@@ -170,12 +170,13 @@ below) — never inside the target repo.
    per-app pages linked off the Apps page instead of gaining a "current
    app" selector, since neither one otherwise needed one.
 
-8. Merged into Meetily (the desktop meeting recorder/transcriber) as its
+8. Merged into Meetily (the desktop meeting recorder/transcriber, since
+   rebranded Riff) as its
    "Dev Sessions" feature: this directory moved to
-   `<meetily>/harness-server/`, the Vite `frontend/` was **deleted** and its
-   pages rebuilt in Meetily's Next.js/Tailwind UI
+   `<riff>/harness-server/`, the Vite `frontend/` was **deleted** and its
+   pages rebuilt in Riff's Next.js/Tailwind UI
    (`frontend/src/app/dev-sessions/**`, `frontend/src/components/DevSessions/`),
-   and Meetily's Tauri core starts/stops this server
+   and Riff's Tauri core starts/stops this server
    (`frontend/src-tauri/src/agent_server.rs`, `node --import tsx` so it's one
    killable process). New: a session can be created from a meeting —
    `POST /api/sessions` takes an optional `source` (transcript + optional AI
@@ -187,9 +188,9 @@ below) — never inside the target repo.
    prompt, because an app's prompt override replaces the base prompt
    wholesale. CORS went from `origin: true` to an allowlist plus an
    `onRequest` 403 for unknown `Origin`s — now that the server runs whenever
-   Meetily does, any website could otherwise have driven the agents.
+   Riff does, any website could otherwise have driven the agents.
    The frontend-specific notes below (pages/, lib/, components/) describe
-   the old Vite UI; the Meetily ports keep the same logic and names.
+   the old Vite UI; the Riff ports keep the same logic and names.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lock, Sparkles, Cpu } from 'lucide-react';
+import { Lock, Sparkles, Cpu, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { OnboardingContainer } from '../OnboardingContainer';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -17,6 +17,10 @@ export function WelcomeStep() {
       title: 'Intelligent summaries & insights',
     },
     {
+      icon: Code2,
+      title: 'Turn meetings into requirements, plans & code',
+    },
+    {
       icon: Cpu,
       title: 'Works offline, no cloud required',
     },
@@ -24,8 +28,8 @@ export function WelcomeStep() {
 
   return (
     <OnboardingContainer
-      title="Welcome to Meetily"
-      description="Record. Transcribe. Summarize. All on your device."
+      title="Welcome to Riff"
+      description="From riff to release. Record, transcribe and summarize on your device, then ship what was said."
       step={1}
       hideProgress={true}
     >

@@ -68,7 +68,7 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
       if (event.type === 'tool_result') queryClient.invalidateQueries({ queryKey: ['requirements-doc', sessionId] });
     }, attachments);
 
-  // Started from a Meetily meeting: open the conversation with the
+  // Started from a Riff meeting: open the conversation with the
   // transcript automatically. The server attaches the transcript to
   // whichever requirements message comes first and clears the flag.
   const kickedOffMeeting = useRef(false);

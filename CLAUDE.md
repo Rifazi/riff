@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Meetily** is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
+**Riff** (formerly Meetily; named for its maker, Rifaz Iqbal) is a privacy-first AI meeting assistant that captures, transcribes, and summarizes meetings entirely on local infrastructure. The supported application is the Tauri desktop app with a Rust core.
 
 1. **Frontend**: Tauri-based desktop application (Rust + Next.js + TypeScript)
 2. **Rust Backend**: Tauri commands, audio capture, transcription, storage, and summarization orchestration
@@ -175,8 +175,8 @@ await listen<TranscriptUpdate>('transcript-update', (event) => {
 
 **Model Storage Locations**:
 - **Development**: `frontend/models/`
-- **Production (macOS)**: `~/Library/Application Support/Meetily/models/`
-- **Production (Windows)**: `%APPDATA%\Meetily\models\`
+- **Production (macOS)**: `~/Library/Application Support/com.rifaz.riff/models/`
+- **Production (Windows)**: `%APPDATA%\com.rifaz.riff\models\`
 
 **Model Loading** (frontend/src-tauri/src/whisper_engine/whisper_engine.rs):
 ```rust
@@ -379,6 +379,10 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 7. **Audio Permissions**: Request permissions early. macOS requires both microphone AND screen recording for system audio.
 
+8. **Rebrand migration**: The app was renamed Meetily → Riff and its bundle identifier changed `com.meetily.ai` → `com.rifaz.riff`. `brand_migration.rs` renames the old data, WebKit and config directories to the new names at startup, before the Tauri builder runs. Keep `IDENTIFIER` there in sync with `tauri.conf.json`. The browser-storage keys (`MeetilyRecoveryDB`, `meetily.*`, `meetily_user_id`) and legacy-import paths (`/usr/local/var/meetily`) keep their old names on purpose. `RIFF_*` env vars fall back to `MEETILY_*`.
+
+9. **Updates and analytics are off**: the inherited updater feed and PostHog key belonged to upstream Meetily. `UPDATES_ENABLED` in `frontend/src/services/updateService.ts` says what to set to turn updates back on. Analytics is available only when the build is given `RIFF_POSTHOG_API_KEY`; otherwise nothing is sent and the consent toggle is hidden.
+
 ## Repository-Specific Conventions
 
 - **Logging Format**: Rust logs should include enough module context to diagnose app behavior
@@ -394,8 +398,8 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
 
 Merged in from the former standalone "harness" project (`~/harness_old`, gitlab `rifaz/harness`). Its backend lives on as `harness-server/` (see `harness-server/CLAUDE.md` for the agent design history — still accurate for everything under `backend/src`); its old Vite/React UI was rebuilt inside this Next.js app and is gone.
 
-- **Process**: `frontend/src-tauri/src/agent_server.rs` starts `node --import tsx src/server.ts` in `harness-server/backend` at app setup and kills it on `RunEvent::Exit`. Needs Node ≥22 (probes `MEETILY_NODE`, Homebrew, nvm, then PATH — the default `node` on PATH may be too old). Runs `npm install` in `harness-server` first if `node_modules/tsx` is missing. Reuses anything already listening on the port (4319, `HARNESS_PORT`), so `npm run dev` in `harness-server` works for backend work. Log: `harness-server/state/agent-server.log`. Tauri commands: `get_agent_server_status`, `restart_agent_server`; event `agent-server-status`.
-- **Server dir resolution**: `MEETILY_HARNESS_SERVER_DIR`, else the source checkout the binary was built from (`CARGO_MANIFEST_DIR/../../harness-server`), else a `harness-server` resource dir. It is **not bundled** into release installers yet — a build only works on a machine with this checkout.
+- **Process**: `frontend/src-tauri/src/agent_server.rs` starts `node --import tsx src/server.ts` in `harness-server/backend` at app setup and kills it on `RunEvent::Exit`. Needs Node ≥22 (probes `RIFF_NODE`, Homebrew, nvm, then PATH — the default `node` on PATH may be too old). Runs `npm install` in `harness-server` first if `node_modules/tsx` is missing. Reuses anything already listening on the port (4319, `HARNESS_PORT`), so `npm run dev` in `harness-server` works for backend work. Log: `harness-server/state/agent-server.log`. Tauri commands: `get_agent_server_status`, `restart_agent_server`; event `agent-server-status`.
+- **Server dir resolution**: `RIFF_HARNESS_SERVER_DIR`, else the source checkout the binary was built from (`CARGO_MANIFEST_DIR/../../harness-server`), else a `harness-server` resource dir. It is **not bundled** into release installers yet — a build only works on a machine with this checkout.
 - **Security**: the server only accepts browser requests from the app's own origins (`config.allowedOrigins`, override with `HARNESS_ALLOWED_ORIGINS`) and rejects any other `Origin` with 403, since its agents can write code and run commands. The CSP `connect-src` allows `http://127.0.0.1:4319`.
 - **UI**: `frontend/src/app/dev-sessions/**` (list, `session?id=&stage=`, `apps`, `apps/integrations?appId=`, `apps/api-spec?appId=`), components in `frontend/src/components/DevSessions/`, data layer in `frontend/src/lib/dev-sessions/` (React Query; `api.ts` holds the server URL, `NEXT_PUBLIC_AGENT_SERVER_URL` overrides). Provider keys / per-agent models / Jira live in Settings → Dev Agents.
 - **Meeting → requirements**: the transcript toolbar's Requirements button (`MeetingDetails/CreateRequirementsDialog.tsx`) fetches the full transcript (+ optional AI summary) and POSTs it as `source` to `/api/sessions`. The server writes it to `harness-server/state/meeting-sources/<sessionId>.md` (gitignored — meeting content stays private), sets `sourceMeeting` + one-shot `meetingKickoffPending`, and attaches the file to whichever requirements message comes first. `GET /api/sessions?meetingId=` lists a meeting's sessions.

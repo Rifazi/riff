@@ -1,9 +1,9 @@
 {
-  "name": "meetily-harness-server",
+  "name": "riff-harness-server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Local-only agent server (requirements / plan / coding / QA) behind Meetily's Dev Sessions UI. Started automatically by the Meetily desktop app; not deployed.",
+  "description": "Local-only agent server (requirements / plan / coding / QA) behind Riff's Dev Sessions UI. Started automatically by the Riff desktop app; not deployed.",
   "workspaces": [
     "backend"
   ],

@@ -31,7 +31,7 @@ export const config = {
 
   // Browser origins allowed to call this server. The agents can write code
   // and run commands, so this must not be open to arbitrary websites.
-  // Defaults cover the Meetily desktop webview (macOS/Linux and Windows
+  // Defaults cover the Riff desktop webview (macOS/Linux and Windows
   // schemes) and its Next.js dev server.
   allowedOrigins: (
     process.env.HARNESS_ALLOWED_ORIGINS ??

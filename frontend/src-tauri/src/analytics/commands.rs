@@ -3,13 +3,18 @@ use std::collections::HashMap;
 use tauri::command;
 use crate::analytics::{AnalyticsClient, AnalyticsConfig};
 
+// Riff's own PostHog project key, supplied at build time. Unset (the default)
+// means analytics is unavailable: nothing is sent and the consent toggle is
+// hidden. The inherited key reported to upstream Meetily's project.
+const POSTHOG_API_KEY: Option<&str> = option_env!("RIFF_POSTHOG_API_KEY");
+
 // Global analytics client
 static ANALYTICS_CLIENT: std::sync::Mutex<Option<Arc<AnalyticsClient>>> = std::sync::Mutex::new(None);
 
 #[command]
 pub async fn init_analytics() -> Result<(), String> {
     let config = AnalyticsConfig {
-        api_key: "phc_ohznXPkRSJYWmrfez9mYxtXv5U5Nekq3iiUts87dJfcr".to_string(),
+        api_key: POSTHOG_API_KEY.unwrap_or_default().to_string(),
         host: Some("https://us.i.posthog.com".to_string()),
         enabled: true,
     };
@@ -139,6 +144,11 @@ pub async fn track_feature_used(feature_name: String) -> Result<(), String> {
     } else {
         Err("Analytics client not initialized".to_string())
     }
+}
+
+#[command]
+pub fn is_analytics_available() -> bool {
+    POSTHOG_API_KEY.is_some_and(|key| !key.is_empty())
 }
 
 #[command]

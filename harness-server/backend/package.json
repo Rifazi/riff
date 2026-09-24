@@ -1,5 +1,5 @@
 {
-  "name": "@meetily-harness/backend",
+  "name": "@riff-harness/backend",
   "version": "0.0.0",
   "private": true,
   "type": "module",

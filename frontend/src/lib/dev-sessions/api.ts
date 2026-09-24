@@ -14,7 +14,7 @@ import type {
   SettingsResponse,
 } from './types';
 
-// The agent server the Meetily desktop app starts alongside itself (see
+// The agent server the Riff desktop app starts alongside itself (see
 // src-tauri/src/agent_server.rs). Absolute, since the UI is a static export
 // served from the Tauri webview, not from this server.
 export const AGENT_SERVER_URL = process.env.NEXT_PUBLIC_AGENT_SERVER_URL ?? 'http://127.0.0.1:4319';

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <!-- Riff mark without the tile, for light UI surfaces (collapsed sidebar). -->
+  <defs>
+    <linearGradient id="voice" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FB7185"/>
+      <stop offset="1" stop-color="#E11D48"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(250 250) scale(0.846) translate(-522 -512)">
+    <rect x="262" y="412" width="64" height="200" rx="32" fill="url(#voice)"/>
+    <rect x="366" y="322" width="64" height="380" rx="32" fill="url(#voice)"/>
+    <rect x="470" y="382" width="64" height="260" rx="32" fill="url(#voice)"/>
+    <polyline points="606,372 746,512 606,652" fill="none" stroke="#3730A3" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

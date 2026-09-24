@@ -1,7 +1,7 @@
 [package]
-name = "meetily"
+name = "riff"
 version = "0.4.1"
-description = "A Tauri App for meeting minutes"
+description = "Riff: turns meetings into requirements, plans and code"
 authors = ["Sujith S"]
 license = "MIT"
 repository = "https://github.com/Zackriya-Solutions/meeting-minutes"

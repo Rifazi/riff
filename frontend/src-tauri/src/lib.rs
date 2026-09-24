@@ -39,6 +39,7 @@ pub mod agent_server;
 pub mod analytics;
 pub mod api;
 pub mod audio;
+pub mod brand_migration;
 pub mod config;
 pub mod console_utils;
 pub mod database;
@@ -448,6 +449,9 @@ pub fn get_language_preference_internal() -> Option<String> {
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
+    // Before anything resolves the app's data directories.
+    brand_migration::migrate_legacy_data();
+
     let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
@@ -634,6 +638,7 @@ pub fn run() {
             analytics::commands::track_settings_changed,
             analytics::commands::track_feature_used,
             analytics::commands::is_analytics_enabled,
+            analytics::commands::is_analytics_available,
             analytics::commands::start_analytics_session,
             analytics::commands::end_analytics_session,
             analytics::commands::track_daily_active_user,

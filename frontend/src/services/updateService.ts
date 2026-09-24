@@ -9,6 +9,15 @@ import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 
+/**
+ * Riff has no release feed yet, so update checks are off. The updater
+ * config in tauri.conf.json has no endpoints or pubkey (the inherited ones
+ * served upstream Meetily builds). To turn updates on: publish signed releases,
+ * set `plugins.updater.endpoints` + `pubkey` and `bundle.createUpdaterArtifacts`,
+ * restore the tray's "Check for Updates" item, then flip this flag.
+ */
+export const UPDATES_ENABLED = false;
+
 export interface UpdateInfo {
   available: boolean;
   currentVersion: string;
@@ -39,6 +48,13 @@ export class UpdateService {
    * @returns Promise with update information
    */
   async checkForUpdates(force = false): Promise<UpdateInfo> {
+    if (!UPDATES_ENABLED) {
+      return {
+        available: false,
+        currentVersion: await getVersion(),
+      };
+    }
+
     // Prevent concurrent update checks
     if (this.updateCheckInProgress) {
       throw new Error('Update check already in progress');

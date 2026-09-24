@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="845" height="295" viewBox="0 0 845 295">
+  <!-- Riff wordmark: mark + name. -->
+  <defs>
+    <linearGradient id="voice" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FB7185"/>
+      <stop offset="1" stop-color="#E11D48"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(160 147.5) scale(0.5) translate(-262 -512)">
+    <rect x="262" y="412" width="64" height="200" rx="32" fill="url(#voice)"/>
+    <rect x="366" y="322" width="64" height="380" rx="32" fill="url(#voice)"/>
+    <rect x="470" y="382" width="64" height="260" rx="32" fill="url(#voice)"/>
+    <polyline points="606,372 746,512 606,652" fill="none" stroke="#3730A3" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="450" y="193" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="190" font-weight="700" letter-spacing="-6" fill="#1E1B4B">riff</text>
+</svg>

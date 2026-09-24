@@ -33,7 +33,7 @@ export interface TranscriptEntry {
   timestamp: string;
 }
 
-// The Meetily meeting a session was started from, when it was created from a
+// The Riff meeting a session was started from, when it was created from a
 // transcript rather than a typed prompt. The transcript itself lives under
 // state/ (gitignored — meeting content is private), not in artifacts/.
 export interface SessionMeetingSource {

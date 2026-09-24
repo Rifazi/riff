@@ -73,7 +73,7 @@ fn set_status<R: Runtime>(app: &AppHandle<R>, status: AgentServerStatus) {
 
 fn resolve_server_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(dir) = std::env::var("MEETILY_HARNESS_SERVER_DIR") {
+    if let Ok(dir) = crate::brand_migration::env_var("HARNESS_SERVER_DIR") {
         candidates.push(PathBuf::from(dir));
     }
     // Source checkout this binary was built from (dev and local builds).
@@ -98,7 +98,7 @@ fn node_major_version(node: &Path) -> Option<u32> {
 /// usual install locations too and take the first recent-enough one.
 fn find_node() -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(explicit) = std::env::var("MEETILY_NODE") {
+    if let Ok(explicit) = crate::brand_migration::env_var("NODE") {
         candidates.push(PathBuf::from(explicit));
     }
     for fixed in [
@@ -134,10 +134,10 @@ fn find_node() -> Result<PathBuf, String> {
         }
     }
     Err(if seen_old.is_empty() {
-        format!("Node.js {MIN_NODE_MAJOR}+ was not found. Install it (e.g. `brew install node`) or set MEETILY_NODE to its path, then restart the agent server.")
+        format!("Node.js {MIN_NODE_MAJOR}+ was not found. Install it (e.g. `brew install node`) or set RIFF_NODE to its path, then restart the agent server.")
     } else {
         format!(
-            "Node.js {MIN_NODE_MAJOR}+ is required but only older versions were found: {}. Install a newer Node or set MEETILY_NODE.",
+            "Node.js {MIN_NODE_MAJOR}+ is required but only older versions were found: {}. Install a newer Node or set RIFF_NODE.",
             seen_old.join(", ")
         )
     })
@@ -219,7 +219,7 @@ fn start_blocking<R: Runtime>(app: &AppHandle<R>) {
             app,
             AgentServerStatus::new(
                 "failed",
-                Some("harness-server directory not found. Set MEETILY_HARNESS_SERVER_DIR to its path.".into()),
+                Some("harness-server directory not found. Set RIFF_HARNESS_SERVER_DIR to its path.".into()),
             ),
         );
         return;

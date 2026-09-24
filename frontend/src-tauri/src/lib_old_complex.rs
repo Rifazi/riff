@@ -1469,7 +1469,7 @@ async fn start_recording<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     log_info!("🎯 Recording started successfully with {} devices", devices.len());
     
     let _ = app.notification().builder()
-        .title("Meetily")
+        .title("Riff")
         .body("Recording has started. Please inform others in the meeting.")
         .show();
     
@@ -1739,7 +1739,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
     }
 
     // Send a system notification indicating recording has stopped
-    let _ = app.notification().builder().title("Meetily").body("Recording stopped").show();
+    let _ = app.notification().builder().title("Riff").body("Recording stopped").show();
     
     Ok(())
 }
@@ -1815,7 +1815,7 @@ async fn save_transcript(file_path: String, content: String) -> Result<(), Strin
 #[tauri::command]
 async fn init_analytics() -> Result<(), String> {
     let config = AnalyticsConfig {
-        api_key:"phc_cohhHPgfQfnNWl33THRRpCftuRtWx2k5svtKrkpFb04".to_string(),
+        api_key:"".to_string(),
         host: Some("https://us.i.posthog.com".to_string()),
         enabled: true ,
     };

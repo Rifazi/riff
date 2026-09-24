@@ -16,6 +16,14 @@ export default function AnalyticsConsentSwitch() {
   const [showModal, setShowModal] = useState(false);
   const [userId, setUserId] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
+  // False unless this build was given a PostHog key (RIFF_POSTHOG_API_KEY).
+  const [isAvailable, setIsAvailable] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>('is_analytics_available')
+      .then(setIsAvailable)
+      .catch(() => setIsAvailable(false));
+  }, []);
 
   // Note: Store loading is handled by AnalyticsProvider to avoid race conditions
 
@@ -147,11 +155,13 @@ export default function AnalyticsConsentSwitch() {
 
   const handlePrivacyPolicyClick = async () => {
     try {
-      await invoke('open_external_url', { url: 'https://github.com/Zackriya-Solutions/meeting-minutes/blob/main/PRIVACY_POLICY.md' });
+      await invoke('open_external_url', { url: 'https://github.com/Rifazi/harness/blob/main/PRIVACY_POLICY.md' });
     } catch (error) {
       console.error('Failed to open privacy policy link:', error);
     }
   };
+
+  if (!isAvailable) return null;
 
   return (
     <>

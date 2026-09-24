@@ -1,6 +1,6 @@
 # Dev Sessions agent server
 
-The local server behind Meetily's **Dev Sessions**: four agent roles —
+The local server behind Riff's **Dev Sessions**: four agent roles —
 **requirements**, **plan**, **coding** and **QA** — that take a feature from
 a meeting transcript (or a typed idea) to a reviewed branch on one of your
 configured apps (a repo checkout), grounded in that repo's `docs/*.md`.
@@ -8,13 +8,13 @@ Every stage has an explicit human approval gate; no agent can push, merge,
 open an MR, or approve its own work.
 
 This used to be a standalone project with its own web UI ("harness"). The UI
-now lives inside the Meetily desktop app; this directory is just the server.
+now lives inside the Riff desktop app; this directory is just the server.
 
 ## Running it
 
-You normally don't: the Meetily desktop app starts it in the background
+You normally don't: the Riff desktop app starts it in the background
 (`frontend/src-tauri/src/agent_server.rs`) and stops it when the app quits.
-It needs **Node 22+** — the app looks for it in `MEETILY_NODE`, Homebrew
+It needs **Node 22+** — the app looks for it in `RIFF_NODE`, Homebrew
 (`/opt/homebrew/opt/node/bin/node`), nvm, then `PATH`, and runs
 `npm install` here the first time if dependencies are missing. If the Dev
 Sessions pages say the agent server isn't running, the banner shows why and
@@ -42,7 +42,7 @@ Everything is configured from the app, not by editing files:
 
 Environment (optional, `backend/.env`): `HARNESS_PORT` (default 4319) and
 `HARNESS_ALLOWED_ORIGINS` — the browser origins allowed to call the server.
-The defaults cover the Meetily webview and its dev server; any other
+The defaults cover the Riff webview and its dev server; any other
 `Origin` is rejected with 403, because the agents can write code and run
 commands.
 
@@ -50,7 +50,7 @@ commands.
 
 1. **Requirements** — start from a meeting (transcript toolbar →
    *Requirements*) or from Dev Sessions → *New session*. For a meeting, the
-   transcript (and optionally Meetily's AI summary) is saved under
+   transcript (and optionally Riff's AI summary) is saved under
    `state/meeting-sources/` and attached to the first agent turn
    automatically. The agent asks clarifying questions and writes
    `artifacts/requirements/<key>.md`. Approve to continue.

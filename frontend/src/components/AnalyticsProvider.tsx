@@ -3,6 +3,7 @@
 import React, { useEffect, ReactNode, useRef, useState, createContext } from 'react';
 import Analytics from '@/lib/analytics';
 import { load } from '@tauri-apps/plugin-store';
+import { invoke } from '@tauri-apps/api/core';
 
 const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
@@ -31,6 +32,12 @@ export default function AnalyticsProvider({ children }: AnalyticsProviderProps) 
     }
 
     const initAnalytics = async () => {
+      // Builds without a PostHog key have nowhere to send events.
+      if (!(await invoke<boolean>('is_analytics_available').catch(() => false))) {
+        setIsAnalyticsOptedIn(false);
+        return;
+      }
+
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
