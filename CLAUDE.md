@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 1. **Frontend**: Tauri-based desktop application (Rust + Next.js + TypeScript)
 2. **Rust Backend**: Tauri commands, audio capture, transcription, storage, and summarization orchestration
-3. **Legacy Backend Archive**: the old Python/FastAPI, Docker, and standalone whisper-server backend under `backend/` is archived and unsupported
+3. **Dev Sessions agent server** (`harness-server/`): local Node/Fastify server behind the Dev Sessions UI — requirements → plan → coding → QA agents that turn a meeting transcript (or a typed idea) into a requirements doc, plan, branch and QA report for a configured target repo ("app"). Started automatically by the Tauri app
+4. **Legacy Backend Archive**: the old Python/FastAPI, Docker, and standalone whisper-server backend under `backend/` is archived and unsupported
 
 ### Key Technology Stack
 - **Desktop App**: Tauri 2.x (Rust) + Next.js 14 + React 18
@@ -388,6 +389,16 @@ $env:RUST_LOG="debug"; ./clean_run_windows.bat
   - `fix/*`: Bug fixes
   - `enhance/*`: Feature enhancements
   - Current: `fix/audio-mixing` (working on audio pipeline improvements)
+
+## Dev Sessions (meeting → requirements → plan → code → QA)
+
+Merged in from the former standalone "harness" project (`~/harness_old`, gitlab `rifaz/harness`). Its backend lives on as `harness-server/` (see `harness-server/CLAUDE.md` for the agent design history — still accurate for everything under `backend/src`); its old Vite/React UI was rebuilt inside this Next.js app and is gone.
+
+- **Process**: `frontend/src-tauri/src/agent_server.rs` starts `node --import tsx src/server.ts` in `harness-server/backend` at app setup and kills it on `RunEvent::Exit`. Needs Node ≥22 (probes `MEETILY_NODE`, Homebrew, nvm, then PATH — the default `node` on PATH may be too old). Runs `npm install` in `harness-server` first if `node_modules/tsx` is missing. Reuses anything already listening on the port (4319, `HARNESS_PORT`), so `npm run dev` in `harness-server` works for backend work. Log: `harness-server/state/agent-server.log`. Tauri commands: `get_agent_server_status`, `restart_agent_server`; event `agent-server-status`.
+- **Server dir resolution**: `MEETILY_HARNESS_SERVER_DIR`, else the source checkout the binary was built from (`CARGO_MANIFEST_DIR/../../harness-server`), else a `harness-server` resource dir. It is **not bundled** into release installers yet — a build only works on a machine with this checkout.
+- **Security**: the server only accepts browser requests from the app's own origins (`config.allowedOrigins`, override with `HARNESS_ALLOWED_ORIGINS`) and rejects any other `Origin` with 403, since its agents can write code and run commands. The CSP `connect-src` allows `http://127.0.0.1:4319`.
+- **UI**: `frontend/src/app/dev-sessions/**` (list, `session?id=&stage=`, `apps`, `apps/integrations?appId=`, `apps/api-spec?appId=`), components in `frontend/src/components/DevSessions/`, data layer in `frontend/src/lib/dev-sessions/` (React Query; `api.ts` holds the server URL, `NEXT_PUBLIC_AGENT_SERVER_URL` overrides). Provider keys / per-agent models / Jira live in Settings → Dev Agents.
+- **Meeting → requirements**: the transcript toolbar's Requirements button (`MeetingDetails/CreateRequirementsDialog.tsx`) fetches the full transcript (+ optional AI summary) and POSTs it as `source` to `/api/sessions`. The server writes it to `harness-server/state/meeting-sources/<sessionId>.md` (gitignored — meeting content stays private), sets `sourceMeeting` + one-shot `meetingKickoffPending`, and attaches the file to whichever requirements message comes first. `GET /api/sessions?meetingId=` lists a meeting's sessions.
 
 ## Key Files Reference
 

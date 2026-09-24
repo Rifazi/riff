@@ -3,10 +3,11 @@
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, FolderOpen, RefreshCw } from 'lucide-react';
+import { ClipboardList, Copy, FolderOpen, RefreshCw } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
+import { CreateRequirementsDialog, useMeetingSessions, type MeetingRequirementsContext } from './CreateRequirementsDialog';
 
 
 interface TranscriptButtonGroupProps {
@@ -16,6 +17,7 @@ interface TranscriptButtonGroupProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+  requirementsContext?: MeetingRequirementsContext;
 }
 
 
@@ -26,9 +28,12 @@ export function TranscriptButtonGroup({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  requirementsContext,
 }: TranscriptButtonGroupProps) {
   const { betaFeatures } = useConfig();
   const [showRetranscribeDialog, setShowRetranscribeDialog] = useState(false);
+  const [showRequirementsDialog, setShowRequirementsDialog] = useState(false);
+  const { data: linkedSessions } = useMeetingSessions(requirementsContext?.meetingId);
 
   const handleRetranscribeComplete = useCallback(async () => {
     // Refetch transcripts to show the updated data
@@ -85,6 +90,36 @@ export function TranscriptButtonGroup({
           </Button>
         )}
       </ButtonGroup>
+
+      {requirementsContext && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="bg-gradient-to-r from-purple-50 to-blue-50 hover:from-purple-100 hover:to-blue-100 border-purple-200 px-2 @[22rem]:px-3"
+          onClick={() => {
+            Analytics.trackButtonClick('open_create_requirements', 'meeting_details');
+            setShowRequirementsDialog(true);
+          }}
+          disabled={transcriptCount === 0}
+          title={transcriptCount === 0 ? 'No transcript available' : 'Turn this transcript into requirements'}
+        >
+          <ClipboardList className="text-purple-600" />
+          <span className="hidden @[22rem]:inline">Requirements</span>
+          {linkedSessions && linkedSessions.length > 0 && (
+            <span className="ml-0.5 rounded-full bg-purple-600 text-white text-[10px] leading-none px-1.5 py-0.5">
+              {linkedSessions.length}
+            </span>
+          )}
+        </Button>
+      )}
+
+      {requirementsContext && (
+        <CreateRequirementsDialog
+          open={showRequirementsDialog}
+          onOpenChange={setShowRequirementsDialog}
+          context={requirementsContext}
+        />
+      )}
 
       {betaFeatures.importAndRetranscribe && meetingId && meetingFolderPath && (
         <RetranscribeDialog

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -18,6 +18,9 @@ import { useTemplates } from '@/hooks/meeting-details/useTemplates';
 import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
+import { hasVisibleSummaryContent } from '@/lib/summary-content';
+import type { MeetingRequirementsContext } from '@/components/MeetingDetails/CreateRequirementsDialog';
+import { MeetingPipelineBar } from '@/components/MeetingDetails/MeetingPipelineBar';
 
 export default function PageContent({
   meeting,
@@ -141,6 +144,22 @@ export default function PageContent({
     meeting,
   });
 
+  // Read lazily at click time so the latest edited summary is what gets sent.
+  const aiSummaryRef = useRef(meetingData.aiSummary);
+  aiSummaryRef.current = meetingData.aiSummary;
+  const requirementsContext = useMemo<MeetingRequirementsContext>(() => ({
+    meetingId: meeting.id,
+    meetingTitle: meetingData.meetingTitle || meeting.title,
+    meetingCreatedAt: meeting.created_at,
+    getSummaryMarkdown: async () => {
+      const summary = aiSummaryRef.current;
+      if (!hasVisibleSummaryContent(summary)) return null;
+      const fromEditor = await meetingData.blockNoteSummaryRef.current?.getMarkdown?.().catch(() => '');
+      if (fromEditor?.trim()) return fromEditor;
+      return summary && typeof summary.markdown === 'string' ? summary.markdown : null;
+    },
+  }), [meeting.id, meeting.title, meeting.created_at, meetingData.meetingTitle, meetingData.blockNoteSummaryRef]);
+
   // Track page view
   useEffect(() => {
     Analytics.trackPageView('meeting_details');
@@ -192,6 +211,10 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen min-w-0 bg-gray-50"
     >
+      <MeetingPipelineBar
+        context={requirementsContext}
+        hasTranscript={(totalCount ?? meetingData.transcripts.length) > 0}
+      />
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <MeetingDetailsSplitView
           activeTab={activeTab}
@@ -218,6 +241,7 @@ export default function PageContent({
               meetingId={meeting.id}
               meetingFolderPath={meeting.folder_path}
               onRefetchTranscripts={onRefetchTranscripts}
+              requirementsContext={requirementsContext}
             />
           }
           summary={

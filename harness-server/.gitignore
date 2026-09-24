@@ -1,0 +1,21 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*.local
+
+# Provider API keys + per-role model config, written by the Settings UI.
+local-settings.json
+
+# Target apps (id/name/repoRoot — machine-local absolute paths) and their
+# per-role prompt overrides, written by the Apps UI.
+local-apps.json
+local-prompts.json
+
+# Session/transcript cache — disposable UI convenience, safe to lose.
+state/
+
+# Generated requirements/plan/QA docs — kept local, not committed.
+artifacts/
+
+.DS_Store

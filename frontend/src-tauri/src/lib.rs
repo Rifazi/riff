@@ -35,6 +35,7 @@ pub(crate) use perf_trace;
 // Re-export async logging macros for external use (removed due to macro conflicts)
 
 // Declare audio module
+pub mod agent_server;
 pub mod analytics;
 pub mod api;
 pub mod audio;
@@ -506,6 +507,9 @@ pub fn run() {
 
             log::info!("Application setup complete");
 
+            // Local agent server behind Dev Sessions (requirements → QA)
+            agent_server::start(_app.handle());
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -610,6 +614,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            agent_server::get_agent_server_status,
+            agent_server::restart_agent_server,
+            agent_server::pick_app_repo_folder,
             start_recording,
             stop_recording,
             is_recording,
@@ -853,6 +860,8 @@ pub fn run() {
                         } else {
                             log::warn!("AppState not available for database cleanup (likely first launch)");
                         }
+
+                        agent_server::stop();
 
                         // Clean up sidecar
                         log::info!("Cleaning up sidecar...");
