@@ -8,11 +8,12 @@ import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { sessionHref, stageGroupFor } from '@/lib/dev-sessions/stage';
-import { meetingKickoffMessage } from '@/lib/dev-sessions/meeting';
+import { meetingKickoffMessage, splitKickoffMessage } from '@/lib/dev-sessions/meeting';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
+import { SplitLinks, SplitProposalCard } from '../SplitPanel';
 import { ErrorText, Notice, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
@@ -45,6 +46,17 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
   });
 
   const rejectMutation = useMutation({ mutationFn: () => api.rejectRequirements(sessionId), onSuccess: refresh });
+
+  // Accepting creates the child sessions server-side; this page then shows
+  // links to them. Keeping it as one tells the agent to carry on.
+  const acceptSplitMutation = useMutation({ mutationFn: () => api.acceptSplit(sessionId), onSuccess: refresh });
+  const dismissSplitMutation = useMutation({
+    mutationFn: () => api.dismissSplit(sessionId),
+    onSuccess: () => {
+      refresh();
+      void handleSend("Let's keep this as one feature — carry on and write a single requirements document.");
+    },
+  });
 
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -81,12 +93,24 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.meetingKickoffPending, streaming]);
 
+  // Created by accepting a split: open with the part's brief, which the
+  // server attaches to the first message and then clears.
+  const kickedOffSplit = useRef(false);
+  useEffect(() => {
+    if (!session.splitKickoffPending) return;
+    if (streaming) return;
+    if (kickedOffSplit.current) return;
+    kickedOffSplit.current = true;
+    void handleSend(splitKickoffMessage(session));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, session.splitKickoffPending, streaming]);
+
   // Coordinator auto-start: the moment this stage is reached with
   // coordinator mode on and nothing said yet, drive it automatically.
   const kickedOffCoordinator = useRef(false);
   useEffect(() => {
     if (!session.coordinatorEnabled) return;
-    if (session.meetingKickoffPending) return;
+    if (session.meetingKickoffPending || session.splitKickoffPending) return;
     if (session.transcripts.requirements.length > 0) return;
     if (streaming) return;
     if (kickedOffCoordinator.current) return;
@@ -111,9 +135,12 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
 
   const entries = streaming ? [...session.transcripts.requirements, ...overlay] : session.transcripts.requirements;
   const isApproved = session.requirementsStatus === 'approved';
+  const isSplit = session.stage === 'split';
+  const splitBusy = acceptSplitMutation.isPending ? 'accept' : dismissSplitMutation.isPending ? 'dismiss' : null;
+  const splitError = (acceptSplitMutation.error ?? dismissSplitMutation.error) as Error | null;
   const codingStarted = Boolean(session.branch);
   const reopenedHere = codingStarted && stageGroupFor(session) === 'requirements';
-  const canEdit = Boolean(session.requirementsPath) && (!codingStarted || reopenedHere) && !streaming;
+  const canEdit = Boolean(session.requirementsPath) && (!codingStarted || reopenedHere) && !streaming && !isSplit;
 
   return (
     <StageLayout
@@ -123,13 +150,15 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
           <ChatPane
             entries={entries}
             onSend={handleSend}
-            disabled={streaming || isApproved || isEditing}
+            disabled={streaming || isApproved || isEditing || isSplit}
             streaming={streaming}
             runningTool={runningTool}
             agent={AGENT}
             emptyHint={`Describe what you want to build — ${AGENT.name} will ask questions and write the requirements.`}
             placeholder={
-              isApproved
+              isSplit
+                ? 'Split into separate sessions — read only.'
+                : isApproved
                 ? 'Requirements approved — read only.'
                 : isEditing
                   ? 'Finish or cancel your manual edit first…'
@@ -150,7 +179,9 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
               : `Not written yet — keep talking to ${AGENT.name}.`
           }
           badge={
-            isApproved ? (
+            isSplit ? (
+              <Pill>Split</Pill>
+            ) : isApproved ? (
               <Pill tone="green">Approved</Pill>
             ) : !reopenedHere && !canEdit && codingStarted ? (
               <Pill title="Coding already started from this doc">Locked — coding started</Pill>
@@ -160,6 +191,18 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
           }
           notices={
             <>
+              <SplitLinks session={session} />
+              {session.splitProposal && !isSplit && (
+                <SplitProposalCard
+                  proposal={session.splitProposal}
+                  agentName={AGENT.name}
+                  busy={splitBusy}
+                  disabled={streaming || isEditing}
+                  onAccept={() => acceptSplitMutation.mutate()}
+                  onDismiss={() => dismissSplitMutation.mutate()}
+                />
+              )}
+              <ErrorText>{splitError?.message ?? null}</ErrorText>
               {reopenedHere && (
                 <Notice tone="amber">
                   Reopened mid-coding — branch <code>{session.branch}</code> has existing work. Changes here are
@@ -190,11 +233,11 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
             <ApprovalBar
               approveLabel={isApproved ? 'Approved' : 'Approve requirements'}
               onApprove={() => approveMutation.mutate()}
-              approveDisabled={isApproved || !session.requirementsPath || streaming || isEditing}
+              approveDisabled={isApproved || isSplit || !session.requirementsPath || streaming || isEditing}
               approveDisabledReason={!session.requirementsPath ? 'No document written yet' : undefined}
               busy={approveMutation.isPending}
               onReject={() => rejectMutation.mutate()}
-              rejectDisabled={isApproved || streaming}
+              rejectDisabled={isApproved || isSplit || streaming}
               rejectBusy={rejectMutation.isPending}
             />
           }

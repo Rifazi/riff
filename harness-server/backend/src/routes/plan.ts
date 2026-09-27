@@ -6,6 +6,7 @@ import { startEventStream } from './sse.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
+import type { PlanWorkstream } from '../sessions/session.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
@@ -63,16 +64,17 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>('/api/sessions/:id/plan/doc', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.planPath) return reply.send({ markdown: null, body: null, steps: [], jira: null });
+    if (!session.planPath) return reply.send({ markdown: null, body: null, steps: [], workstreams: [], jira: null });
     try {
       const markdown = await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8');
       const parsed = matter(markdown);
       const body = parsed.content.trim();
       const steps = (parsed.data.steps ?? []) as { id: string; title: string }[];
+      const workstreams = (parsed.data.workstreams ?? []) as PlanWorkstream[];
       const jira = (parsed.data.jira as JiraPlanRecord | undefined) ?? null;
-      return { markdown, body, steps, jira };
+      return { markdown, body, steps, workstreams, jira };
     } catch {
-      return { markdown: null, body: null, steps: [], jira: null };
+      return { markdown: null, body: null, steps: [], workstreams: [], jira: null };
     }
   });
 

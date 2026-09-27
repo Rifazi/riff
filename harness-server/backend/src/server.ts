@@ -11,6 +11,7 @@ import { registerQaRoutes } from './routes/qa.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerAppRoutes } from './routes/apps.js';
 import { registerCoordinatorRoutes } from './routes/coordinator.js';
+import { recoverInterruptedTeams } from './agents/team/coding-team.js';
 
 async function main() {
   // Default is 1MB — raised so a chat message can carry a base64-encoded
@@ -45,6 +46,7 @@ async function main() {
     watchDocsForChanges(target);
   }
 
+  await recoverInterruptedTeams();
   await registerSessionRoutes(app);
   await registerRequirementsRoutes(app);
   await registerPlanRoutes(app);

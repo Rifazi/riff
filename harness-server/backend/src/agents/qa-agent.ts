@@ -9,6 +9,7 @@ import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
+import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
@@ -77,7 +78,7 @@ export async function runQaAgentTurn(
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
     const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
-    const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, checkCommands: app.checkCommands });
+    const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -123,7 +124,7 @@ export async function runQaAgentTurn(
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
     const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
-    const { runCheckedCommandTool, getDiffTool } = createQaTools({ repoRoot: app.repoRoot, checkCommands: app.checkCommands });
+    const { runCheckedCommandTool, getDiffTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,

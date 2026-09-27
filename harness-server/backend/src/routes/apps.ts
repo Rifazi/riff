@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { listApps, getApp, createApp, updateApp, deleteApp, AppInUseError } from '../apps/apps-store.js';
-import { docsDirFor, readRepoUrl, validateRepoRoot, hasDocsDir, InvalidRepoRootError, type CheckCommands } from '../apps/apps.js';
+import { docsDirFor, readRepoUrl, validateRepoRoot, describeSetup, baseBranchFor, InvalidRepoRootError, type CheckCommands } from '../apps/apps.js';
 import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-index.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
 import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts-store.js';
@@ -15,6 +15,7 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     id: app.id,
     name: app.name,
     repoRoot: app.repoRoot,
+    baseBranch: baseBranchFor(app),
     checkCommands: app.checkCommands ?? {},
     docsDir: docsDirFor(app),
     repoUrl: readRepoUrl(app),
@@ -27,15 +28,14 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     return Promise.all(apps.map(serializeApp));
   });
 
-  // Dry-run only — never touches disk. A missing docs/ is informational,
-  // not an error: createApp/updateApp initialize it automatically (see
-  // apps.ts's ensureDocsDir), so it's not a reason to block adding the app.
+  // Dry-run only — never touches disk. A missing folder, docs/ or .git is
+  // informational, not an error: createApp/updateApp set those up (see
+  // apps.ts's ensureDocsDir and repo/git.ts's setupGitRepo).
   app.post<{ Body: { repoRoot: string } }>('/api/apps/validate', async (request, reply) => {
     try {
       const resolved = validateRepoRoot(request.body?.repoRoot ?? '');
-      return hasDocsDir(resolved)
-        ? { ok: true }
-        : { ok: true, note: 'No docs/ folder yet — one will be created automatically for this app.' };
+      const note = describeSetup(resolved);
+      return note ? { ok: true, note } : { ok: true };
     } catch (err) {
       if (err instanceof InvalidRepoRootError) return { ok: false, error: err.message };
       return reply.code(400).send({ ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -48,10 +48,10 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'name and repoRoot are required' });
     }
     try {
-      const { app: created, docsInitialized } = await createApp({ name, repoRoot, checkCommands });
+      const { app: created, docsInitialized, git } = await createApp({ name, repoRoot, checkCommands });
       await buildDocsIndex(created);
       watchDocsForChanges(created);
-      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized });
+      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized, git });
     } catch (err) {
       if (err instanceof InvalidRepoRootError) return reply.code(400).send({ error: err.message });
       throw err;
@@ -62,10 +62,10 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     '/api/apps/:id',
     async (request, reply) => {
       try {
-        const { app: updated, docsInitialized } = await updateApp(request.params.id, request.body ?? {});
+        const { app: updated, docsInitialized, git } = await updateApp(request.params.id, request.body ?? {});
         await buildDocsIndex(updated);
         watchDocsForChanges(updated);
-        return { ...(await serializeApp(updated)), docsInitialized };
+        return { ...(await serializeApp(updated)), docsInitialized, git };
       } catch (err) {
         if (err instanceof InvalidRepoRootError) return reply.code(400).send({ error: err.message });
         if (err instanceof Error && err.message.includes('not found')) return reply.code(404).send({ error: err.message });

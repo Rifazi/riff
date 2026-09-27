@@ -6,10 +6,10 @@ import { apiUrl } from './api';
  * browser's native EventSource (GET-only) can't be used. This parses the
  * same "data: ...\n\n" SSE framing manually off a streamed fetch response.
  */
-export async function postSSE(
+export async function postSSE<E = AgentEvent>(
   path: string,
   body: unknown,
-  onEvent: (event: AgentEvent) => void,
+  onEvent: (event: E) => void,
   signal?: AbortSignal
 ): Promise<void> {
   let res: Response;
@@ -60,7 +60,7 @@ export async function postSSE(
       const line = chunk.split('\n').find((l) => l.startsWith('data: '));
       if (!line) continue;
       try {
-        const event = JSON.parse(line.slice('data: '.length)) as AgentEvent;
+        const event = JSON.parse(line.slice('data: '.length)) as E;
         onEvent(event);
       } catch {
         // ignore malformed frame

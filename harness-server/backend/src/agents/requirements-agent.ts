@@ -10,16 +10,18 @@ import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
-import { docsDirFor } from '../apps/apps.js';
+import { docsDirFor, baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createWriteRequirementsTool } from './tool-defs/write-requirements-tool.js';
 import { askMultipleChoiceTool, askQuestionTool } from './tool-defs/ask-question-tool.js';
+import { createProposeSplitTool } from './tool-defs/propose-split-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createWriteRequirementsToolClaude } from './tool-defs-claude/write-requirements-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
+import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-tool.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
 const TOOL_NAMES = [
@@ -28,6 +30,7 @@ const TOOL_NAMES = [
   'write_requirements_doc',
   'ask_multiple_choice',
   'ask_question',
+  'propose_split',
 ];
 
 export async function runRequirementsAgentTurn(
@@ -75,7 +78,7 @@ export async function runRequirementsAgentTurn(
     }
     let diffStat = '(unable to read diff stat)';
     try {
-      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch)).trim() || '(no changes yet)';
+      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
     } catch {
       // repo/branch not in a readable state — proceed without it
     }
@@ -83,7 +86,7 @@ export async function runRequirementsAgentTurn(
       `# Coding already in progress\n\nThis session's requirements are being revised while coding has already ` +
       `started on branch "${session.branch}". Treat this as a change to something partially built, not a fresh ` +
       `design — reason about what should change and what existing work should be preserved.\n\n` +
-      `Coding checklist:\n${stepsText}\n\nDiff stat against master:\n${diffStat}`;
+      `Coding checklist:\n${stepsText}\n\nDiff stat against ${baseBranchFor(app)}:\n${diffStat}`;
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
@@ -104,6 +107,7 @@ export async function runRequirementsAgentTurn(
           createWriteRequirementsToolClaude({ sessionKey: session.sessionKey, sessionId: session.id }),
           askMultipleChoiceToolClaude,
           askQuestionToolClaude,
+          createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
         ],
       });
 
@@ -135,6 +139,7 @@ export async function runRequirementsAgentTurn(
       write_requirements_doc: createWriteRequirementsTool({ sessionKey: session.sessionKey, sessionId: session.id }),
       ask_multiple_choice: askMultipleChoiceTool,
       ask_question: askQuestionTool,
+      propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
     };
 
     const { updatedHistory } = await runAgentTurn({

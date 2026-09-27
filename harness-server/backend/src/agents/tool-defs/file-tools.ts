@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tool } from 'ai';
 import { z } from 'zod';
-import { assertPathAllowed } from '../../repo/guardrails.js';
+import { assertPathAllowed, PathNotAllowedError } from '../../repo/guardrails.js';
 
 // Same "anything under repoRoot except the always-forbidden paths" scope as
 // read_file — target repos aren't all shaped like the original Customer-EDI
@@ -53,7 +53,32 @@ export const editFileDescription =
   'Replace an exact, unique occurrence of oldText with newText in an existing file anywhere in the repo (same ' +
   'scope as write_file). Fails if oldText is not found or occurs more than once — read the file first.';
 
-export function createFileExecutors(deps: { repoRoot: string }) {
+/**
+ * For a coding-team member: `writablePaths` are the paths its workstream
+ * owns (sessions/plan-doc.ts guarantees no two members' paths overlap), so
+ * concurrent members can never write the same file and their branches merge
+ * cleanly. Unset for every other agent — anywhere under the repo, as before.
+ */
+export function assertWritable(requestedPath: string, repoRoot: string, writablePaths?: string[]): string {
+  const absolute = assertPathAllowed(requestedPath, WRITE_ALLOWED_ROOTS, repoRoot);
+  if (!writablePaths) return absolute;
+  try {
+    return assertPathAllowed(requestedPath, writablePaths, repoRoot);
+  } catch (err) {
+    if (!(err instanceof PathNotAllowedError)) throw err;
+    throw new PathNotAllowedError(
+      `${requestedPath} isn't in your workstream's owned paths (${writablePaths.join(', ')}). Another team member may ` +
+        'own it — leave it alone, and say in your summary what change it would need.'
+    );
+  }
+}
+
+export interface FileToolDeps {
+  repoRoot: string;
+  writablePaths?: string[];
+}
+
+export function createFileExecutors(deps: FileToolDeps) {
   const readFileExecute = async ({ path: requestedPath, offset, limit }: z.infer<typeof readFileSchema>): Promise<string> => {
     const absolute = assertPathAllowed(requestedPath, ['.'], deps.repoRoot);
     const content = await fs.readFile(absolute, 'utf8');
@@ -73,14 +98,14 @@ export function createFileExecutors(deps: { repoRoot: string }) {
   };
 
   const writeFileExecute = async ({ path: requestedPath, content }: z.infer<typeof writeFileSchema>): Promise<string> => {
-    const absolute = assertPathAllowed(requestedPath, WRITE_ALLOWED_ROOTS, deps.repoRoot);
+    const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     await fs.mkdir(path.dirname(absolute), { recursive: true });
     await fs.writeFile(absolute, content, 'utf8');
     return `Wrote ${requestedPath}`;
   };
 
   const editFileExecute = async ({ path: requestedPath, oldText, newText }: z.infer<typeof editFileSchema>): Promise<string> => {
-    const absolute = assertPathAllowed(requestedPath, WRITE_ALLOWED_ROOTS, deps.repoRoot);
+    const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     const content = await fs.readFile(absolute, 'utf8');
     const occurrences = content.split(oldText).length - 1;
     if (occurrences === 0) {
@@ -96,7 +121,7 @@ export function createFileExecutors(deps: { repoRoot: string }) {
   return { readFileExecute, writeFileExecute, editFileExecute };
 }
 
-export function createFileTools(deps: { repoRoot: string }) {
+export function createFileTools(deps: FileToolDeps) {
   const { readFileExecute, writeFileExecute, editFileExecute } = createFileExecutors(deps);
   return {
     readFileTool: tool({ description: readFileDescription, inputSchema: readFileSchema, execute: readFileExecute }),

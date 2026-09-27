@@ -10,7 +10,11 @@ export type SessionStage =
   | 'qa-in-progress'
   | 'qa-reviewed'
   | 'done'
-  | 'abandoned';
+  | 'abandoned'
+  // Terminal: the requirements agent judged this feature too big for one
+  // pass, the human accepted its proposal, and the work now lives in the
+  // child sessions listed in splitInto.
+  | 'split';
 
 export type TranscriptRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
 
@@ -44,6 +48,72 @@ export interface SessionMeetingSource {
   includesSummary: boolean;
 }
 
+// One independently shippable slice of a feature the requirements agent
+// proposed splitting (see tool-defs/propose-split-tool.ts).
+export interface SplitPart {
+  title: string;
+  sessionKey: string;
+  // Self-contained markdown handed to the child session's requirements
+  // agent as its starting point — it never sees the parent's conversation.
+  brief: string;
+  // Indexes into the same parts array — each only ever points at an
+  // earlier part, so the order is also a valid build order.
+  dependsOn: number[];
+}
+
+export interface SplitProposal {
+  rationale: string;
+  parts: SplitPart[];
+  proposedAt: string;
+}
+
+export interface SessionSplitOrigin {
+  sessionId: string;
+  sessionKey: string;
+  title: string;
+  // Sibling session ids this part depends on, resolved from
+  // SplitPart.dependsOn at split time.
+  dependsOnSessionIds: string[];
+}
+
+// A group of plan steps one coding-team member implements, concurrently
+// with the others, in its own git worktree (see agents/team/). Declared by
+// the plan agent in write_plan_doc; validated by sessions/plan-doc.ts so no
+// two workstreams can write the same path.
+export interface PlanWorkstream {
+  id: string;
+  title: string;
+  stepIds: string[];
+  // Repo-relative files or directories this member may write — nobody else
+  // may write inside them.
+  ownedPaths: string[];
+  // Workstream ids that must be merged before this one starts.
+  dependsOn: string[];
+}
+
+export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
+
+export interface CodingTeamMember extends PlanWorkstream {
+  branch: string;
+  status: TeamMemberStatus;
+  // Why it failed or is blocked, or a note about the merge.
+  note: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  transcript: TranscriptEntry[];
+  history: ModelMessage[];
+  claudeSessionId: string | null;
+}
+
+export interface CodingTeamState {
+  // "interrupted" = the server stopped mid-run (set at boot); the run
+  // endpoint resumes every member that hasn't merged yet.
+  status: 'running' | 'done' | 'needs_attention' | 'interrupted';
+  members: CodingTeamMember[];
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 export interface SessionRecord {
   id: string;
   sessionKey: string; // e.g. "API-1234" or a kebab-slug — shared across requirements doc, branch, QA report
@@ -72,6 +142,10 @@ export interface SessionRecord {
   // steps, then updated as each step is completed. Null until the agent
   // calls write_coding_plan.
   codingPlan: CodingPlanStep[] | null;
+  // Set when the approved plan had 2+ workstreams and the team was started
+  // — the members' own transcripts live here, not in transcripts.coding
+  // (which stays the lead's single-agent chat for follow-ups after merge).
+  codingTeam: CodingTeamState | null;
 
   qaReportPath: string | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
@@ -109,6 +183,18 @@ export interface SessionRecord {
   // until the first requirements message, which is when the meeting
   // transcript gets attached to the turn server-side.
   meetingKickoffPending: boolean;
+
+  // Pending until the human accepts or dismisses it in the UI — the agent
+  // can only propose a split, never perform one (same rule as approvals).
+  splitProposal: SplitProposal | null;
+  // Set on the parent once a split is accepted.
+  splitInto: string[];
+  // Set on each child created by a split.
+  splitFrom: SessionSplitOrigin | null;
+  // The accepted part's brief, attached to the child's first requirements
+  // message — one-shot, same lifecycle as meetingKickoffPending.
+  splitBrief: string | null;
+  splitKickoffPending: boolean;
 
   // Human-readable, for the UI's chat panes.
   transcripts: {

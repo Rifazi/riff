@@ -22,6 +22,8 @@ export function stageGroupFor(session: SessionRecord): StageGroup {
     case 'qa-reviewed':
     case 'done':
       return 'qa';
+    case 'split':
+      return 'requirements';
     case 'abandoned':
       if (session.qaReportPath) return 'qa';
       if (session.branch) return 'coding';

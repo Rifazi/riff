@@ -72,7 +72,7 @@ export const runCheckedCommandDescription =
 
 export const getDiffSchema = z.object({ branchName: z.string() });
 export const getDiffDescription =
-  'Get the full diff and stat summary between master and this session\'s branch — the actual change set to ' +
+  'Get the full diff and stat summary between the app\'s base branch and this session\'s branch — the actual change set to ' +
   'review, not the coding agent\'s self-report.';
 
 /**
@@ -82,7 +82,7 @@ export const getDiffDescription =
  * about, not a tool-execution error, so this always returns normally
  * (pass/fail is embedded in the text) rather than throwing.
  */
-export function createQaExecutors(deps: { repoRoot: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
+export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
   const runCheckedCommandExecute = async ({ command }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
     const script = deps.checkCommands?.[command] ?? DEFAULT_SCRIPTS[command];
     const timeoutMs = TIMEOUTS_MS[command];
@@ -122,8 +122,8 @@ export function createQaExecutors(deps: { repoRoot: string; checkCommands?: Part
 
   const getDiffExecute = async ({ branchName }: z.infer<typeof getDiffSchema>): Promise<string> => {
     const [diff, stat] = await Promise.all([
-      diffAgainstBase(deps.repoRoot, branchName),
-      diffStatAgainstBase(deps.repoRoot, branchName),
+      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
+      diffStatAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
     ]);
     return `${stat}\n\n${diff}`.slice(0, 60_000);
   };
@@ -131,7 +131,7 @@ export function createQaExecutors(deps: { repoRoot: string; checkCommands?: Part
   return { runCheckedCommandExecute, getDiffExecute };
 }
 
-export function createQaTools(deps: { repoRoot: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
+export function createQaTools(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
   const { runCheckedCommandExecute, getDiffExecute } = createQaExecutors(deps);
   return {
     runCheckedCommandTool: tool({

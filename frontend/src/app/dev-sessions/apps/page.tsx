@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
-import type { AppConfig, CheckCommands, Role } from '@/lib/dev-sessions/types';
+import type { AppConfig, AppWriteResult, CheckCommands, Role } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 import { SESSIONS_HREF } from '@/lib/dev-sessions/stage';
 import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell, Pill } from '@/components/DevSessions/PageShell';
@@ -28,6 +28,43 @@ const ROLES: { key: Role; label: string }[] = [
   { key: 'qa', label: `QA — ${AGENT_PERSONAS.qa.name}` },
   { key: 'coordinator', label: `Coordinator — ${COORDINATOR_PERSONA.name}` },
 ];
+
+interface SetupReport {
+  done: string[];
+  warnings: string[];
+}
+
+// Turns what the server set up on disk (docs/, git) into notices; null when
+// it did nothing worth mentioning.
+function setupReport(result: AppWriteResult): SetupReport | null {
+  const done = [
+    ...(result.docsInitialized ? [`Created docs/ at ${result.docsDir} — add markdown there for the agents to search.`] : []),
+    ...(result.git?.actions ?? []),
+  ];
+  if (result.git) done.push(`Coding sessions will branch off ${result.git.baseBranch}.`);
+  const warnings = result.git?.warnings ?? [];
+  return done.length > 0 || warnings.length > 0 ? { done, warnings } : null;
+}
+
+function SetupNotices({ report }: { report: SetupReport | null }) {
+  if (!report) return null;
+  return (
+    <>
+      {report.done.length > 0 && (
+        <Notice tone="green">
+          {report.done.map((line) => (
+            <div key={line}>{line}</div>
+          ))}
+        </Notice>
+      )}
+      {report.warnings.map((line) => (
+        <Notice key={line} tone="amber">
+          {line}
+        </Notice>
+      ))}
+    </>
+  );
+}
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -115,7 +152,7 @@ function AppCard({ app }: { app: AppConfig }) {
   const [showCheckCommands, setShowCheckCommands] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [saveReport, setSaveReport] = useState<SetupReport | null>(null);
 
   const dirty =
     name !== app.name || repoRoot !== app.repoRoot || JSON.stringify(checkCommands) !== JSON.stringify(app.checkCommands);
@@ -124,9 +161,7 @@ function AppCard({ app }: { app: AppConfig }) {
     mutationFn: () => api.updateApp(app.id, { name, repoRoot, checkCommands }),
     onSuccess: (result) => {
       setSaveError(null);
-      setSaveNotice(
-        result.docsInitialized ? `Created docs/ at ${result.docsDir} — add markdown there for the agents to search.` : null
-      );
+      setSaveReport(setupReport(result));
       queryClient.invalidateQueries({ queryKey: ['apps'] });
     },
     onError: (err) => setSaveError((err as Error).message),
@@ -173,6 +208,7 @@ function AppCard({ app }: { app: AppConfig }) {
         </FieldRow>
         <div className="text-xs text-gray-500 pl-[152px]">
           docs: <code>{app.docsDir}</code>
+          {' · '}base branch: <code>{app.baseBranch}</code>
           {app.repoUrl && (
             <>
               {' · '}repo: <code>{app.repoUrl}</code>
@@ -197,7 +233,7 @@ function AppCard({ app }: { app: AppConfig }) {
           </Button>
         </div>
         <ErrorText>{saveError}</ErrorText>
-        {saveNotice && <Notice tone="green">{saveNotice}</Notice>}
+        <SetupNotices report={saveReport} />
 
         {showCheckCommands && (
           <div className="pt-3 border-t border-gray-100 space-y-3">
@@ -249,7 +285,7 @@ export default function AppsPage() {
   const [repoRoot, setRepoRoot] = useState('');
   const [validation, setValidation] = useState<{ ok: boolean; error?: string; note?: string } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createNotice, setCreateNotice] = useState<string | null>(null);
+  const [createReport, setCreateReport] = useState<SetupReport | null>(null);
 
   const validateMutation = useMutation({
     mutationFn: () => api.validateApp(repoRoot),
@@ -263,7 +299,7 @@ export default function AppsPage() {
       setRepoRoot('');
       setValidation(null);
       setCreateError(null);
-      setCreateNotice(result.docsInitialized ? `Created docs/ at ${result.docsDir} — add markdown there for the agents to search.` : null);
+      setCreateReport(setupReport(result));
       queryClient.invalidateQueries({ queryKey: ['apps'] });
     },
     onError: (err) => setCreateError((err as Error).message),
@@ -303,6 +339,10 @@ export default function AppsPage() {
                 className="font-mono text-xs"
               />
             </FieldRow>
+            <p className="text-xs text-gray-500 pl-[152px]">
+              An existing checkout, an empty folder, or a new folder to create. A folder that isn&apos;t a git repo yet gets{' '}
+              <code>git init</code>, a starter <code>.gitignore</code> and an initial commit; a missing <code>docs/</code> is created.
+            </p>
             <div className="flex gap-2 pl-[152px]">
               <Button size="sm" variant="outline" disabled={!repoRoot.trim() || validateMutation.isPending} onClick={() => validateMutation.mutate()}>
                 {validateMutation.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
@@ -324,7 +364,7 @@ export default function AppsPage() {
               </Notice>
             )}
             <ErrorText>{createError}</ErrorText>
-            {createNotice && <Notice tone="green">{createNotice}</Notice>}
+            <SetupNotices report={createReport} />
           </div>
         </Card>
       </div>

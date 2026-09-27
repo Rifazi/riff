@@ -8,7 +8,9 @@ import { runCodingAgentTurn } from '../agents/coding-agent.js';
 import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
 import { diffAgainstBase, diffStatAgainstBase, commitLogAgainstBase } from '../repo/git.js';
 import { getApp } from '../apps/apps-store.js';
+import { baseBranchFor } from '../apps/apps.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
+import { isTeamRunning, runCodingTeam, type TeamEvent } from '../agents/team/coding-team.js';
 
 // Mirrors the frontmatter rewrite the approve/reject routes already do for
 // their own doc — revert to draft on disk too, not just on the session
@@ -36,6 +38,9 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       if (!session) return reply.code(404).send({ error: 'session not found' });
       if (session.requirementsStatus !== 'approved' || session.planStatus !== 'approved') {
         return reply.code(400).send({ error: 'requirements and plan must both be approved before coding can start' });
+      }
+      if (isTeamRunning(session.id)) {
+        return reply.code(409).send({ error: 'the coding team is still working — wait for it to finish before messaging the lead' });
       }
       const { message, attachments: rawAttachments } = request.body ?? {};
       if (!message || !message.trim()) return reply.code(400).send({ error: 'message is required' });
@@ -71,15 +76,41 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     }
   );
 
+  // SSE. Starts (or resumes) the coding team for a plan with workstreams —
+  // every member's events are tagged with its memberId. Resuming re-runs
+  // only the members that haven't merged yet.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/team/run', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (isTeamRunning(session.id)) return reply.code(409).send({ error: 'the coding team is already running' });
+    if (session.codingApprovedAt) return reply.code(400).send({ error: 'coding is already approved' });
+
+    startEventStream(reply);
+    const send = (event: TeamEvent) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    try {
+      await runCodingTeam(session.id, send);
+    } catch (err) {
+      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/coding/team', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    return { running: isTeamRunning(session.id) };
+  });
+
   app.get<{ Params: { id: string } }>('/api/sessions/:id/coding/diff', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     if (!session.branch) return { diff: null, stat: null, commits: [] };
     const app = await getApp(session.appId);
     const [diff, stat, commits] = await Promise.all([
-      diffAgainstBase(app.repoRoot, session.branch),
-      diffStatAgainstBase(app.repoRoot, session.branch),
-      commitLogAgainstBase(app.repoRoot, session.branch),
+      diffAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
+      diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
+      commitLogAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
     ]);
     return { diff, stat, commits };
   });

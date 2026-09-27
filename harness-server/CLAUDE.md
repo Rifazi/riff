@@ -192,6 +192,60 @@ below) — never inside the target repo.
    The frontend-specific notes below (pages/, lib/, components/) describe
    the old Vite UI; the Riff ports keep the same logic and names.
 
+9. User asked for the app to break a too-big feature into separate
+   requirements. The requirements agent got a `propose_split` tool
+   (`tool-defs/propose-split-tool.ts`): 2-8 parts in build order, each with
+   a self-contained brief and `dependsOn` (earlier indexes only). It only
+   records `session.splitProposal`; the human-only
+   `/requirements/split/accept` creates one child session per part (key
+   `<parentKey>-<slug>`, own copy of the meeting transcript, `splitFrom`
+   with resolved sibling dependencies, one-shot `splitKickoffPending` that
+   attaches the brief to the child's first message) and moves the parent to
+   the terminal `split` stage (`splitInto`, doc superseded).
+   `/requirements/split/dismiss` or approving a doc clears the proposal. The
+   when-to-split guidance lives mainly in the tool description, not just the
+   base prompt, because a prompt override (e.g. customer-edi's) replaces the
+   base prompt wholesale. Dependencies are advisory only: each child still
+   branches off the app's base branch. Live-verified on a scratch server:
+   propose (incl. the ordering check), accept, dismiss, and the guards
+   against a second accept and messages to a split parent. A real agent run
+   of a child's kickoff has not been exercised.
+
+10. User asked for planning to detect parallelizable coding and run a team
+   of agents concurrently, with a UI that makes the team obvious.
+   `write_plan_doc` takes optional `workstreams` (`sessions/plan-doc.ts`:
+   steps grouped, each with `ownedPaths` and `dependsOn`), rejected unless
+   every step is assigned once, owned paths are disjoint, deps are acyclic,
+   and at least two workstreams can actually run at once. The plan doc's
+   frontmatter carries them. With 2+ workstreams the Coding tab runs
+   `agents/team/coding-team.ts` (`POST /coding/team/run`, SSE of
+   `team_member_*` events) instead of the single agent. It creates the
+   session branch, gives each member a git worktree under
+   `state/worktrees/<sessionId>/<id>` on `<branch>--<id>` (branched off the
+   session branch *after* its deps merged; `node_modules` symlinked in and
+   excluded from catch-all adds), runs `team/workstream-agent.ts`, the normal
+   coding prompt + `prompts/coding-team-member.md`, with every repo tool
+   rooted at the worktree. `write_file`/`edit_file`/`run_prettier` enforce
+   `ownedPaths` (`assertWritable`), which is what makes the merges
+   conflict-free. `update_my_steps` replaces `write_coding_plan` because
+   several members share `session.codingPlan` (`mutateSession` does the
+   read-modify-write under the session lock). No `git_create_branch`, and
+   `run_npm_install` only for the member owning `package.json`. Each member
+   implements its whole workstream in one turn. When it finishes, leftovers
+   are committed, and its branch is `--no-ff` merged into the session branch
+   under a per-repo lock (`withRepoLock`); then its worktree and branch are
+   removed. A failed or unmerged member leaves the team `needs_attention`
+   and its dependents `blocked`. Calling the run again resumes every
+   unmerged member, continuing its own history/claude session.
+   `recoverInterruptedTeams()` at boot marks a run cut off by a restart
+   `interrupted`. Afterwards `transcripts.coding` is the **lead's** chat
+   (same coding agent, told the team already merged its work on the branch)
+   for review follow-ups and QA fixes. The coordinator never drives the
+   team. The frontend shows the lineup on the Plan tab and a team board on
+   the Coding tab (`components/DevSessions/CodingTeam.tsx`, personas in
+   `lib/dev-sessions/agents.ts`, `useTeamRun`), with lead chat behind a
+   toggle.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -205,7 +259,7 @@ backend/src/
   config.ts              — this project's own root/state paths only now (harnessRoot, artifacts dirs, port) — no target-repo fields, see apps/ below
   server.ts               — Fastify bootstrap: builds/watches a docs index per app, registers all routes
   apps/
-    apps.ts                 — AppConfig type, validateRepoRoot()/docsDirFor()/readRepoUrl() (per app, not stored/cached — read fresh so a repoRoot edit can't leave a stale docsDir/repoUrl around), LEGACY_APP_ID. validateRepoRoot() only requires package.json — a missing docs/ is initialized by ensureDocsDir() (called from apps-store's createApp/updateApp, never from the read-only /api/apps/validate check) rather than rejected, so pointing at a real repo that just hasn't grown a docs/ folder yet works on the first try
+    apps.ts                 — AppConfig type, validateRepoRoot()/docsDirFor()/readRepoUrl() (per app, not stored/cached — read fresh so a repoRoot edit can't leave a stale docsDir/repoUrl around), LEGACY_APP_ID. validateRepoRoot() only requires an absolute path to a folder (or a not-yet-existing one whose parent exists) — no package.json, docs/ or .git needed, so a brand-new app can start from an empty folder. createApp/updateApp (never the read-only /api/apps/validate check) create the folder and docs/ via ensureDocsDir(), then run repo/git.ts's setupGitRepo(): a folder that isn't its own repo gets `git init` on master + starter .gitignore + initial commit; an existing repo only gets the new docs/README.md committed if it's on its base branch. AppConfig.baseBranch (detected: master, else main, else HEAD; missing on old apps → baseBranchFor() returns "master") replaces the old hardcoded master in every git.ts diff/branch helper
     apps-store.ts            — reads/writes backend/local-apps.json; seeds one app from the legacy TARGET_REPO_ROOT env var the first time it's read if that file doesn't exist yet
   sessions/
     session.ts             — SessionRecord type: appId (which app this session drives) + stage machine, transcripts (UI display) + histories (ModelMessage[] per stage, for conversation continuity)

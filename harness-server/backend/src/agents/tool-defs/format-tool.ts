@@ -2,8 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
-import { assertPathAllowed } from '../../repo/guardrails.js';
-import { WRITE_ALLOWED_ROOTS } from './file-tools.js';
+import { assertWritable, type FileToolDeps } from './file-tools.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,9 +25,9 @@ export const runPrettierDescription =
  * diff can never balloon with unrelated pre-existing formatting drift
  * elsewhere in the repo.
  */
-export function createRunPrettierExecute(deps: { repoRoot: string }) {
+export function createRunPrettierExecute(deps: FileToolDeps) {
   return async ({ files }: z.infer<typeof runPrettierSchema>): Promise<string> => {
-    const absolutePaths = files.map((f) => assertPathAllowed(f, WRITE_ALLOWED_ROOTS, deps.repoRoot));
+    const absolutePaths = files.map((f) => assertWritable(f, deps.repoRoot, deps.writablePaths));
 
     try {
       const { stdout, stderr } = await execFileAsync('npx', ['prettier', '--write', ...absolutePaths], {
@@ -47,7 +46,7 @@ export function createRunPrettierExecute(deps: { repoRoot: string }) {
   };
 }
 
-export function createRunPrettierTool(deps: { repoRoot: string }) {
+export function createRunPrettierTool(deps: FileToolDeps) {
   return tool({
     description: runPrettierDescription,
     inputSchema: runPrettierSchema,

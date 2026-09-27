@@ -5,6 +5,8 @@ import { config } from '../config.js';
 import { createSession, deleteSession, getSession, listSessions, updateSession } from '../sessions/session-store.js';
 import { slugify, type SessionRecord } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
+import { isSessionKeyInUse } from '../sessions/session-keys.js';
+import { cleanupTeamWorktrees } from '../agents/team/coding-team.js';
 import { listApps } from '../apps/apps-store.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -13,15 +15,6 @@ import {
   writeMeetingSource,
   type MeetingSourceInput,
 } from '../sessions/meeting-source.js';
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // Sessions don't store the app's display name (only its id, which can
 // outlive a rename) — join against the current app list so the UI doesn't
@@ -56,25 +49,10 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       if (sourceError) return reply.code(400).send({ error: sourceError });
     }
 
-    // Every stage's own agent derives its doc's filename straight from
-    // sessionKey (requirementsDir/<key>.md, plansDir/<key>.md, ...) with no
-    // further uniqueness check of its own — see requirements-agent.ts's
-    // "does a file already exist at this path" adoption logic. Two sessions
-    // sharing a key silently merge onto the same file: the newer session
-    // would inherit the older one's approved status on its very first turn,
-    // and a later write would overwrite the older session's document
-    // outright. Reject the collision here, once, before either can happen.
+    // Reject a key collision here, once, before two sessions can merge onto
+    // the same docs (see session-keys.ts).
     const effectiveKey = sessionKey?.trim() || slugify(title);
-    const existingSessions = await listSessions();
-    const collidesWithSession = existingSessions.some((s) => s.sessionKey === effectiveKey);
-    const collidesWithArtifact = collidesWithSession
-      ? false
-      : await Promise.all(
-          [config.requirementsDir, config.plansDir, config.qaReportsDir].map((dir) =>
-            fileExists(path.join(dir, `${effectiveKey}.md`))
-          )
-        ).then((hits) => hits.some(Boolean));
-    if (collidesWithSession || collidesWithArtifact) {
+    if (await isSessionKeyInUse(effectiveKey)) {
       return reply.code(409).send({
         error: `"${effectiveKey}" is already in use by another session or an existing artifact doc — pick a different ticket ID, or open the existing session instead.`,
       });
@@ -108,6 +86,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     }
 
     await removeMeetingSource(session.sourceMeeting);
+    await cleanupTeamWorktrees(session);
     await deleteSession(session.id);
     return reply.code(204).send();
   });

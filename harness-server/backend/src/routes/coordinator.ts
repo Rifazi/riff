@@ -9,6 +9,7 @@ import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { runCodingAgentTurn } from '../agents/coding-agent.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
+import { isTeamRunning, planHasTeam } from '../agents/team/coding-team.js';
 
 // Hard cap so a stuck/looping coordinator can't run away unattended — it
 // always stops and hands back to a human rather than looping forever.
@@ -71,8 +72,29 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           break;
         }
 
+        if (session.stage === 'split' || session.stage === 'abandoned') {
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
+          break;
+        }
+        if (session.splitProposal) {
+          // Only a human can accept or dismiss a split.
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to accept or dismiss the proposed split.' });
+          break;
+        }
+
         const group = stageGroupFor(session);
         const transcript = transcriptFor(session, group);
+
+        // The team drives itself from the Coding tab; the coordinator only
+        // takes over follow-ups with the lead once it has finished.
+        if (group === 'coding' && (isTeamRunning(session.id) || (!session.codingTeam && (await planHasTeam(session))))) {
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team runs on its own — start or watch it on the Coding tab.' });
+          break;
+        }
+        if (group === 'coding' && session.codingTeam && transcript.length === 0) {
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team has finished — review the merged diff.' });
+          break;
+        }
 
         let message: string;
         if (transcript.length === 0) {

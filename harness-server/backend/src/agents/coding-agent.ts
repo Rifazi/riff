@@ -9,6 +9,7 @@ import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
+import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
@@ -72,26 +73,23 @@ export async function runCodingAgentTurn(
     if (!session.planPath) {
       throw new Error('Cannot start the coding stage without an approved plan document.');
     }
-    const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
-    const parsed = matter(requirementsRaw);
-    systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
+    const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, app.repoRoot);
+    systemPrompt += approvedDocs;
 
-    const relatedDocs: string[] = Array.isArray(parsed.data['related-docs']) ? parsed.data['related-docs'] : [];
-    for (const relDoc of relatedDocs) {
-      try {
-        const docContent = await fs.readFile(path.join(app.repoRoot, relDoc), 'utf8');
-        systemPrompt += `\n\n# Related doc: ${relDoc}\n\n${docContent}`;
-      } catch {
-        // referenced doc no longer exists — skip it
-      }
-    }
-
-    const planRaw = await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8');
-    const planParsed = matter(planRaw);
-    systemPrompt += `\n\n# Approved plan (${session.planPath})\n\n${planRaw}`;
-
-    const planSteps: unknown = planParsed.data.steps;
-    if (Array.isArray(planSteps) && planSteps.length > 0) {
+    if (session.codingTeam) {
+      // The team already built the plan on this branch — this agent is the
+      // lead handling follow-ups (review feedback, QA fixes), not starting
+      // from scratch.
+      const checklist = (session.codingPlan ?? []).map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`).join('\n');
+      const members = session.codingTeam.members
+        .map((m) => `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; owned ${m.ownedPaths.join(', ')}`)
+        .join('\n');
+      systemPrompt +=
+        `\n\n# The coding team already ran\n\nYou are the lead engineer. A team of agents implemented this plan in ` +
+        `parallel and their work is merged on branch "${session.branch}", which is checked out. Do NOT call ` +
+        `git_create_branch. Review what's there before changing it, handle the human's requests on this branch, and ` +
+        `keep the checklist accurate with write_coding_plan.\n\nTeam members:\n${members}\n\nChecklist:\n${checklist}`;
+    } else if (planSteps.length > 0) {
       const stepsList = planSteps
         .map((s: { id: string; title: string }) => `- id: "${s.id}", title: "${s.title}"`)
         .join('\n');
@@ -101,7 +99,7 @@ export async function runCodingAgentTurn(
         `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
     }
 
-    systemPrompt += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
+    if (!session.codingTeam) systemPrompt += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
   }
 
   // A mid-coding send-back that's just been reconciled through requirements
@@ -150,9 +148,9 @@ export async function runCodingAgentTurn(
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
     const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
-    const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, onBranchCreated });
+    const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
     const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({ repoRoot: app.repoRoot });
-    const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, checkCommands: app.checkCommands });
+    const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -198,9 +196,9 @@ export async function runCodingAgentTurn(
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
     const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
-    const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, onBranchCreated });
+    const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
     const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
-    const { runCheckedCommandTool } = createQaTools({ repoRoot: app.repoRoot, checkCommands: app.checkCommands });
+    const { runCheckedCommandTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
 
     const tools: ToolSet = {
       search_docs: searchDocsTool,
@@ -241,7 +239,39 @@ export async function runCodingAgentTurn(
   return latest;
 }
 
-function suggestedBranchName(session: SessionRecord): string {
+/**
+ * The approved requirements doc, the docs it cites and the approved plan,
+ * as a system-prompt section — shared by the single coding agent and every
+ * coding-team member so they work from identical context.
+ */
+export async function loadApprovedDocsForCoding(
+  session: SessionRecord,
+  repoRoot: string
+): Promise<{ text: string; planSteps: { id: string; title: string }[] }> {
+  if (!session.requirementsPath || !session.planPath) {
+    throw new Error('Coding needs an approved requirements document and plan.');
+  }
+  const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
+  let text = `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
+
+  const cited: unknown = matter(requirementsRaw).data['related-docs'];
+  const relatedDocs: string[] = Array.isArray(cited) ? cited : [];
+  for (const relDoc of relatedDocs) {
+    try {
+      const docContent = await fs.readFile(path.join(repoRoot, relDoc), 'utf8');
+      text += `\n\n# Related doc: ${relDoc}\n\n${docContent}`;
+    } catch {
+      // referenced doc no longer exists — skip it
+    }
+  }
+
+  const planRaw = await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8');
+  text += `\n\n# Approved plan (${session.planPath})\n\n${planRaw}`;
+  const steps: unknown = matter(planRaw).data.steps;
+  return { text, planSteps: Array.isArray(steps) ? (steps as { id: string; title: string }[]) : [] };
+}
+
+export function suggestedBranchName(session: SessionRecord): string {
   // Ticket id keeps whatever case the human typed it in (e.g. "API-1234")
   // rather than being forced to lowercase — it's a ticket key, not a slug.
   const key = session.sessionKey.trim().replace(/\s+/g, '_');

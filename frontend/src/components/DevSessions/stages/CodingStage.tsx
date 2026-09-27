@@ -3,18 +3,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
+import { GitBranch, GitCommit, Loader2, MessageSquare, Play, Undo2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
-import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
+import type { AttachmentInput, CodingTeamMember, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
-import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
+import { AGENT_PERSONAS, COORDINATOR_PERSONA, TEAM_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
+import { useTeamRun } from '@/lib/dev-sessions/useTeamRun';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
+import { CodingTeamBoard } from '../CodingTeam';
 import { DiffViewer } from '../DiffViewer';
 import { ErrorText, Notice, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
@@ -44,7 +46,60 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
+    queryClient.invalidateQueries({ queryKey: ['team-status', sessionId] });
   };
+
+  // Team mode: the approved plan split the work into 2+ workstreams, so a
+  // team of agents codes it in parallel (see harness-server agents/team/).
+  // Wait for the plan to load before deciding, so the single-agent kickoff
+  // below can't fire for a team plan.
+  const { data: planDoc } = useQuery({
+    queryKey: ['plan-doc', sessionId, session.planPath],
+    queryFn: () => api.getPlanDoc(sessionId),
+  });
+  const teamMode = Boolean(session.codingTeam) || (planDoc?.workstreams.length ?? 0) >= 2;
+  const team = useTeamRun();
+  const codingTeam = session.codingTeam;
+  // A run keeps going server-side if this page is closed; the persisted
+  // status alone can't tell that apart from a run cut off by a restart.
+  const { data: teamServer } = useQuery({
+    queryKey: ['team-status', sessionId],
+    queryFn: () => api.getTeamStatus(sessionId),
+    enabled: teamMode,
+  });
+  const teamActive = team.running || (codingTeam?.status === 'running' && teamServer?.running !== false);
+  const teamStatus = !codingTeam
+    ? ('not_started' as const)
+    : codingTeam.status === 'running' && !teamActive
+      ? ('interrupted' as const)
+      : codingTeam.status;
+  const teamFinished = Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
+  const [view, setView] = useState<'team' | 'lead'>('team');
+
+  // Watching a run started elsewhere (another window, or before a reload):
+  // poll instead of streaming.
+  useEffect(() => {
+    if (team.running || codingTeam?.status !== 'running') return;
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team.running, codingTeam?.status]);
+
+  const startTeam = () => void team.start(sessionId, refresh);
+
+  const kickedOffTeam = useRef(false);
+  useEffect(() => {
+    if (!teamMode || codingTeam || session.branch || team.running) return;
+    if (kickedOffTeam.current) return;
+    kickedOffTeam.current = true;
+    startTeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamMode, codingTeam, session.branch, team.running]);
+
+  const entriesFor = (member: CodingTeamMember) =>
+    team.running && team.startedAt
+      ? [...member.transcript.filter((e) => e.timestamp < team.startedAt!), ...(team.overlays[member.id] ?? [])]
+      : member.transcript;
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveCoding(sessionId),
@@ -70,6 +125,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   const kickedOffCoordinator = useRef(false);
   useEffect(() => {
+    if (teamMode) return;
     if (!session.coordinatorEnabled) return;
     if (session.transcripts.coding.length > 0) return;
     if (streaming) return;
@@ -92,6 +148,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // Kick off automatically when reached with no branch and nothing said.
   const kickedOff = useRef(false);
   useEffect(() => {
+    if (planDoc === undefined || teamMode) return;
     if (session.branch) return;
     if (session.transcripts.coding.length > 0) return;
     if (streaming) return;
@@ -100,7 +157,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     if (session.coordinatorEnabled) return;
     void handleSend(CODING_KICKOFF_MESSAGE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming]);
+  }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming, planDoc, teamMode]);
 
   // QA sent this back for fixes — relay the report as the next message.
   const kickedOffQaFix = useRef(false);
@@ -161,7 +218,29 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   const entries = streaming ? [...session.transcripts.coding, ...overlay] : session.transcripts.coding;
   const hasCommits = Boolean(session.branch) && (diffData?.commits.length ?? 0) > 0;
-  const canContinue = Boolean(plan) && !allStepsDone && !streaming && !approved;
+  const canContinue = Boolean(plan) && !allStepsDone && !streaming && !approved && !teamMode;
+  const busy = streaming || teamActive;
+  const canStartTeam =
+    teamMode && !teamActive && !approved && (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
+
+  const leadChat = (
+    <ChatPane
+      entries={entries}
+      onSend={handleSend}
+      disabled={streaming || approved || !teamFinished}
+      streaming={streaming}
+      runningTool={runningTool}
+      agent={TEAM_LEAD_PERSONA}
+      emptyHint={`The team's work is merged on ${session.branch ?? 'the session branch'}. Ask ${TEAM_LEAD_PERSONA.name} for any changes, or approve the diff.`}
+      placeholder={
+        approved
+          ? 'Coding approved — read only.'
+          : !teamFinished
+            ? `${TEAM_LEAD_PERSONA.name} takes follow-ups once the team has finished…`
+            : `Ask ${TEAM_LEAD_PERSONA.name} for changes, or approve the diff…`
+      }
+    />
+  );
 
   return (
     <StageLayout
@@ -177,6 +256,59 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         </>
       }
       chat={
+        teamMode ? (
+          <div className="flex flex-col flex-1 min-h-0 gap-3">
+            <div className="flex-shrink-0 inline-flex self-start rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
+              <button
+                type="button"
+                onClick={() => setView('team')}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 ${view === 'team' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                <Users className="w-4 h-4" />
+                Team board
+                {teamActive && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('lead')}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 ${view === 'lead' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
+                title={teamFinished ? undefined : `${TEAM_LEAD_PERSONA.name} takes follow-ups once the team has finished`}
+              >
+                <MessageSquare className="w-4 h-4" />
+                Chat with {TEAM_LEAD_PERSONA.name} (lead)
+              </button>
+            </div>
+            {view === 'team' ? (
+              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
+                <CodingTeamBoard
+                  workstreams={planDoc?.workstreams ?? []}
+                  members={codingTeam?.members ?? null}
+                  teamStatus={teamStatus}
+                  steps={plan ?? []}
+                  branch={session.branch}
+                  entriesFor={entriesFor}
+                  runningTools={team.runningTools}
+                  canStart={canStartTeam}
+                  starting={team.running}
+                  onStart={startTeam}
+                />
+                {teamFinished && (
+                  <Notice tone={teamStatus === 'done' ? 'green' : 'amber'}>
+                    {teamStatus === 'done'
+                      ? `Everyone's work is merged. Review the diff, then approve it — or ask ${TEAM_LEAD_PERSONA.name} for changes.`
+                      : `Not everything merged — resume the team to retry, or ask ${TEAM_LEAD_PERSONA.name} to finish it on the merged branch.`}{' '}
+                    <button type="button" className="font-medium underline" onClick={() => setView('lead')}>
+                      Chat with {TEAM_LEAD_PERSONA.name}
+                    </button>
+                  </Notice>
+                )}
+              </div>
+            ) : (
+              leadChat
+            )}
+            <ErrorText>{team.error ?? error}</ErrorText>
+          </div>
+        ) : (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
           {plan && plan.length > 0 && (
             <div className="flex-shrink-0 space-y-2">
@@ -229,6 +361,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
           />
           <ErrorText>{error}</ErrorText>
         </div>
+        )
       }
       document={
         <div className="flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -263,11 +396,11 @@ export function CodingStage({ session }: { session: SessionRecord }) {
             <ApprovalBar
               approveLabel={approved ? 'Approved — QA started' : 'Approve diff and start QA'}
               onApprove={() => approveMutation.mutate()}
-              approveDisabled={approved || !hasCommits || streaming}
-              approveDisabledReason={!hasCommits ? 'No commits on a branch yet' : undefined}
+              approveDisabled={approved || !hasCommits || busy}
+              approveDisabledReason={teamActive ? 'The coding team is still working' : !hasCommits ? 'No commits on a branch yet' : undefined}
               busy={approveMutation.isPending}
               onReject={() => rejectMutation.mutate()}
-              rejectDisabled={approved || streaming}
+              rejectDisabled={approved || busy}
               rejectBusy={rejectMutation.isPending}
             />
             {!showSendBackForm ? (
@@ -276,7 +409,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 size="sm"
                 className="mt-2 text-gray-600"
                 onClick={() => setShowSendBackForm(true)}
-                disabled={approved || streaming}
+                disabled={approved || busy}
                 title="Reopen Requirements to revise something already partially implemented, without abandoning this branch"
               >
                 <Undo2 />

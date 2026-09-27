@@ -8,7 +8,8 @@ export type SessionStage =
   | 'qa-in-progress'
   | 'qa-reviewed'
   | 'done'
-  | 'abandoned';
+  | 'abandoned'
+  | 'split';
 
 export type TranscriptRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
 
@@ -48,9 +49,17 @@ export interface AppConfig {
   id: string;
   name: string;
   repoRoot: string;
+  baseBranch: string;
   checkCommands: CheckCommands;
   docsDir: string;
   repoUrl: string | null;
+}
+
+// What adding an app (or pointing it at a new folder) set up on disk.
+export interface AppWriteResult extends AppConfig {
+  docsInitialized: boolean;
+  // Absent when an update didn't change the repository path.
+  git?: { baseBranch: string; actions: string[]; warnings: string[] };
 }
 
 export interface SessionMeetingSource {
@@ -69,6 +78,60 @@ export interface MeetingSourceInput {
   summary?: string | null;
 }
 
+export interface SplitPart {
+  title: string;
+  sessionKey: string;
+  brief: string;
+  /** Indexes of earlier parts in the same proposal. */
+  dependsOn: number[];
+}
+
+export interface SplitProposal {
+  rationale: string;
+  parts: SplitPart[];
+  proposedAt: string;
+}
+
+export interface SessionSplitOrigin {
+  sessionId: string;
+  sessionKey: string;
+  title: string;
+  dependsOnSessionIds: string[];
+}
+
+/** A group of plan steps one coding-team member builds in parallel with the others. */
+export interface PlanWorkstream {
+  id: string;
+  title: string;
+  stepIds: string[];
+  ownedPaths: string[];
+  dependsOn: string[];
+}
+
+export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
+
+export interface CodingTeamMember extends PlanWorkstream {
+  branch: string;
+  status: TeamMemberStatus;
+  note: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  transcript: TranscriptEntry[];
+}
+
+export interface CodingTeamState {
+  status: 'running' | 'done' | 'needs_attention' | 'interrupted';
+  members: CodingTeamMember[];
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export type TeamEvent =
+  | { type: 'team_member_event'; memberId: string; event: AgentEvent }
+  | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus; note: string | null }
+  | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
+  | { type: 'error'; message: string };
+
 export interface SessionRecord {
   id: string;
   sessionKey: string;
@@ -86,6 +149,7 @@ export interface SessionRecord {
   branch: string | null;
   codingApprovedAt: string | null;
   codingPlan: CodingPlanStep[] | null;
+  codingTeam: CodingTeamState | null;
 
   qaReportPath: string | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
@@ -101,6 +165,11 @@ export interface SessionRecord {
 
   sourceMeeting: SessionMeetingSource | null;
   meetingKickoffPending: boolean;
+
+  splitProposal: SplitProposal | null;
+  splitInto: string[];
+  splitFrom: SessionSplitOrigin | null;
+  splitKickoffPending: boolean;
 
   transcripts: {
     requirements: TranscriptEntry[];

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Overrides the npm script name run_checked_command uses for each of its
@@ -18,6 +18,14 @@ export interface AppConfig {
   name: string;
   repoRoot: string;
   checkCommands?: CheckCommands;
+  // The branch the coding stage branches off and diffs against, detected by
+  // repo/git.ts's setupGitRepo() when the app is created or its repoRoot
+  // changes. Missing on apps that predate it, which get "master".
+  baseBranch?: string;
+}
+
+export function baseBranchFor(app: AppConfig): string {
+  return app.baseBranch ?? 'master';
 }
 
 // Fixed id for the app seeded from the legacy single-repo TARGET_REPO_ROOT
@@ -36,17 +44,37 @@ export class InvalidRepoRootError extends Error {
   }
 }
 
-// Same check config.ts's old resolveTargetRepoRoot used for the single
-// TARGET_REPO_ROOT — now applied per app instead of once at startup.
-// Deliberately doesn't check for docs/ — a repo without one yet is
-// initialized via ensureDocsDir() below rather than rejected, so adding a
-// brand-new app doesn't require hand-creating a docs/ folder first.
+// Only requires an absolute path to a directory, or to a not-yet-existing
+// folder whose parent exists (createApp/updateApp create it), so a brand-new
+// app can start from an empty folder. No package.json, docs/ or .git is
+// required: docs/ is initialized by ensureDocsDir() below and git by
+// repo/git.ts's setupGitRepo(). The absolute-path rule stops a relative path
+// silently resolving against the server's own working directory.
 export function validateRepoRoot(repoRoot: string): string {
-  const resolved = path.resolve(repoRoot.trim());
-  if (!existsSync(path.join(resolved, 'package.json'))) {
-    throw new InvalidRepoRootError(`${resolved} has no package.json — is this really a repo checkout?`);
+  const trimmed = repoRoot.trim();
+  if (!path.isAbsolute(trimmed)) {
+    throw new InvalidRepoRootError(`"${trimmed}" is not an absolute path.`);
+  }
+  const resolved = path.resolve(trimmed);
+  if (existsSync(resolved)) {
+    if (!statSync(resolved).isDirectory()) throw new InvalidRepoRootError(`${resolved} is a file, not a folder.`);
+    return resolved;
+  }
+  if (!existsSync(path.dirname(resolved)) || !statSync(path.dirname(resolved)).isDirectory()) {
+    throw new InvalidRepoRootError(`${resolved} doesn't exist, and neither does its parent folder.`);
   }
   return resolved;
+}
+
+// What the read-only /api/apps/validate check tells the user setup will do.
+export function describeSetup(repoRoot: string): string | undefined {
+  if (!existsSync(repoRoot)) return 'This folder will be created, with git initialized and a docs/ folder.';
+  const notes: string[] = [];
+  if (!existsSync(path.join(repoRoot, '.git'))) notes.push('git will be initialized with an initial commit');
+  if (!hasDocsDir(repoRoot)) notes.push('a docs/ folder will be created');
+  if (notes.length === 0) return undefined;
+  const sentence = notes.join(' and ');
+  return `${sentence[0].toUpperCase()}${sentence.slice(1)}.`;
 }
 
 export function docsDirFor(app: AppConfig): string {
@@ -63,6 +91,7 @@ export function hasDocsDir(repoRoot: string): boolean {
 // check, which must stay read-only. Returns whether it actually created
 // anything, so callers can surface that to the user.
 export function ensureDocsDir(repoRoot: string): boolean {
+  mkdirSync(repoRoot, { recursive: true });
   const docsDir = path.join(repoRoot, 'docs');
   if (existsSync(docsDir)) return false;
   mkdirSync(docsDir, { recursive: true });

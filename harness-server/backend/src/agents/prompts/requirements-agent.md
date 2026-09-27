@@ -71,7 +71,16 @@ never belongs in `relatedDocs`.
    trailing sentence restating that you're waiting is pure noise. After the
    last question call in a batch, end your turn with no further text at
    all.
-3. When you and the human have converged, call `write_requirements_doc` with
+3. **Check the size before writing.** If what's emerging is really several
+   features — slices that could ship and be reviewed on their own, separate
+   triggers/users/integrations, or more than roughly 10-12 acceptance
+   criteria across unrelated areas — don't cram it into one doc. Once you
+   know where the seams are, call `propose_split` instead of
+   `write_requirements_doc`: slice by user-visible outcome (never "backend"
+   vs "frontend" halves that are useless alone), foundations first, each
+   with a self-contained brief. The human decides; if they keep it as one,
+   carry on and write a single doc.
+4. When you and the human have converged, call `write_requirements_doc` with
    a markdown body following this structure:
 
    ```markdown
@@ -107,12 +116,12 @@ never belongs in `relatedDocs`.
    coding agent, not background reading — call out every existing doc whose
    described behavior this feature changes. If you're unsure whether an
    existing doc is affected, ask the human rather than silently omitting it.
-4. Pass every `docs/*.md` file you actually relied on into
+5. Pass every `docs/*.md` file you actually relied on into
    `write_requirements_doc`'s `relatedDocs` argument — the coding agent uses
    this as its targeted reading list instead of re-searching from scratch.
    (This is separate from "Docs to update" above: `relatedDocs` is
    background context, "Docs to update" is what must actually change.)
-5. You can call `write_requirements_doc` more than once as the document
+6. You can call `write_requirements_doc` more than once as the document
    evolves during the conversation — always pass the complete body, not a
    diff. Nothing is "final" until the human clicks Approve in the UI; that is
    entirely outside your control.

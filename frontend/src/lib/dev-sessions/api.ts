@@ -1,12 +1,14 @@
 import type {
   AppConfig,
   AppPrompts,
+  AppWriteResult,
   CheckCommands,
   CreateJiraTicketsResult,
   Integration,
   JiraSettingsFields,
   MeetingSourceInput,
   PlanStepSummary,
+  PlanWorkstream,
   Provider,
   Role,
   RoleModelConfig,
@@ -48,14 +50,14 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
-    }).then((r) => json<AppConfig & { docsInitialized: boolean }>(r)),
+    }).then((r) => json<AppWriteResult>(r)),
 
   updateApp: (id: string, patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands }) =>
     fetch(apiUrl(`/api/apps/${id}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
-    }).then((r) => json<AppConfig & { docsInitialized: boolean }>(r)),
+    }).then((r) => json<AppWriteResult>(r)),
 
   deleteApp: (id: string) =>
     fetch(apiUrl(`/api/apps/${id}`), { method: 'DELETE' }).then(async (r) => {
@@ -115,9 +117,23 @@ export const api = {
   rejectRequirements: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/requirements/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
+  acceptSplit: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/requirements/split/accept`), { method: 'POST' }).then((r) =>
+      json<{ parent: SessionRecord; children: SessionRecord[] }>(r)
+    ),
+
+  dismissSplit: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/requirements/split/dismiss`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+
   getPlanDoc: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/plan/doc`)).then((r) =>
-      json<{ markdown: string | null; body: string | null; steps: PlanStepSummary[]; jira: { epicKey: string; issues: CreateJiraTicketsResult['issues'] } | null }>(
+      json<{
+        markdown: string | null;
+        body: string | null;
+        steps: PlanStepSummary[];
+        workstreams: PlanWorkstream[];
+        jira: { epicKey: string; issues: CreateJiraTicketsResult['issues'] } | null;
+      }>(
         r
       )
     ),
@@ -135,6 +151,9 @@ export const api = {
 
   createJiraTickets: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/plan/jira/create`), { method: 'POST' }).then((r) => json<CreateJiraTicketsResult>(r)),
+
+  getTeamStatus: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/coding/team`)).then((r) => json<{ running: boolean }>(r)),
 
   getCodingDiff: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/diff`)).then((r) =>

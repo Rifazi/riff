@@ -7,10 +7,11 @@ import {
   editFileSchema,
   editFileDescription,
   createFileExecutors,
+  type FileToolDeps,
 } from '../tool-defs/file-tools.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createFileToolsClaude(deps: { repoRoot: string }) {
+export function createFileToolsClaude(deps: FileToolDeps) {
   const { readFileExecute, writeFileExecute, editFileExecute } = createFileExecutors(deps);
   return {
     readFileToolClaude: tool('read_file', readFileDescription, readFileSchema.shape, wrapForClaudeSdk(readFileExecute), {

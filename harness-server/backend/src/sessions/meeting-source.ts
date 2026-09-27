@@ -60,3 +60,12 @@ export async function removeMeetingSource(source: SessionMeetingSource | null): 
   if (!source) return;
   await fs.rm(path.join(config.harnessRoot, source.transcriptPath), { force: true });
 }
+
+// Each split child gets its own copy, so deleting the parent session (which
+// removes its transcript file) can't strand the children.
+export async function copyMeetingSource(source: SessionMeetingSource, toSessionId: string): Promise<SessionMeetingSource> {
+  await fs.mkdir(config.meetingSourcesDir, { recursive: true });
+  const target = path.join(config.meetingSourcesDir, `${toSessionId}.md`);
+  await fs.copyFile(path.join(config.harnessRoot, source.transcriptPath), target);
+  return { ...source, transcriptPath: path.relative(config.harnessRoot, target) };
+}

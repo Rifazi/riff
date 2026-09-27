@@ -10,6 +10,7 @@ import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
+import { baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
@@ -83,7 +84,7 @@ export async function runPlanAgentTurn(
     }
     let diffStat = '(unable to read diff stat)';
     try {
-      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch)).trim() || '(no changes yet)';
+      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
     } catch {
       // repo/branch not in a readable state — proceed without it
     }
@@ -93,7 +94,7 @@ export async function runPlanAgentTurn(
       `started on branch "${session.branch}". Propose a *minimal* revision to the plan: preserve step ids and ` +
       `statuses for steps that are still valid, and only add/drop/reword steps the requirements change actually ` +
       `affects. Do not reseed the whole checklist from scratch.\n\n` +
-      `Existing coding checklist:\n${stepsText}\n\nDiff stat against master:\n${diffStat}`;
+      `Existing coding checklist:\n${stepsText}\n\nDiff stat against ${baseBranchFor(app)}:\n${diffStat}`;
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 

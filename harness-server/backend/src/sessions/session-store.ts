@@ -3,7 +3,7 @@ import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import type { ModelMessage } from 'ai';
-import type { SessionMeetingSource, SessionRecord, SessionStage, TranscriptEntry } from './session.js';
+import type { SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionStage, TranscriptEntry } from './session.js';
 import { slugify } from './session.js';
 import { LEGACY_APP_ID } from '../apps/apps.js';
 
@@ -53,6 +53,12 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.codingReconciliationPending ??= false;
   session.sourceMeeting ??= null;
   session.meetingKickoffPending ??= false;
+  session.codingTeam ??= null;
+  session.splitProposal ??= null;
+  session.splitInto ??= [];
+  session.splitFrom ??= null;
+  session.splitBrief ??= null;
+  session.splitKickoffPending ??= false;
   return session;
 }
 
@@ -118,6 +124,8 @@ export async function createSession(input: {
   sessionKey?: string;
   appId: string;
   sourceMeeting?: SessionMeetingSource | null;
+  splitFrom?: SessionSplitOrigin | null;
+  splitBrief?: string | null;
 }): Promise<SessionRecord> {
   const now = new Date().toISOString();
   const sessionKey = input.sessionKey?.trim() || slugify(input.title);
@@ -134,6 +142,7 @@ export async function createSession(input: {
     branch: null,
     codingApprovedAt: null,
     codingPlan: null,
+    codingTeam: null,
     qaReportPath: null,
     qaStatus: null,
     coordinatorEnabled: false,
@@ -144,7 +153,14 @@ export async function createSession(input: {
     planRelayPending: false,
     codingReconciliationPending: false,
     sourceMeeting: input.sourceMeeting ?? null,
-    meetingKickoffPending: Boolean(input.sourceMeeting),
+    // A split child carries its meeting transcript along with its brief in
+    // one kickoff (see routes/requirements.ts), not a separate meeting one.
+    meetingKickoffPending: Boolean(input.sourceMeeting) && !input.splitBrief,
+    splitProposal: null,
+    splitInto: [],
+    splitFrom: input.splitFrom ?? null,
+    splitBrief: input.splitBrief ?? null,
+    splitKickoffPending: Boolean(input.splitBrief),
     transcripts: { requirements: [], plan: [], coding: [], qa: [] },
     histories: { requirements: [], plan: [], coding: [], qa: [] },
     claudeSessionIds: { requirements: null, plan: null, coding: null, qa: null },
@@ -204,5 +220,30 @@ export async function appendTranscriptEntry(
     session.transcripts[stage].push(full);
     await saveSession(session);
     return full;
+  });
+}
+
+// Read-modify-write under the session's lock, for changes that depend on
+// the current value (e.g. one team member's step status inside the shared
+// codingPlan) — updateSession's plain patch would let two concurrent team
+// members overwrite each other's change.
+export async function mutateSession(id: string, fn: (session: SessionRecord) => void): Promise<SessionRecord> {
+  return withLock(id, async () => {
+    const session = await readSession(id);
+    if (!session) throw new Error(`Session ${id} not found`);
+    fn(session);
+    await saveSession(session);
+    return session;
+  });
+}
+
+export async function appendTeamTranscriptEntry(
+  id: string,
+  memberId: string,
+  entry: Omit<TranscriptEntry, 'id' | 'timestamp'>
+): Promise<void> {
+  await mutateSession(id, (session) => {
+    const member = session.codingTeam?.members.find((m) => m.id === memberId);
+    member?.transcript.push({ ...entry, id: uuidv4(), timestamp: new Date().toISOString() });
   });
 }

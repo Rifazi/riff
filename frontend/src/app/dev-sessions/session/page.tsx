@@ -61,7 +61,7 @@ function SessionView() {
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono">{session.sessionKey}</span>
           <Pill>{session.appName}</Pill>
-          <Pill tone={session.stage === 'abandoned' ? 'red' : session.stage === 'done' ? 'green' : 'blue'}>
+          <Pill tone={session.stage === 'abandoned' ? 'red' : session.stage === 'done' ? 'green' : session.stage === 'split' ? 'neutral' : 'blue'}>
             {STAGE_LABEL[session.stage] ?? session.stage}
           </Pill>
           {session.sourceMeeting && (

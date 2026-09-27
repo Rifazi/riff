@@ -13,8 +13,9 @@ export const gitCreateBranchSchema = z.object({
   ),
 });
 export const gitCreateBranchDescription =
-  'Create and check out this session\'s feature branch off a clean master. Call this once, at the start of ' +
-  'the coding stage, before any file writes. Fails if master is not clean or the branch already exists.';
+  'Create and check out this session\'s feature branch off the app\'s clean base branch (master or main). Call this ' +
+  'once, at the start of the coding stage, before any file writes. Fails if the base branch is not clean or the ' +
+  'branch already exists.';
 
 export const gitCommitSchema = z.object({
   branchName: z.string().describe('Must match the branch created by git_create_branch'),
@@ -30,9 +31,9 @@ export const gitCommitDescription =
  * agent has — no push, merge, rebase, or checkout-off-branch tool exists at
  * all, so those actions are structurally unavailable, not just discouraged.
  */
-export function createGitExecutors(deps: { repoRoot: string; onBranchCreated: (branchName: string) => Promise<void> }) {
+export function createGitExecutors(deps: { repoRoot: string; baseBranch?: string; onBranchCreated: (branchName: string) => Promise<void> }) {
   const gitCreateBranchExecute = async ({ branchName }: z.infer<typeof gitCreateBranchSchema>): Promise<string> => {
-    await createBranch(deps.repoRoot, branchName);
+    await createBranch(deps.repoRoot, branchName, deps.baseBranch);
     await deps.onBranchCreated(branchName);
     return `Created and checked out branch ${branchName}.`;
   };
@@ -50,7 +51,7 @@ export function createGitExecutors(deps: { repoRoot: string; onBranchCreated: (b
   return { gitCreateBranchExecute, gitCommitExecute };
 }
 
-export function createGitTools(deps: { repoRoot: string; onBranchCreated: (branchName: string) => Promise<void> }) {
+export function createGitTools(deps: { repoRoot: string; baseBranch?: string; onBranchCreated: (branchName: string) => Promise<void> }) {
   const { gitCreateBranchExecute, gitCommitExecute } = createGitExecutors(deps);
   return {
     gitCreateBranchTool: tool({

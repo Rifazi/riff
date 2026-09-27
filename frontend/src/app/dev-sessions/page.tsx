@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FolderGit2, Loader2, NotebookPen, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronRight, FolderGit2, GitFork, Loader2, NotebookPen, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/dev-sessions/api';
@@ -18,6 +18,7 @@ import { AppPicker } from '@/components/DevSessions/AppPicker';
 function stageTone(session: SessionRecord) {
   if (session.stage === 'done') return 'green' as const;
   if (session.stage === 'abandoned') return 'red' as const;
+  if (session.stage === 'split') return 'neutral' as const;
   if (session.stage.endsWith('approved') || session.stage === 'coding-review' || session.stage === 'qa-reviewed') return 'amber' as const;
   return 'blue' as const;
 }
@@ -132,6 +133,12 @@ export default function DevSessionsPage() {
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                       <span className="font-mono">{session.sessionKey}</span>
                       <Pill>{session.appName}</Pill>
+                      {session.splitFrom && (
+                        <Pill title={`Split from "${session.splitFrom.title}"`}>
+                          <GitFork className="w-3 h-3" />
+                          {session.splitFrom.sessionKey}
+                        </Pill>
+                      )}
                       {session.sourceMeeting && (
                         <Pill tone="blue" title="Started from a meeting transcript">
                           <NotebookPen className="w-3 h-3" />

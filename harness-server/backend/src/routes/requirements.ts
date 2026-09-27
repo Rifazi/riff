@@ -4,11 +4,14 @@ import matter from 'gray-matter';
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
 import { config } from '../config.js';
-import { getSession, updateSession } from '../sessions/session-store.js';
+import { v4 as uuidv4 } from 'uuid';
+import { createSession, getSession, updateSession } from '../sessions/session-store.js';
+import { isSessionKeyInUse } from '../sessions/session-keys.js';
+import type { SessionRecord, SplitProposal } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
 import { runRequirementsAgentTurn } from '../agents/requirements-agent.js';
 import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
-import { readMeetingSourceAttachment } from '../sessions/meeting-source.js';
+import { copyMeetingSource, readMeetingSourceAttachment } from '../sessions/meeting-source.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 
 export async function registerRequirementsRoutes(app: FastifyInstance): Promise<void> {
@@ -18,6 +21,9 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
     async (request, reply) => {
       const session = await getSession(request.params.id);
       if (!session) return reply.code(404).send({ error: 'session not found' });
+      if (session.stage === 'split') {
+        return reply.code(400).send({ error: 'this feature was split into separate sessions — continue in those instead' });
+      }
       const { message, attachments: rawAttachments } = request.body ?? {};
       if (!message || !message.trim()) return reply.code(400).send({ error: 'message is required' });
 
@@ -54,6 +60,23 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
         }
         await updateSession(session.id, { meetingKickoffPending: false });
         session.meetingKickoffPending = false;
+      }
+
+      // A session created by accepting a split: its first message carries
+      // the part's brief, plus the original meeting transcript if the parent
+      // had one (the child's own meeting kickoff is folded into this one).
+      if (session.splitKickoffPending && session.splitBrief) {
+        const kickoff = [{ name: `split-brief-${session.sessionKey}.md`, text: session.splitBrief }];
+        if (session.sourceMeeting) {
+          try {
+            kickoff.push(await readMeetingSourceAttachment(session.sourceMeeting));
+          } catch {
+            // transcript copy missing — the brief alone is still a usable start
+          }
+        }
+        attachments = [...kickoff, ...attachments];
+        await updateSession(session.id, { splitKickoffPending: false });
+        session.splitKickoffPending = false;
       }
 
             startEventStream(reply);
@@ -177,6 +200,8 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
     const updatedSession = await updateSession(session.id, {
       requirementsStatus: 'approved',
       stage: 'requirements-approved',
+      // Approving a single doc is the human keeping the feature as one.
+      splitProposal: null,
       // A revision that got here via a mid-coding send-back needs the plan
       // to reconcile against it too before coding resumes — flag Plan to
       // auto-relay the note the moment it's reached.
@@ -203,4 +228,121 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
       stage: 'abandoned',
     });
   });
+
+  // Human-only: the agent's propose_split only records a proposal. This is
+  // what actually creates one child session per part and retires the
+  // parent — same "the model cannot act on its own proposal" rule as the
+  // approve endpoints.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/requirements/split/accept', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (session.stage === 'split') return reply.code(400).send({ error: 'this session has already been split' });
+    const proposal = session.splitProposal;
+    if (!proposal) return reply.code(400).send({ error: 'there is no split proposal to accept' });
+    if (session.stage !== 'requirements-in-progress' || session.branch) {
+      return reply.code(400).send({ error: 'only a session still in requirements, with no coding started, can be split' });
+    }
+
+    let parentDoc: string | null = null;
+    if (session.requirementsPath) {
+      try {
+        parentDoc = matter(await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8')).content.trim();
+      } catch {
+        // doc deleted outside the app — children start from their briefs alone
+      }
+    }
+
+    const ids = proposal.parts.map(() => uuidv4());
+    const keys: string[] = [];
+    for (const part of proposal.parts) {
+      let key = part.sessionKey;
+      for (let n = 2; keys.includes(key) || (await isSessionKeyInUse(key)); n++) key = `${part.sessionKey}-${n}`;
+      keys.push(key);
+    }
+
+    const children: SessionRecord[] = [];
+    for (const [i, part] of proposal.parts.entries()) {
+      const sourceMeeting = session.sourceMeeting ? await copyMeetingSource(session.sourceMeeting, ids[i]) : null;
+      children.push(
+        await createSession({
+          id: ids[i],
+          title: part.title,
+          sessionKey: keys[i],
+          appId: session.appId,
+          sourceMeeting,
+          splitFrom: {
+            sessionId: session.id,
+            sessionKey: session.sessionKey,
+            title: session.title,
+            dependsOnSessionIds: part.dependsOn.map((d) => ids[d]),
+          },
+          splitBrief: buildSplitBrief(session, proposal, i, keys, parentDoc),
+        })
+      );
+    }
+
+    if (session.requirementsPath) {
+      try {
+        const filePath = path.join(config.harnessRoot, session.requirementsPath);
+        const raw = await fs.readFile(filePath, 'utf8');
+        await fs.writeFile(filePath, raw.replace(/^status:\s*\S+/m, 'status: superseded'), 'utf8');
+      } catch {
+        // nothing on disk to mark
+      }
+    }
+
+    const parent = await updateSession(session.id, {
+      stage: 'split',
+      splitInto: ids,
+      requirementsStatus: session.requirementsPath ? 'superseded' : session.requirementsStatus,
+    });
+    return { parent, children };
+  });
+
+  // Human-only: keep the feature as one. The UI follows this with a chat
+  // message so the agent knows to carry on with a single doc.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/requirements/split/dismiss', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    return updateSession(session.id, { splitProposal: null });
+  });
+}
+
+// Everything a child's requirements agent gets to start from — it never
+// sees the parent's conversation, so the part's own brief is restated
+// alongside where it sits in the whole.
+function buildSplitBrief(
+  parent: SessionRecord,
+  proposal: SplitProposal,
+  index: number,
+  keys: string[],
+  parentDoc: string | null
+): string {
+  const part = proposal.parts[index];
+  const others = proposal.parts
+    .map((p, i) => {
+      if (i === index) return `- **${p.title}** (${keys[i]}) — this session`;
+      const deps = p.dependsOn.length ? ` — depends on ${p.dependsOn.map((d) => keys[d]).join(', ')}` : '';
+      return `- ${p.title} (${keys[i]})${deps}`;
+    })
+    .join('\n');
+  const many = part.dependsOn.length > 1;
+  const dependsOn = part.dependsOn.length
+    ? `\n\nThis part builds on ${part.dependsOn.map((d) => `"${proposal.parts[d].title}" (${keys[d]})`).join(', ')}, ` +
+      (many
+        ? 'each its own session — assume they exist, but keep their scope out of this doc.'
+        : 'which is its own session — assume it exists, but keep its scope out of this doc.')
+    : '';
+  return [
+    `# Split from "${parent.title}" (${parent.sessionKey})`,
+    `The original request was judged too big for one requirements doc and split into ${proposal.parts.length} sessions. ` +
+      `Why: ${proposal.rationale}`,
+    `## All parts\n\n${others}`,
+    `## This part: ${part.title}\n\n${part.brief}${dependsOn}`,
+    parentDoc
+      ? `## The parent's draft requirements (for context — only this part's slice belongs in your doc)\n\n${parentDoc}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

@@ -61,8 +61,20 @@ export function meetingKickoffMessage(session: SessionRecord): string {
     '1. Read the whole transcript and pull out the features, changes, problems and decisions that were discussed.',
     '2. Search the docs for related context before asking anything they already answer.',
     '3. Ask me about whatever is ambiguous, contradictory or missing — especially acceptance criteria and non-goals.',
-    '4. Then write the requirements document.',
+    '4. Then write the requirements document — or, if the meeting really covered several separate features, propose splitting them into separate sessions.',
     '',
     'The transcript is automatic speech-to-text without speaker labels, so names and technical terms may be mis-transcribed — confirm anything important rather than guessing. Cite the meeting in the document\'s Links section.',
+  ].join('\n');
+}
+
+// Opening message for a session created by accepting a split. The server
+// attaches the part's brief (and the meeting transcript, if any) to it.
+export function splitKickoffMessage(session: SessionRecord): string {
+  const parent = session.splitFrom;
+  const from = parent ? `"${parent.title}" (${parent.sessionKey})` : 'a larger feature';
+  return [
+    `This session is one part of ${from}, which was split because it was too big for one requirements doc. I've attached this part's brief${session.sourceMeeting ? ' and the original meeting transcript' : ''}.`,
+    '',
+    `Please write the requirements for this part only — "${session.title}". Keep the other parts' scope out, search the docs for context, and ask me about anything the brief leaves open before writing the document.`,
   ].join('\n');
 }

@@ -32,6 +32,8 @@ export function stageGroupFor(session: SessionRecord): StageGroup {
     case 'qa-reviewed':
     case 'done':
       return 'qa';
+    case 'split':
+      return 'requirements';
     case 'abandoned':
       // Rejected mid-flight — land on wherever it actually got to, not
       // always back at the start.
@@ -103,4 +105,5 @@ export const STAGE_LABEL: Record<string, string> = {
   'qa-reviewed': 'QA reviewed',
   done: 'Done',
   abandoned: 'Abandoned',
+  split: 'Split',
 };

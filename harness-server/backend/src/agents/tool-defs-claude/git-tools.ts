@@ -8,7 +8,7 @@ import {
 } from '../tool-defs/git-tools.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createGitToolsClaude(deps: { repoRoot: string; onBranchCreated: (branchName: string) => Promise<void> }) {
+export function createGitToolsClaude(deps: { repoRoot: string; baseBranch?: string; onBranchCreated: (branchName: string) => Promise<void> }) {
   const { gitCreateBranchExecute, gitCommitExecute } = createGitExecutors(deps);
   return {
     gitCreateBranchTool: tool(
