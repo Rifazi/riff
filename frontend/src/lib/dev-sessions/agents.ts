@@ -7,6 +7,8 @@ export interface AgentPersona {
   fullName: string;
   title: string;
   initials: string;
+  /** Tailwind gradient stops for the avatar; defaults to the blue→purple every single agent uses. */
+  gradient?: string;
 }
 
 // Purely cosmetic identities for the chat UI — give each role a face so the
@@ -54,6 +56,7 @@ export function teamMemberPersona(index: number, workstreamTitle: string): TeamP
     ...base,
     name: lap ? `${base.name} ${lap + 1}` : base.name,
     title: `Engineer · ${workstreamTitle}`,
+    gradient: base.color.avatar,
   };
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranch, GitCommit, Loader2, MessageSquare, Play, Undo2, Users } from 'lucide-react';
+import { GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
@@ -16,7 +16,7 @@ import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
-import { CodingTeamBoard } from '../CodingTeam';
+import { CodingTeamPanel } from '../CodingTeam';
 import { DiffViewer } from '../DiffViewer';
 import { ErrorText, Notice, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
@@ -74,7 +74,6 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       ? ('interrupted' as const)
       : codingTeam.status;
   const teamFinished = Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
-  const [view, setView] = useState<'team' | 'lead'>('team');
 
   // Watching a run started elsewhere (another window, or before a reload):
   // poll instead of streaming.
@@ -258,54 +257,20 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       chat={
         teamMode ? (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
-            <div className="flex-shrink-0 inline-flex self-start rounded-lg border border-gray-200 bg-white p-0.5 text-sm">
-              <button
-                type="button"
-                onClick={() => setView('team')}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1 ${view === 'team' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
-              >
-                <Users className="w-4 h-4" />
-                Team board
-                {teamActive && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setView('lead')}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1 ${view === 'lead' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:text-gray-900'}`}
-                title={teamFinished ? undefined : `${TEAM_LEAD_PERSONA.name} takes follow-ups once the team has finished`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                Chat with {TEAM_LEAD_PERSONA.name} (lead)
-              </button>
-            </div>
-            {view === 'team' ? (
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
-                <CodingTeamBoard
-                  workstreams={planDoc?.workstreams ?? []}
-                  members={codingTeam?.members ?? null}
-                  teamStatus={teamStatus}
-                  steps={plan ?? []}
-                  branch={session.branch}
-                  entriesFor={entriesFor}
-                  runningTools={team.runningTools}
-                  canStart={canStartTeam}
-                  starting={team.running}
-                  onStart={startTeam}
-                />
-                {teamFinished && (
-                  <Notice tone={teamStatus === 'done' ? 'green' : 'amber'}>
-                    {teamStatus === 'done'
-                      ? `Everyone's work is merged. Review the diff, then approve it — or ask ${TEAM_LEAD_PERSONA.name} for changes.`
-                      : `Not everything merged — resume the team to retry, or ask ${TEAM_LEAD_PERSONA.name} to finish it on the merged branch.`}{' '}
-                    <button type="button" className="font-medium underline" onClick={() => setView('lead')}>
-                      Chat with {TEAM_LEAD_PERSONA.name}
-                    </button>
-                  </Notice>
-                )}
-              </div>
-            ) : (
-              leadChat
-            )}
+            <CodingTeamPanel
+              workstreams={planDoc?.workstreams ?? []}
+              members={codingTeam?.members ?? null}
+              teamStatus={teamStatus}
+              teamFinished={teamFinished}
+              steps={plan ?? []}
+              branch={session.branch}
+              entriesFor={entriesFor}
+              runningTools={team.runningTools}
+              canStart={canStartTeam}
+              starting={team.running}
+              onStart={startTeam}
+              leadChat={leadChat}
+            />
             <ErrorText>{team.error ?? error}</ErrorText>
           </div>
         ) : (

@@ -1,13 +1,13 @@
 import { CheckCircle2, Circle, CircleDot } from 'lucide-react';
 import type { CodingPlanStep } from '@/lib/dev-sessions/types';
 
-export function CodingPlanChecklist({ steps }: { steps: CodingPlanStep[] }) {
+export function CodingPlanChecklist({ steps, title = 'Coding checklist' }: { steps: CodingPlanStep[]; title?: string }) {
   const doneCount = steps.filter((s) => s.status === 'done').length;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm font-semibold text-gray-900">Coding checklist</div>
+        <div className="text-sm font-semibold text-gray-900">{title}</div>
         <div className="text-xs text-gray-500">
           {doneCount} of {steps.length} step{steps.length === 1 ? '' : 's'} done
         </div>

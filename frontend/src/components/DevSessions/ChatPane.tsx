@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
@@ -10,8 +10,16 @@ import type { AgentPersona } from '@/lib/dev-sessions/agents';
 
 interface ChatPaneProps {
   entries: TranscriptEntry[];
-  onSend: (message: string, attachments?: AttachmentInput[]) => void;
+  /** Omitted for a read-only log (see readOnly). */
+  onSend?: (message: string, attachments?: AttachmentInput[]) => void;
   disabled: boolean;
+  /** A log to read, not a conversation: no composer, just readOnlyNote in its place. */
+  readOnly?: boolean;
+  readOnlyNote?: React.ReactNode;
+  /** Right-aligned controls in the header strip (status, expand…). */
+  headerActions?: React.ReactNode;
+  /** Extra classes for the outer card, e.g. to drop its border inside a dialog. */
+  className?: string;
   placeholder?: string;
   /** True while an agent turn is actively streaming — shows a live "working" indicator. */
   streaming?: boolean;
@@ -74,11 +82,11 @@ function summarizeToolInput(input: unknown): string | null {
   return null;
 }
 
-function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?: 'sm' | 'md' }) {
-  const dims = size === 'sm' ? 'w-6 h-6 text-[10px]' : 'w-9 h-9 text-xs';
+export function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?: 'xs' | 'sm' | 'md' }) {
+  const dims = size === 'xs' ? 'w-5 h-5 text-[9px]' : size === 'sm' ? 'w-6 h-6 text-[10px]' : 'w-9 h-9 text-xs';
   return (
     <div
-      className={`${dims} flex-shrink-0 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 text-white font-semibold flex items-center justify-center`}
+      className={`${dims} flex-shrink-0 rounded-full bg-gradient-to-br ${agent.gradient ?? 'from-blue-500 to-purple-500'} text-white font-semibold flex items-center justify-center`}
       title={agent.fullName}
     >
       {agent.initials}
@@ -86,10 +94,14 @@ function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?: 'sm' 
   );
 }
 
+const RESULT_PREVIEW_CHARS = 800;
+
 function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
   // Live SSE overlay entries (id "overlay-N", see useAgentTurnStream) open
   // by default so a running turn is visible; historical ones stay collapsed.
   const isLive = entry.id.startsWith('overlay-');
+  const [showFull, setShowFull] = useState(false);
+  const result = entry.toolResult !== undefined ? JSON.stringify(entry.toolResult) : null;
   const name = stripToolPrefix(entry.toolName);
   const summary = entry.role === 'tool_call' ? summarizeToolInput(entry.toolInput) : null;
 
@@ -111,7 +123,20 @@ function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
       </summary>
       <div className="px-2.5 pb-2 space-y-1 break-all whitespace-pre-wrap">
         {entry.toolInput !== undefined && <div>in: {JSON.stringify(entry.toolInput)}</div>}
-        {entry.toolResult !== undefined && <div>out: {JSON.stringify(entry.toolResult).slice(0, 800)}</div>}
+        {result !== null && (
+          <div>
+            out: {showFull ? result : result.slice(0, RESULT_PREVIEW_CHARS)}
+            {result.length > RESULT_PREVIEW_CHARS && (
+              <button
+                type="button"
+                onClick={() => setShowFull((v) => !v)}
+                className="ml-1 font-sans text-blue-600 hover:underline"
+              >
+                {showFull ? 'show less' : `… show full output (${result.length.toLocaleString()} chars)`}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </details>
   );
@@ -237,7 +262,20 @@ function QuestionBubble({
   );
 }
 
-export function ChatPane({ entries, onSend, disabled, placeholder, streaming, runningTool, agent, emptyHint }: ChatPaneProps) {
+export function ChatPane({
+  entries,
+  onSend,
+  disabled,
+  placeholder,
+  streaming,
+  runningTool,
+  agent,
+  emptyHint,
+  readOnly,
+  readOnlyNote,
+  headerActions,
+  className,
+}: ChatPaneProps) {
   const [draft, setDraft] = useState('');
   const [pendingFiles, setPendingFiles] = useState<AttachmentInput[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -287,7 +325,7 @@ export function ChatPane({ entries, onSend, disabled, placeholder, streaming, ru
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingKey]);
 
-  const canSend = !disabled && (draft.trim().length > 0 || pendingFiles.length > 0 || (batchOpen && answeredCount > 0));
+  const canSend = !readOnly && !disabled && (draft.trim().length > 0 || pendingFiles.length > 0 || (batchOpen && answeredCount > 0));
 
   const send = () => {
     if (!canSend) return;
@@ -301,7 +339,7 @@ export function ChatPane({ entries, onSend, disabled, placeholder, streaming, ru
           ? `See attached: ${pendingFiles[0].name}`
           : `See attached files: ${pendingFiles.map((f) => f.name).join(', ')}`);
     }
-    onSend(message, pendingFiles.length ? pendingFiles : undefined);
+    onSend?.(message, pendingFiles.length ? pendingFiles : undefined);
     setDraft('');
     setPendingFiles([]);
     setAnswers({});
@@ -331,15 +369,16 @@ export function ChatPane({ entries, onSend, disabled, placeholder, streaming, ru
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm">
+    <div className={`flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm ${className ?? ''}`}>
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
         <AgentAvatar agent={agent} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-gray-900" title={agent.fullName}>
             {agent.name}
           </div>
-          <div className="text-xs text-gray-500">{agent.title}</div>
+          <div className="text-xs text-gray-500 break-words">{agent.title}</div>
         </div>
+        {headerActions && <div className="flex items-center gap-2 flex-shrink-0">{headerActions}</div>}
       </div>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
@@ -416,6 +455,9 @@ export function ChatPane({ entries, onSend, disabled, placeholder, streaming, ru
         )}
       </div>
 
+      {readOnly ? (
+        readOnlyNote && <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-500">{readOnlyNote}</div>
+      ) : (
       <div className="flex-shrink-0 border-t border-gray-100 p-3 space-y-2">
         {batchOpen && (
           <div className="flex items-center gap-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
@@ -507,6 +549,7 @@ export function ChatPane({ entries, onSend, disabled, placeholder, streaming, ru
           </Button>
         </div>
       </div>
+      )}
     </div>
   );
 }
