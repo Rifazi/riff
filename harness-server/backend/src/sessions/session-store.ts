@@ -54,6 +54,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.sourceMeeting ??= null;
   session.meetingKickoffPending ??= false;
   session.codingTeam ??= null;
+  session.delivery ??= null;
   session.splitProposal ??= null;
   session.splitInto ??= [];
   session.splitFrom ??= null;
@@ -144,6 +145,7 @@ export async function createSession(input: {
     codingPlan: null,
     codingTeam: null,
     qaReportPath: null,
+    delivery: null,
     qaStatus: null,
     coordinatorEnabled: false,
     qaFindingsPending: false,

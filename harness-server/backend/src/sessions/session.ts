@@ -148,6 +148,9 @@ export interface SessionRecord {
   codingTeam: CodingTeamState | null;
 
   qaReportPath: string | null;
+  // How the reviewed branch was shipped (repo/delivery.ts): merged into the
+  // base branch for a local-only repo, or pushed with an MR/PR opened.
+  delivery: { kind: 'merged' | 'merge_request' | 'pushed'; target: string; url: string | null; detail: string; at: string } | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
   // Set when a QA report is sent back to Coding for fixes instead of being
   // marked reviewed — true until the next coding message is sent, at which

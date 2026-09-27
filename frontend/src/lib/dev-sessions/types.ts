@@ -132,6 +132,29 @@ export type TeamEvent =
   | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
   | { type: 'error'; message: string };
 
+export interface SessionDelivery {
+  kind: 'merged' | 'merge_request' | 'pushed';
+  target: string;
+  url: string | null;
+  detail: string;
+  at: string;
+}
+
+/** What shipping would do, detected server-side from the repo's remotes. */
+export type DeliveryPlan =
+  | { kind: 'merge'; branch: string; baseBranch: string; reason: string }
+  | {
+      kind: 'merge_request';
+      branch: string;
+      baseBranch: string;
+      remote: string;
+      remoteUrl: string;
+      host: 'github' | 'gitlab' | 'other';
+      webUrl: string | null;
+      via: 'gitlab-push-options' | 'gh' | 'push-only';
+      reason: string;
+    };
+
 export interface SessionRecord {
   id: string;
   sessionKey: string;
@@ -152,6 +175,7 @@ export interface SessionRecord {
   codingTeam: CodingTeamState | null;
 
   qaReportPath: string | null;
+  delivery: SessionDelivery | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
 
   coordinatorEnabled: boolean;

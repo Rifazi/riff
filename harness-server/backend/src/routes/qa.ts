@@ -7,6 +7,27 @@ import { getSession, updateSession } from '../sessions/session-store.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
+import matter from 'gray-matter';
+import { getApp } from '../apps/apps-store.js';
+import { baseBranchFor } from '../apps/apps.js';
+import { deliver, detectDelivery } from '../repo/delivery.js';
+import { resolveBaseBranch } from '../repo/git.js';
+import type { SessionRecord } from '../sessions/session.js';
+
+async function deliveryText(session: SessionRecord): Promise<{ title: string; description: string }> {
+  let qa = '';
+  if (session.qaReportPath) {
+    try {
+      const parsed = matter(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'));
+      const d = parsed.data as Record<string, unknown>;
+      qa = `QA: ${d.result ?? '?'} (lint ${d.lint ?? '?'}, unit tests ${d['unit-tests'] ?? '?'}, integration ${d['integration-tests'] ?? '?'})\n\n${parsed.content.trim()}`;
+    } catch {
+      // report unreadable — ship without it
+    }
+  }
+  const description = `${session.title} (${session.sessionKey}), built with Riff Dev Sessions.\n\n${qa}`.slice(0, 60_000);
+  return { title: `${session.sessionKey}: ${session.title}`, description };
+}
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -76,9 +97,8 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Human-only. Reaching "done" here never pushes, merges, or opens an MR —
-  // it just marks the session complete with the branch/report surfaced for
-  // the developer to act on manually.
+  // Human-only. Reaching "done" never pushes, merges, or opens an MR by
+  // itself — that's the separate, explicitly-clicked /delivery below.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
@@ -92,6 +112,41 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     await fs.writeFile(filePath, updated, 'utf8');
 
     return updateSession(session.id, { qaStatus: 'reviewed', stage: 'done' });
+  });
+
+  // What shipping this branch would do, worked out from the repo (see
+  // repo/delivery.ts). Read-only.
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/delivery', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (!session.branch) return reply.code(400).send({ error: 'no branch to deliver yet' });
+    const app = await getApp(session.appId);
+    try {
+      return await detectDelivery(app.repoRoot, session.branch, await resolveBaseBranch(app.repoRoot, baseBranchFor(app)));
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Human-only: merges the reviewed branch into the base branch (local
+  // repo) or pushes it and opens an MR/PR (repo with a remote). Only after
+  // QA is marked reviewed — no agent tool reaches this.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/delivery', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (!session.branch) return reply.code(400).send({ error: 'no branch to deliver yet' });
+    if (session.qaStatus !== 'reviewed') return reply.code(400).send({ error: 'mark QA reviewed before shipping' });
+    if (session.delivery && session.delivery.kind !== 'pushed') {
+      return reply.code(400).send({ error: `already delivered: ${session.delivery.detail}` });
+    }
+    const app = await getApp(session.appId);
+    try {
+      const plan = await detectDelivery(app.repoRoot, session.branch, await resolveBaseBranch(app.repoRoot, baseBranchFor(app)));
+      const result = await deliver(app.repoRoot, plan, await deliveryText(session));
+      return updateSession(session.id, { delivery: result });
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // Human-only. Branch and report are left in place for manual follow-up —

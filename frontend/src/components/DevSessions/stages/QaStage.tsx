@@ -3,8 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, ExternalLink, Loader2, Wrench } from 'lucide-react';
-import { toast } from 'sonner';
+import { Loader2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
@@ -12,7 +11,7 @@ import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
-import { ExternalAnchor } from '../ExternalAnchor';
+import { DeliveryPanel } from '../DeliveryPanel';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
@@ -42,8 +41,6 @@ export function QaStage({ session }: { session: SessionRecord }) {
     queryKey: ['qa-report', sessionId, session.qaReportPath],
     queryFn: () => api.getQaReport(sessionId),
   });
-  const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps, staleTime: Infinity });
-  const repoUrl = apps?.find((a) => a.id === session.appId)?.repoUrl ?? null;
 
   const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
   const kickedOff = useRef(false);
@@ -90,7 +87,6 @@ export function QaStage({ session }: { session: SessionRecord }) {
   const entries = streaming ? [...session.transcripts.qa, ...overlay] : session.transcripts.qa;
   const reviewed = session.qaStatus === 'reviewed';
   const markdown = report?.markdown ?? null;
-  const pushCommand = session.branch ? `git push -u origin ${session.branch}` : null;
 
   return (
     <StageLayout
@@ -156,38 +152,8 @@ export function QaStage({ session }: { session: SessionRecord }) {
                 rejectDisabled={reviewed || streaming}
                 rejectBusy={rejectMutation.isPending}
               />
-              {session.stage === 'done' && pushCommand && (
-                <div className="mt-3 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 space-y-2">
-                  <div>
-                    Done. Nothing was pushed or merged automatically — review <code>{session.branch}</code> and push it
-                    yourself when ready:
-                  </div>
-                  <pre className="bg-white border border-green-200 rounded px-2 py-1 text-xs font-mono text-gray-800">{pushCommand}</pre>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="bg-white"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(pushCommand);
-                        toast.success('Push command copied');
-                      }}
-                    >
-                      <Copy />
-                      Copy push command
-                    </Button>
-                    {repoUrl && (
-                      <Button size="sm" variant="outline" className="bg-white" asChild>
-                        <ExternalAnchor
-                          href={`${repoUrl}/-/merge_requests/new?merge_request%5Bsource_branch%5D=${encodeURIComponent(session.branch!)}`}
-                        >
-                          <ExternalLink />
-                          Open merge request
-                        </ExternalAnchor>
-                      </Button>
-                    )}
-                  </div>
-                </div>
+              {reviewed && session.branch && (
+                <DeliveryPanel session={session} qaResult={markdown ? parseFrontmatterField(markdown, 'result') : null} />
               )}
             </>
           }

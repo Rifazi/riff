@@ -4,6 +4,7 @@ import type {
   AppWriteResult,
   CheckCommands,
   CreateJiraTicketsResult,
+  DeliveryPlan,
   Integration,
   JiraSettingsFields,
   MeetingSourceInput,
@@ -151,6 +152,10 @@ export const api = {
 
   createJiraTickets: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/plan/jira/create`), { method: 'POST' }).then((r) => json<CreateJiraTicketsResult>(r)),
+
+  getDeliveryPlan: (id: string) => fetch(apiUrl(`/api/sessions/${id}/delivery`)).then((r) => json<DeliveryPlan>(r)),
+
+  deliver: (id: string) => fetch(apiUrl(`/api/sessions/${id}/delivery`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
   getTeamStatus: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/team`)).then((r) => json<{ running: boolean }>(r)),

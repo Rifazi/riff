@@ -383,10 +383,17 @@ exist standalone).
   you explicitly Approve, so giving feedback and continuing the
   conversation already does this; a dedicated button would just wrap
   "type in the box."
-- No auto-push / auto-MR — by design, per the original spec. The Done
-  screen has a copy-to-clipboard push command and a GitLab new-MR link
-  (built from the target repo's own `package.json` `repository.url`), both
-  human-triggered only.
+- No agent can push, merge or open an MR. Delivery (`repo/delivery.ts`,
+  `GET/POST /api/sessions/:id/delivery`) is a human click on the QA tab,
+  only once QA is marked reviewed. It detects the repo shape itself: no
+  remote → `--no-ff` merge into the trunk locally, leaving the trunk
+  checked out for the next session. A remote → push, then open the MR: via
+  GitLab push options (`merge_request.create`, no CLI needed), via `gh pr
+  create` for GitHub when gh is logged in, else push-only plus a link. The
+  trunk is resolved live by `resolveBaseBranch`: `main` if it exists
+  locally or on a remote, else `master`, else the app's stored base
+  branch. git/gh run with prompts disabled, so missing credentials fail
+  fast instead of hanging.
 - No cross-app anything — each session belongs to exactly one app, and
   nothing (docs search, git operations, artifacts) ever spans two apps in
   the same operation. Multi-app support (step 7) is about *which single

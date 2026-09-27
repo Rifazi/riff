@@ -128,14 +128,32 @@ async function headBranch(git: SimpleGit): Promise<string> {
   }
 }
 
-// Picks the branch the coding stage should branch off: master or main if
-// either exists (in that order, matching the old hardcoded default), else
-// whatever is checked out.
+// Picks the branch the coding stage should branch off: main if it exists,
+// else master, else whatever is checked out.
 async function detectBaseBranch(git: SimpleGit): Promise<string> {
   const branches = await git.branchLocal();
-  if (branches.all.includes('master')) return 'master';
   if (branches.all.includes('main')) return 'main';
+  if (branches.all.includes('master')) return 'master';
   return headBranch(git);
+}
+
+/**
+ * The trunk to merge into, looked up live rather than trusting the app's
+ * stored baseBranch (a repo can gain a main or be renamed after the app was
+ * added): main if it exists locally or on a remote, else master, else
+ * `fallback`. main wins when both exist.
+ */
+export async function resolveBaseBranch(repoRoot: string, fallback: string): Promise<string> {
+  const git = client(repoRoot);
+  const local = (await git.branchLocal()).all;
+  const remote = (await git.raw(['branch', '-r', '--format=%(refname:short)']).catch(() => ''))
+    .split('\n')
+    .map((b) => b.trim().replace(/^[^/]+\//, ''))
+    .filter(Boolean);
+  const all = new Set([...local, ...remote]);
+  if (all.has('main')) return 'main';
+  if (all.has('master')) return 'master';
+  return fallback;
 }
 
 /**
