@@ -87,13 +87,27 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   // codingApprovedAt is set, so this must not require qaReportPath to
   // exist. qaFindingsPending only gets set when there's an actual report to
   // relay; otherwise CodingStage just reopens with nothing auto-injected.
+  //
+  // Also undoes an earlier "Mark reviewed" (stage 'done') — the report goes
+  // back to pending-review so the branch can't be shipped until a fresh QA
+  // pass is reviewed. Refused once the branch has actually been merged or
+  // an MR opened, since fixes on the branch would no longer reach anything.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/send-back', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (session.delivery && session.delivery.kind !== 'pushed') {
+      return reply.code(400).send({ error: `already delivered: ${session.delivery.detail}` });
+    }
+    if (session.qaStatus === 'reviewed' && session.qaReportPath) {
+      const filePath = path.join(config.harnessRoot, session.qaReportPath);
+      const raw = await fs.readFile(filePath, 'utf8');
+      await fs.writeFile(filePath, raw.replace(/^status:\s*\S+/m, 'status: pending-review'), 'utf8');
+    }
     return updateSession(session.id, {
       codingApprovedAt: null,
       stage: 'coding-review',
       qaFindingsPending: Boolean(session.qaReportPath),
+      qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
     });
   });
 

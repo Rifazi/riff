@@ -157,6 +157,11 @@ export interface SessionRecord {
   // point CodingStage has relayed the findings and this clears itself.
   qaFindingsPending: boolean;
 
+  // Set when coding is re-approved after a send-back and QA already has a
+  // conversation — QaStage (or the coordinator) sends a re-review message
+  // instead of waiting for an empty transcript, and the next QA turn clears it.
+  qaRerunPending: boolean;
+
   // Opt-in, per-session: when true, an SSE run against
   // /coordinator/run drives a stage's conversation forward automatically
   // (composing follow-up messages, deciding when a stage looks ready) and

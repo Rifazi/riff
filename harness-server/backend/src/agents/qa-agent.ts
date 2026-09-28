@@ -53,6 +53,10 @@ export async function runQaAgentTurn(
   const branch = session.branch;
   const requirementsPath = session.requirementsPath;
 
+  if (session.qaRerunPending) {
+    await updateSession(session.id, { qaRerunPending: false });
+    session.qaRerunPending = false;
+  }
   await appendTranscriptEntry(session.id, 'qa', { role: 'user', text: userMessage });
   const prompt = await applyAttachments(session.id, 'qa', userMessage, attachments);
 

@@ -26,6 +26,10 @@ const KICKOFF_MESSAGE: Partial<Record<StageGroup, string>> = {
   qa: 'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.',
 };
 
+// Keep in sync with QA_RERUN_MESSAGE in QaStage.tsx.
+const QA_RERUN_MESSAGE =
+  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
+
 const RUN_TURN: Record<StageGroup, (session: SessionRecord, message: string, onEvent: (e: AgentEvent) => void) => Promise<SessionRecord>> = {
   requirements: runRequirementsAgentTurn,
   plan: runPlanAgentTurn,
@@ -97,7 +101,9 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
         }
 
         let message: string;
-        if (transcript.length === 0) {
+        if (group === 'qa' && session.qaRerunPending) {
+          message = QA_RERUN_MESSAGE;
+        } else if (transcript.length === 0) {
           const kickoff = KICKOFF_MESSAGE[group];
           if (!kickoff) {
             // requirements: nothing to continue from — the coordinator

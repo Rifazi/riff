@@ -127,6 +127,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     return updateSession(session.id, {
       stage: 'qa-in-progress',
       codingApprovedAt: new Date().toISOString(),
+      qaRerunPending: session.transcripts.qa.length > 0,
     });
   });
 

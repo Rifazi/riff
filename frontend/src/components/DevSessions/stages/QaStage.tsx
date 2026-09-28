@@ -19,6 +19,12 @@ import { ErrorText, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.qa;
+const QA_KICKOFF_MESSAGE =
+  'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.';
+// Sent instead when coding was re-approved after a send-back. Keep in sync
+// with QA_RERUN_MESSAGE in harness-server's routes/coordinator.ts.
+const QA_RERUN_MESSAGE =
+  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
 
 function parseFrontmatterField(markdown: string, field: string): string | null {
   const match = new RegExp(`^${field}:\\s*(.+)$`, 'm').exec(markdown);
@@ -43,7 +49,10 @@ export function QaStage({ session }: { session: SessionRecord }) {
   });
 
   const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
-  const kickedOff = useRef(false);
+  // Which coding approval QA was last kicked off for — a send-back and
+  // re-approval gives a new codingApprovedAt, so a second pass can start
+  // even if this component never unmounted.
+  const kickedOff = useRef<string | null>(null);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
@@ -71,21 +80,23 @@ export function QaStage({ session }: { session: SessionRecord }) {
 
   useEffect(() => {
     if (session.stage !== 'qa-in-progress') return;
-    if (session.transcripts.qa.length > 0) return;
-    if (kickedOff.current) return;
-    kickedOff.current = true;
+    const rerun = session.qaRerunPending;
+    if (!rerun && session.transcripts.qa.length > 0) return;
+    const approvalKey = session.codingApprovedAt ?? '';
+    if (kickedOff.current === approvalKey) return;
+    kickedOff.current = approvalKey;
     if (session.coordinatorEnabled) {
       void runCoordinator(sessionId, refresh);
     } else {
-      void handleSend(
-        'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.'
-      );
+      void handleSend(rerun ? QA_RERUN_MESSAGE : QA_KICKOFF_MESSAGE);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.stage]);
+  }, [session.id, session.stage, session.qaRerunPending, session.codingApprovedAt]);
 
   const entries = streaming ? [...session.transcripts.qa, ...overlay] : session.transcripts.qa;
   const reviewed = session.qaStatus === 'reviewed';
+  // Once merged or an MR is open, fixes on the branch no longer reach anything.
+  const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed');
   const markdown = report?.markdown ?? null;
 
   return (
@@ -125,7 +136,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
           }
           footer={
             <>
-              {!reviewed && (
+              {!delivered && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -133,7 +144,9 @@ export function QaStage({ session }: { session: SessionRecord }) {
                   onClick={() => sendBackMutation.mutate()}
                   disabled={streaming || sendBackMutation.isPending}
                   title={
-                    session.qaReportPath
+                    reviewed
+                      ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+                      : session.qaReportPath
                       ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
                       : `Reopen Coding without a QA report — e.g. if ${AGENT.name} was interrupted before reviewing anything.`
                   }

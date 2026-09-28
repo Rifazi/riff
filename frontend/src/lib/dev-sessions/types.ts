@@ -180,6 +180,7 @@ export interface SessionRecord {
 
   coordinatorEnabled: boolean;
   qaFindingsPending: boolean;
+  qaRerunPending: boolean;
 
   reopenedFromCoding: boolean;
   pendingRequirementsRelayNote: string | null;
