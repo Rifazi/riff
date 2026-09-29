@@ -160,10 +160,13 @@ rely on it.
      ### 2. <title>
      ...
      ```
-   - `steps`: the same steps as a minimal `{id, title}` list, **in the same
-     dependency-respecting order** — the coding agent's checklist is seeded
-     verbatim from this, so keep `id` short and stable and `title` matching
-     the step's heading above.
+   - `steps`: the same steps as a minimal `{id, title, effort}` list, **in the
+     same dependency-respecting order** — the coding agent's checklist is
+     seeded verbatim from this, so keep `id` short and stable and `title`
+     matching the step's heading above. Set `effort: "light"` only on steps
+     that are mechanical and fully specified by the plan (see the tool's
+     description); those run on a cheaper model. Everything else is
+     `"standard"`.
    - `workstreams` (optional — only if step 6 found real parallelism): the
      steps grouped into workstreams, each with the paths it alone owns and
      the workstreams it waits for. Also add a short `## Coding team` section

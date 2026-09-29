@@ -23,7 +23,7 @@ export const WRITE_ALLOWED_ROOTS = ['.'];
 // protects the AI-SDK engine (anthropic/openai/google), which has no
 // equivalent built-in guard of its own and would otherwise just blow
 // straight through context/cost on a huge file.
-const DEFAULT_LINE_LIMIT = 2000;
+const DEFAULT_LINE_LIMIT = 600;
 
 export const readFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/adapters/primary/foo/foo.ts'),
@@ -33,16 +33,17 @@ export const readFileSchema = z.object({
 export const readFileDescription =
   'Read a file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own runtime ' +
   `state). Files over ${DEFAULT_LINE_LIMIT} lines are truncated to the first ${DEFAULT_LINE_LIMIT} unless you pass ` +
-  'offset and/or limit — use those to page through the rest (e.g. offset: 2001) for large generated files like ' +
-  'CDK snapshot tests or lockfiles.';
+  `offset and/or limit — use those to page through the rest (e.g. offset: ${DEFAULT_LINE_LIMIT + 1}). For a large file, ` +
+  'search_code for the part you need first, then read just that range.';
 
 export const writeFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/schemas/acme-inventory.schema.json'),
   content: z.string(),
 });
 export const writeFileDescription =
-  'Create or overwrite a file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the ' +
-  "harness's own runtime state). Use edit_file for small changes to existing files.";
+  'Create a new file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own ' +
+  'runtime state), or replace most of an existing one. To change part of an existing file, use edit_file ' +
+  'instead — rewriting the whole file costs far more.';
 
 export const editFileSchema = z.object({
   path: z.string(),
@@ -99,9 +100,15 @@ export function createFileExecutors(deps: FileToolDeps) {
 
   const writeFileExecute = async ({ path: requestedPath, content }: z.infer<typeof writeFileSchema>): Promise<string> => {
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
+    const existed = await fs
+      .stat(absolute)
+      .then(() => true)
+      .catch(() => false);
     await fs.mkdir(path.dirname(absolute), { recursive: true });
     await fs.writeFile(absolute, content, 'utf8');
-    return `Wrote ${requestedPath}`;
+    return existed
+      ? `Wrote ${requestedPath} (replaced the existing file — for partial changes to existing files, edit_file is much cheaper)`
+      : `Wrote ${requestedPath}`;
   };
 
   const editFileExecute = async ({ path: requestedPath, oldText, newText }: z.infer<typeof editFileSchema>): Promise<string> => {

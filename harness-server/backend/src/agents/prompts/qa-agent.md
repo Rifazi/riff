@@ -42,22 +42,30 @@ rely on it.
    - `result`: `"pass"` if lint, unit tests, and every acceptance criterion
      are satisfied; `"fail"` if any of those are not; `"pass-with-notes"` if
      everything required passes but you have non-blocking observations.
-   - A markdown body following this structure:
+   - `blockingFindings`: one line per thing the coding agent must fix —
+     file (and line if known), what's wrong, what to do. This list is what
+     gets sent back to the coding agent, so make each entry actionable on
+     its own. Empty when nothing blocks.
+   - A markdown body following this structure. Keep it short — the human
+     skims it and every word costs tokens:
 
    ```markdown
    # QA report — <feature title>
 
    ## Summary
-   ...
+   (at most 3 sentences)
 
    ## Acceptance criteria check
-   - [x] ... — verified in src/...
-   - [ ] ... — NOT MET: ...
+   - [x] <criterion> — src/...            (one line, no explanation)
+   - [ ] <criterion> — NOT MET: <why, one or two sentences>
 
    ## Findings
    - [blocking] ...
-   - [nit] ...
+   - [nit] ...                            (at most 3 nits)
    ```
+
+   Never paste command output, diffs or code into the report — name the
+   file and failing test instead.
 
 # What NOT to do
 

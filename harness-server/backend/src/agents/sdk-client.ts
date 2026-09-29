@@ -31,6 +31,26 @@ export async function testProviderCredential(provider: ApiKeyProvider, apiKey: s
   await generateText({ model: languageModel, prompt: 'Reply with just "ok".', maxOutputTokens: 5 });
 }
 
+// Tokens for one agent turn, summed across its continuation hops. `input`
+// is uncached input only, so the four fields add up to the whole bill.
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export const ZERO_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+  };
+}
+
 export type AgentEvent =
   | { type: 'assistant_text'; text: string }
   | { type: 'tool_call'; toolCallId: string; name: string; input: unknown }
@@ -38,7 +58,8 @@ export type AgentEvent =
   | { type: 'done'; text: string; isError: boolean }
   | { type: 'error'; message: string }
   | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
-  | { type: 'continuation'; hop: number; maxHops: number };
+  | { type: 'continuation'; hop: number; maxHops: number }
+  | { type: 'usage'; usage: TokenUsage };
 
 // Bounds automatic continuation (see runAgentTurn/runClaudeAgentTurn below):
 // when a turn is cut off purely because it hit its own per-call step/turn
@@ -67,6 +88,7 @@ export interface RunAgentTurnResult {
   updatedHistory: ModelMessage[];
   resultText: string;
   isError: boolean;
+  usage: TokenUsage;
 }
 
 interface RunAgentTurnOnceResult extends RunAgentTurnResult {
@@ -94,11 +116,22 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
   try {
     const languageModel = resolveLanguageModel(provider, model, apiKey);
 
+    // Anthropic only caches what's marked: the system prompt (with the
+    // tools ahead of it) and the prior-turn history. Without this, every
+    // step of every turn re-bills all of it at the full input rate. The
+    // Claude-login engine gets this from Claude Code already.
+    const cache = provider === 'anthropic' ? { anthropic: { cacheControl: { type: 'ephemeral' as const } } } : undefined;
+    const messages: ModelMessage[] = [...history, { role: 'user', content: prompt }];
+    if (cache && history.length > 0) {
+      const last = history.length - 1;
+      messages[last] = { ...messages[last], providerOptions: { ...messages[last].providerOptions, ...cache } };
+    }
+
     const result = streamText({
       model: languageModel,
-      instructions: systemPrompt,
+      instructions: cache ? { role: 'system', content: systemPrompt, providerOptions: cache } : systemPrompt,
       tools,
-      messages: [...history, { role: 'user', content: prompt }],
+      messages,
       stopWhen: stepCountIs(20),
     });
 
@@ -145,13 +178,22 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     const responseMessages = await result.responseMessages;
     const updatedHistory: ModelMessage[] = [...history, { role: 'user', content: prompt }, ...responseMessages];
     const finishReason = await result.finishReason;
+    const total = await result.totalUsage;
+    const cacheRead = total.inputTokenDetails?.cacheReadTokens ?? 0;
+    const cacheWrite = total.inputTokenDetails?.cacheWriteTokens ?? 0;
+    const usage: TokenUsage = {
+      input: total.inputTokenDetails?.noCacheTokens ?? Math.max(0, (total.inputTokens ?? 0) - cacheRead - cacheWrite),
+      output: total.outputTokens ?? 0,
+      cacheRead,
+      cacheWrite,
+    };
 
     onEvent({ type: 'done', text: fullText, isError: sawError });
-    return { updatedHistory, resultText: fullText, isError: sawError, finishReason };
+    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { updatedHistory: history, resultText: message, isError: true, finishReason: null };
+    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE };
   }
 }
 
@@ -168,6 +210,7 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
   let currentHistory = params.history;
   let currentPrompt = params.prompt;
   let result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
+  let usage = result.usage;
 
   while (result.finishReason === 'tool-calls' && hop < MAX_CONTINUATION_HOPS) {
     hop += 1;
@@ -175,17 +218,20 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
     currentHistory = result.updatedHistory;
     currentPrompt = CONTINUATION_PROMPT;
     result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
+    usage = addUsage(usage, result.usage);
   }
+  onEvent({ type: 'usage', usage });
 
   if (result.finishReason === 'tool-calls' && hop >= MAX_CONTINUATION_HOPS) {
     return {
       updatedHistory: result.updatedHistory,
       resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
+      usage,
     };
   }
 
-  return { updatedHistory: result.updatedHistory, resultText: result.resultText, isError: result.isError };
+  return { updatedHistory: result.updatedHistory, resultText: result.resultText, isError: result.isError, usage };
 }
 
 // --- Claude subscription (OAuth login) engine ---------------------------
@@ -201,6 +247,18 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
 // message array.
 
 const CLAUDE_MCP_SERVER_NAME = 'harness-tools';
+
+// Left to its defaults, each query() boots a Claude Code instance with this
+// machine's whole setup — ~/.claude settings and plugins, skills, user and
+// claude.ai MCP connectors — none of which an agent here can call (tools
+// are [] and allowedTools names only harness-tools), but all of which can
+// ride along in context on every call. 'project' stays: the target repo's
+// own CLAUDE.md is real guidance for the agents working in it.
+const CLAUDE_ISOLATION = {
+  settingSources: ['project'] as ('user' | 'project' | 'local')[],
+  strictMcpConfig: true,
+  skills: [] as string[],
+};
 
 export interface RunClaudeAgentTurnParams {
   systemPrompt: string;
@@ -222,6 +280,7 @@ export interface RunClaudeAgentTurnResult {
   sdkSessionId: string | null;
   resultText: string;
   isError: boolean;
+  usage: TokenUsage;
 }
 
 interface RunClaudeAgentTurnOnceResult extends RunClaudeAgentTurnResult {
@@ -248,6 +307,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   let isError = false;
   let subtype: string | null = null;
   let gotResult = false;
+  let usage: TokenUsage = ZERO_USAGE;
 
   const stream = query({
     prompt,
@@ -261,6 +321,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       permissionPrompts: 'none',
+      ...CLAUDE_ISOLATION,
       ...(model ? { model } : {}),
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
     },
@@ -270,7 +331,17 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
     for await (const message of stream) {
       switch (message.type) {
         case 'system': {
-          if (message.subtype === 'init') sdkSessionId = message.session_id;
+          if (message.subtype === 'init') {
+            sdkSessionId = message.session_id;
+            // HARNESS_LOG_CONTEXT=1: log what fills the context window, e.g.
+            // to confirm CLAUDE_ISOLATION leaves only harness-tools loaded.
+            if (process.env.HARNESS_LOG_CONTEXT) {
+              stream
+                .getContextUsage({ detail: 'summary' })
+                .then((u) => console.log('[context]', JSON.stringify(u.categories.map((c) => [c.name, c.tokens]))))
+                .catch(() => {});
+            }
+          }
           break;
         }
         case 'assistant': {
@@ -304,6 +375,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
           isError = message.is_error;
           subtype = message.subtype;
           resultText = message.subtype === 'success' ? message.result : message.errors.join('\n');
+          // `usage`, not `modelUsage`/`total_cost_usd`: those carry a resumed
+          // session's earlier totals forward, this is just this query() call.
+          usage = {
+            input: message.usage.input_tokens ?? 0,
+            output: message.usage.output_tokens ?? 0,
+            cacheRead: message.usage.cache_read_input_tokens ?? 0,
+            cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
+          };
           gotResult = true;
           onEvent({ type: 'done', text: resultText, isError });
           break;
@@ -322,14 +401,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
     // turn into a raw, unretried error the human would see instead of the
     // continuation loop below picking it up).
     if (gotResult) {
-      return { sdkSessionId, resultText, isError, subtype };
+      return { sdkSessionId, resultText, isError, subtype, usage };
     }
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { sdkSessionId, resultText: message, isError: true, subtype: null };
+    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage };
   }
 
-  return { sdkSessionId, resultText, isError, subtype };
+  return { sdkSessionId, resultText, isError, subtype, usage };
 }
 
 /**
@@ -345,22 +424,26 @@ export async function runClaudeAgentTurn(params: RunClaudeAgentTurnParams): Prom
   const { onEvent } = params;
   let hop = 0;
   let result = await runClaudeAgentTurnOnce(params);
+  let usage = result.usage;
 
   while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < MAX_CONTINUATION_HOPS) {
     hop += 1;
     onEvent({ type: 'continuation', hop, maxHops: MAX_CONTINUATION_HOPS });
     result = await runClaudeAgentTurnOnce({ ...params, resumeSessionId: result.sdkSessionId, prompt: CONTINUATION_PROMPT });
+    usage = addUsage(usage, result.usage);
   }
+  onEvent({ type: 'usage', usage });
 
   if (result.subtype === 'error_max_turns' && hop >= MAX_CONTINUATION_HOPS) {
     return {
       sdkSessionId: result.sdkSessionId,
       resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
+      usage,
     };
   }
 
-  return { sdkSessionId: result.sdkSessionId, resultText: result.resultText, isError: result.isError };
+  return { sdkSessionId: result.sdkSessionId, resultText: result.resultText, isError: result.isError, usage };
 }
 
 /**
@@ -382,6 +465,7 @@ export async function runClaudeSingleShot(params: { systemPrompt: string; prompt
       systemPrompt: { type: 'custom', prompt: systemPrompt },
       tools: [],
       maxTurns: 1,
+      ...CLAUDE_ISOLATION,
       ...(model ? { model } : {}),
     },
   })) {
@@ -413,7 +497,7 @@ export async function testClaudeLogin(): Promise<void> {
 
   for await (const message of query({
     prompt: 'Reply with just "ok".',
-    options: { tools: [], maxTurns: 1 },
+    options: { tools: [], maxTurns: 1, ...CLAUDE_ISOLATION },
   })) {
     if (message.type !== 'result') continue;
     if (message.subtype !== 'success') {

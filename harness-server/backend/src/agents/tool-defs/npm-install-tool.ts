@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
+import { outputTail } from './qa-tools.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -69,19 +70,19 @@ export function createRunNpmInstallExecute(deps: { repoRoot: string }) {
       ...packages,
     ];
     try {
-      const { stdout, stderr } = await execFileAsync('npm', args, {
+      await execFileAsync('npm', args, {
         cwd: deps.repoRoot,
         timeout: 180_000,
         maxBuffer: 10_000_000,
       });
       const target = workspace ? ` into workspace "${workspace}"` : '';
-      return `Installed ${packages.join(', ')}${dev ? ' (devDependency)' : ''}${target}.\n\n${stdout.slice(-3000)}\n${stderr.slice(-1000)}`.trim();
+      return `Installed ${packages.join(', ')}${dev ? ' (devDependency)' : ''}${target}.`;
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
       const timedOut = e.killed ? ' (TIMED OUT)' : '';
       return (
         `npm install failed${timedOut} for ${packages.join(', ')}.\n\n` +
-        `${(e.stdout ?? '').slice(-3000)}\n${(e.stderr ?? e.message ?? '').slice(-2000)}`
+        outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')
       );
     }
   };

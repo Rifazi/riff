@@ -11,6 +11,13 @@ export const writeQaReportSchema = z.object({
   lint: z.enum(['pass', 'fail']),
   unitTests: z.enum(['pass', 'fail']),
   integrationTests: z.enum(['pass', 'fail', 'skipped', 'not-applicable']),
+  blockingFindings: z
+    .array(z.string())
+    .describe(
+      'One entry per thing the coding agent must fix: unmet acceptance criteria, failing checks, skipped ' +
+        '"Docs to update". Each a single line naming the file (and line if known) and the fix. Empty if none. ' +
+        'This list — not the report body — is what gets sent back to the coding agent.'
+    ),
 });
 export const writeQaReportDescription =
   'Write (or overwrite) the QA report for this session. Pass the full markdown BODY only (summary, ' +
@@ -29,6 +36,7 @@ export function createWriteQaReportExecute(sessionInfo: {
     lint,
     unitTests,
     integrationTests,
+    blockingFindings,
   }: z.infer<typeof writeQaReportSchema>): Promise<string> => {
     await fs.mkdir(config.qaReportsDir, { recursive: true });
     const filePath = path.join(config.qaReportsDir, `${sessionInfo.sessionKey}.md`);
@@ -53,6 +61,7 @@ export function createWriteQaReportExecute(sessionInfo: {
       lint,
       'unit-tests': unitTests,
       'integration-tests': integrationTests,
+      'blocking-findings': blockingFindings,
     };
 
     const fileContents = matter.stringify(`\n${markdownBody.trim()}\n`, frontmatter);

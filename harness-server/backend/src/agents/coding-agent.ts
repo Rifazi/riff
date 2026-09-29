@@ -4,13 +4,14 @@ import matter from 'gray-matter';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, updateSession } from '../sessions/session-store.js';
+import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
@@ -49,17 +50,32 @@ const TOOL_NAMES = [
   'run_npm_install',
 ];
 
+const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
+  `A lighter model (${lightModel}) worked on the step "${stepTitle}" just now but didn't finish it cleanly. ` +
+  `Review what it did — its commits on the branch and any uncommitted changes — fix anything that's wrong or ` +
+  `missing, then finish the step exactly as the workflow above says (tests, prettier, commit, lint and test, ` +
+  `mark it done) and stop.`;
+
+export interface CodingTurnOptions {
+  // An automatic "do the next checklist step" turn (kickoff, Continue,
+  // auto-run, coordinator) rather than a human's own message — only these
+  // are eligible for the light model.
+  stepTurn?: boolean;
+}
+
 export async function runCodingAgentTurn(
   session: SessionRecord,
   userMessage: string,
   onEvent: (event: AgentEvent) => void,
-  attachments: ParsedAttachment[] = []
+  attachments: ParsedAttachment[] = [],
+  options: CodingTurnOptions = {}
 ): Promise<SessionRecord> {
   await appendTranscriptEntry(session.id, 'coding', { role: 'user', text: userMessage });
   let prompt = await applyAttachments(session.id, 'coding', userMessage, attachments);
 
   const app = await getApp(session.appId);
-  const { provider, model } = await getRoleModelConfig('coding');
+  const roleConfig = await getRoleModelConfig('coding');
+  const { provider, model } = roleConfig;
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'coding');
@@ -145,90 +161,43 @@ export async function runCodingAgentTurn(
     void persistEvent(session.id, event);
   };
 
-  if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
-    const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
-    const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
-    const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({ repoRoot: app.repoRoot });
-    const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
-    const createMcpServer = () =>
-      createSdkMcpServer({
-        name: 'harness-tools',
-        version: '1.0.0',
-        tools: [
-          searchDocsToolClaude,
-          readDocToolClaude,
-          createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
-          readFileToolClaude,
-          writeFileToolClaude,
-          editFileToolClaude,
-          gitCreateBranchTool,
-          gitCommitTool,
-          runGeneratePathsToolClaude,
-          runGenerateOpenApiToolClaude,
-          createWriteCodingPlanToolClaude(session.id),
-          runCheckedCommandToolClaude,
-          createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
-          createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
-        ],
+  // Light-model routing (agents/model-routing.ts): only for an automatic
+  // step turn on a plan step tagged light, never for a human's follow-up,
+  // a QA fix or a reconciliation.
+  let lightStep: { id: string; title: string; model: string } | null = null;
+  const lightModel = lightModelFor(roleConfig);
+  if (options.stepTurn && lightModel && !session.codingTeam && !session.codingReconciliationPending) {
+    const efforts = await planStepEfforts(session);
+    const stepId = nextCodingStepId(session, efforts);
+    if (stepId && efforts.get(stepId) === 'light') {
+      const title =
+        session.codingPlan?.find((s) => s.id === stepId)?.title ??
+        (await loadApprovedDocsForCoding(session, app.repoRoot)).planSteps.find((s) => s.id === stepId)?.title ??
+        stepId;
+      lightStep = { id: stepId, title, model: lightModel };
+      await appendTranscriptEntry(session.id, 'coding', {
+        role: 'system',
+        text: `Light step "${title}" — running on ${lightModel}.`,
       });
-
-    const { sdkSessionId } = await runClaudeAgentTurn({
-      systemPrompt,
-      createMcpServer,
-      toolNames: TOOL_NAMES,
-      model,
-      resumeSessionId: session.claudeSessionIds.coding,
-      prompt,
-      cwd: app.repoRoot,
-      onEvent: wrappedOnEvent,
-    });
-
-    await setClaudeSessionId(session.id, 'coding', sdkSessionId);
-  } else {
-    const apiKey = await getCredential(provider);
-    if (!apiKey) {
-      const message = `No API key configured for ${provider} — add one in Settings before starting the coding stage.`;
-      onEvent({ type: 'error', message });
-      await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: message, isError: true });
-      return session;
     }
+  }
 
-    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
-    const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
-    const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
-    const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
-    const { runCheckedCommandTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
-
-    const tools: ToolSet = {
-      search_docs: searchDocsTool,
-      read_doc: readDocTool,
-      search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
-      read_file: readFileTool,
-      write_file: writeFileTool,
-      edit_file: editFileTool,
-      git_create_branch: gitCreateBranchTool,
-      git_commit: gitCommitTool,
-      run_generate_paths: runGeneratePathsTool,
-      run_generate_openapi: runGenerateOpenApiTool,
-      write_coding_plan: createWriteCodingPlanTool(session.id),
-      run_checked_command: runCheckedCommandTool,
-      run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
-      run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
-    };
-
-    const { updatedHistory } = await runAgentTurn({
-      systemPrompt,
-      tools,
-      provider,
-      model,
-      apiKey,
-      history: session.histories.coding,
-      prompt,
-      onEvent: wrappedOnEvent,
-    });
-
-    await setHistory(session.id, 'coding', updatedHistory);
+  let turnPrompt = prompt;
+  let turnModel = lightStep?.model ?? model;
+  let result = await runEngine();
+  if (lightStep) {
+    const after = await getSession(session.id);
+    const status = after?.codingPlan?.find((s) => s.id === lightStep.id)?.status;
+    if (result.isError || status !== 'done') {
+      await appendTranscriptEntry(session.id, 'coding', {
+        role: 'system',
+        text: `↑ ${lightStep.model} didn't finish "${lightStep.title}" — handing it to ${model}.`,
+      });
+      if (after) session = after;
+      turnPrompt = ESCALATION_PROMPT(lightStep.title, lightStep.model);
+      turnModel = model;
+      result = await runEngine();
+    }
   }
 
   const latest = await getSession(session.id);
@@ -237,6 +206,98 @@ export async function runCodingAgentTurn(
     return updateSession(session.id, { stage: 'coding-review' });
   }
   return latest;
+
+  async function runEngine(): Promise<{ isError: boolean }> {
+    if (provider === 'claude') {
+      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
+      const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
+      const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({ repoRoot: app.repoRoot });
+      const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+      const createMcpServer = () =>
+        createSdkMcpServer({
+          name: 'harness-tools',
+          version: '1.0.0',
+          tools: [
+            searchDocsToolClaude,
+            readDocToolClaude,
+            createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+            readFileToolClaude,
+            writeFileToolClaude,
+            editFileToolClaude,
+            gitCreateBranchTool,
+            gitCommitTool,
+            runGeneratePathsToolClaude,
+            runGenerateOpenApiToolClaude,
+            createWriteCodingPlanToolClaude(session.id),
+            runCheckedCommandToolClaude,
+            createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
+            createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
+          ],
+        });
+
+      const { sdkSessionId, isError } = await runClaudeAgentTurn({
+        systemPrompt,
+        createMcpServer,
+        toolNames: TOOL_NAMES,
+        model: turnModel,
+        resumeSessionId: session.claudeSessionIds.coding,
+        prompt: turnPrompt,
+        cwd: app.repoRoot,
+        onEvent: wrappedOnEvent,
+      });
+
+      await setClaudeSessionId(session.id, 'coding', sdkSessionId);
+      session.claudeSessionIds.coding = sdkSessionId;
+      return { isError };
+    } else {
+      const apiKey = await getCredential(provider);
+      if (!apiKey) {
+        const message = `No API key configured for ${provider} — add one in Settings before starting the coding stage.`;
+        onEvent({ type: 'error', message });
+        await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: message, isError: true });
+        return { isError: true };
+      }
+
+      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+      const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
+      const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
+      const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
+      const { runCheckedCommandTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+
+      const tools: ToolSet = {
+        search_docs: searchDocsTool,
+        read_doc: readDocTool,
+        search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+        read_file: readFileTool,
+        write_file: writeFileTool,
+        edit_file: editFileTool,
+        git_create_branch: gitCreateBranchTool,
+        git_commit: gitCommitTool,
+        run_generate_paths: runGeneratePathsTool,
+        run_generate_openapi: runGenerateOpenApiTool,
+        write_coding_plan: createWriteCodingPlanTool(session.id),
+        run_checked_command: runCheckedCommandTool,
+        run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
+        run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
+      };
+
+      const { updatedHistory, isError } = await runAgentTurn({
+        systemPrompt,
+        tools,
+        provider,
+        model: turnModel,
+        apiKey,
+        history: session.histories.coding,
+        prompt: turnPrompt,
+        onEvent: wrappedOnEvent,
+      });
+
+      await setHistory(session.id, 'coding', updatedHistory);
+      session.histories.coding = updatedHistory;
+      return { isError };
+    }
+  }
 }
 
 /**
@@ -256,13 +317,22 @@ export async function loadApprovedDocsForCoding(
 
   const cited: unknown = matter(requirementsRaw).data['related-docs'];
   const relatedDocs: string[] = Array.isArray(cited) ? cited : [];
+  // Listed, not inlined: the full docs rode along in every step of every
+  // coding (and team-member) turn whether or not they were needed.
+  const relatedLines: string[] = [];
   for (const relDoc of relatedDocs) {
     try {
       const docContent = await fs.readFile(path.join(repoRoot, relDoc), 'utf8');
-      text += `\n\n# Related doc: ${relDoc}\n\n${docContent}`;
+      const heading = /^#+\s+(.+)$/m.exec(docContent)?.[1]?.trim();
+      relatedLines.push(`- ${relDoc}${heading ? ` — ${heading}` : ''}`);
     } catch {
       // referenced doc no longer exists — skip it
     }
+  }
+  if (relatedLines.length > 0) {
+    text +=
+      `\n\n# Related docs\n\nThe requirements cite these repo docs. Read the ones relevant to your current step ` +
+      `with read_file (search_docs finds sections within them):\n\n${relatedLines.join('\n')}`;
   }
 
   const planRaw = await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8');
@@ -284,6 +354,7 @@ export function suggestedBranchName(session: SessionRecord): string {
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'coding', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

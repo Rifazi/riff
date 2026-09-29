@@ -4,13 +4,14 @@ import path from 'node:path';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession } from '../sessions/session-store.js';
+import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { compactQaFindings } from '../sessions/qa-findings.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
@@ -53,7 +54,23 @@ export async function runQaAgentTurn(
   const branch = session.branch;
   const requirementsPath = session.requirementsPath;
 
+  // A rerun after coding fixes starts a fresh QA conversation rather than
+  // resuming the old one: that one's diffs, file reads and test logs are of
+  // the pre-fix branch — stale, and re-billed on every step. What carries
+  // over is the previous report's findings, in the system prompt below.
+  let previousFindings: string | null = null;
   if (session.qaRerunPending) {
+    if (session.qaReportPath) {
+      try {
+        previousFindings = compactQaFindings(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'));
+      } catch {
+        // report unreadable — the fresh pass just reviews from scratch
+      }
+    }
+    session.histories.qa = [];
+    session.claudeSessionIds.qa = null;
+    await setHistory(session.id, 'qa', []);
+    await setClaudeSessionId(session.id, 'qa', null);
     await updateSession(session.id, { qaRerunPending: false });
     session.qaRerunPending = false;
   }
@@ -72,6 +89,12 @@ export async function runQaAgentTurn(
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
     systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
     systemPrompt += `\n\n# Session\n\nBranch to review: ${session.branch}`;
+    if (previousFindings) {
+      systemPrompt +=
+        `\n\n# Your previous QA pass on this branch\n\nThe coding agent has since pushed fixes for these. Confirm ` +
+        `each one is actually resolved, but still do the full review above — every acceptance criterion, lint ` +
+        `and tests — since the fixes may have broken something else.\n\n${previousFindings}`;
+    }
   }
 
   const wrappedOnEvent = (event: AgentEvent) => {
@@ -172,6 +195,7 @@ export async function runQaAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'qa', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

@@ -1,4 +1,5 @@
 import type { ModelMessage } from 'ai';
+import type { TokenUsage } from '../agents/sdk-client.js';
 
 export type SessionStage =
   | 'requirements-in-progress'
@@ -233,6 +234,15 @@ export interface SessionRecord {
     plan: string | null;
     coding: string | null;
     qa: string | null;
+  };
+
+  // Running token totals per stage (team members count toward coding), so
+  // the cost of each stage is visible and changes to it measurable.
+  usage: {
+    requirements: TokenUsage;
+    plan: TokenUsage;
+    coding: TokenUsage;
+    qa: TokenUsage;
   };
 
   createdAt: string;

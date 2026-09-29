@@ -69,7 +69,8 @@ export function useAgentTurnStream() {
     message: string,
     onDone: () => void,
     onEvent?: (event: AgentEvent) => void,
-    attachments?: AttachmentInput[]
+    attachments?: AttachmentInput[],
+    extraBody?: Record<string, unknown>
   ) => {
     setError(null);
     setStreaming(true);
@@ -77,7 +78,7 @@ export function useAgentTurnStream() {
     setOverlay([{ id: nextId(), role: 'user', text: message, timestamp: new Date().toISOString() }]);
 
     try {
-      await postSSE(url, attachments?.length ? { message, attachments } : { message }, consume(onEvent));
+      await postSSE(url, { message, ...(attachments?.length ? { attachments } : {}), ...extraBody }, consume(onEvent));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

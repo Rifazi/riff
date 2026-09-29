@@ -13,6 +13,7 @@ import { baseBranchFor } from '../apps/apps.js';
 import { deliver, detectDelivery } from '../repo/delivery.js';
 import { resolveBaseBranch } from '../repo/git.js';
 import type { SessionRecord } from '../sessions/session.js';
+import { compactQaFindings } from '../sessions/qa-findings.js';
 
 async function deliveryText(session: SessionRecord): Promise<{ title: string; description: string }> {
   let qa = '';
@@ -71,6 +72,20 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       return { markdown };
     } catch {
       return { markdown: null };
+    }
+  });
+
+  // What the coding agent gets when QA sends a branch back: only the things
+  // it must fix, not the full report (passed criteria, nits, summary) — the
+  // human still has that in the QA tab.
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/findings', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (!session.qaReportPath) return { text: null };
+    try {
+      return { text: compactQaFindings(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8')) };
+    } catch {
+      return { text: null };
     }
   });
 

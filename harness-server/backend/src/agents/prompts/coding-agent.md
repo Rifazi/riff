@@ -276,3 +276,6 @@ to change them, so the lockfile and `node_modules` stay consistent with it.
 - Do not touch unrelated existing features unless the requirements doc
   explicitly says to.
 - Do not invent scope beyond the requirements doc's acceptance criteria.
+- Do not rewrite an existing file with `write_file` to change part of it —
+  use `edit_file` (one call per changed region). `write_file` is for new
+  files, or for replacing most of a file's content.

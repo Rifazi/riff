@@ -13,6 +13,12 @@ import {
 } from '@/lib/dev-sessions/stage';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 export function StageStepper({ session, current }: { session: SessionRecord; current: StageGroup }) {
   return (
     <div className="grid grid-cols-4 gap-2">
@@ -23,6 +29,8 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
         const active = hasStageActivity(session, group);
         const isCurrent = group === current;
         const statusText = completed ? 'Done' : active ? 'In progress' : reached ? 'Ready to start' : 'Not started';
+        const u = session.usage?.[group];
+        const tokens = u ? u.input + u.output + u.cacheRead + u.cacheWrite : 0;
 
         const content = (
           <div className="flex items-center gap-3">
@@ -43,6 +51,18 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
               <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-blue-700' : 'text-gray-900'}`}>{label}</div>
               <div className="text-xs text-gray-500 truncate" title={agent.fullName}>
                 {agent.name} · {statusText}
+                {tokens > 0 && (
+                  <span
+                    title={
+                      u
+                        ? `Tokens used: ${u.input.toLocaleString()} input, ${u.output.toLocaleString()} output, ` +
+                          `${u.cacheRead.toLocaleString()} cache read, ${u.cacheWrite.toLocaleString()} cache write`
+                        : undefined
+                    }
+                  >
+                    {' '}· {formatTokens(tokens)} tokens
+                  </span>
+                )}
               </div>
             </div>
           </div>

@@ -6,6 +6,7 @@ import type { ModelMessage } from 'ai';
 import type { SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionStage, TranscriptEntry } from './session.js';
 import { slugify } from './session.js';
 import { LEGACY_APP_ID } from '../apps/apps.js';
+import { addUsage, ZERO_USAGE, type TokenUsage } from '../agents/sdk-client.js';
 
 type StageKey = 'requirements' | 'plan' | 'coding' | 'qa';
 
@@ -61,6 +62,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.splitFrom ??= null;
   session.splitBrief ??= null;
   session.splitKickoffPending ??= false;
+  session.usage ??= { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
   return session;
 }
 
@@ -168,6 +170,7 @@ export async function createSession(input: {
     transcripts: { requirements: [], plan: [], coding: [], qa: [] },
     histories: { requirements: [], plan: [], coding: [], qa: [] },
     claudeSessionIds: { requirements: null, plan: null, coding: null, qa: null },
+    usage: { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE },
     createdAt: now,
     updatedAt: now,
   };
@@ -210,6 +213,17 @@ export async function setClaudeSessionId(id: string, stage: StageKey, sdkSession
     await saveSession(session);
     return session;
   });
+}
+
+export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsage): Promise<void> {
+  await mutateSession(id, (session) => {
+    session.usage[stage] = addUsage(session.usage[stage], usage);
+  });
+  const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+  console.log(
+    `[usage] session ${id} ${stage}: ${total} tokens (input ${usage.input}, output ${usage.output}, ` +
+      `cache read ${usage.cacheRead}, cache write ${usage.cacheWrite})`
+  );
 }
 
 export async function appendTranscriptEntry(

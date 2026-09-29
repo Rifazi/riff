@@ -163,11 +163,29 @@ export function searchDocs(appId: string, query: string, k = 5): ScoredSection[]
     .slice(0, k);
 }
 
-export function readDocSection(appId: string, relPath: string): string | null {
+/**
+ * The whole file, or with `heading` just that section and everything nested
+ * under it (headings are paths, e.g. "Ingestion > Invoices"). Throws, listing
+ * the file's headings, when `heading` matches nothing.
+ */
+export function readDocSection(appId: string, relPath: string, heading?: string): string | null {
   const normalized = relPath.replace(/^\/+/, '');
   const sections = sectionsByApp.get(appId) ?? [];
-  const matches = sections.filter((s) => s.file === normalized);
+  let matches = sections.filter((s) => s.file === normalized);
   if (matches.length === 0) return null;
+  if (heading) {
+    const wanted = heading.trim().toLowerCase();
+    const inSection = matches.filter((s) => {
+      const h = s.heading.toLowerCase();
+      return h === wanted || h.startsWith(`${wanted} > `);
+    });
+    if (inSection.length === 0) {
+      throw new Error(
+        `No section "${heading}" in ${normalized}. Its headings:\n${matches.map((s) => `- ${s.heading}`).join('\n')}`
+      );
+    }
+    matches = inSection;
+  }
   return matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
 }
 

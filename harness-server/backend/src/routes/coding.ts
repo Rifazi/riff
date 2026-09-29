@@ -31,7 +31,7 @@ async function revertDocToDraftOnDisk(relPath: string | null): Promise<void> {
 }
 
 export async function registerCodingRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
+  app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[]; stepTurn?: boolean } }>(
     '/api/sessions/:id/coding/message',
     async (request, reply) => {
       const session = await getSession(request.params.id);
@@ -42,7 +42,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       if (isTeamRunning(session.id)) {
         return reply.code(409).send({ error: 'the coding team is still working — wait for it to finish before messaging the lead' });
       }
-      const { message, attachments: rawAttachments } = request.body ?? {};
+      const { message, attachments: rawAttachments, stepTurn } = request.body ?? {};
       if (!message || !message.trim()) return reply.code(400).send({ error: 'message is required' });
 
       let attachments;
@@ -67,7 +67,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       const send = (event: AgentEvent) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
 
       try {
-        await runCodingAgentTurn(session, message, send, attachments);
+        await runCodingAgentTurn(session, message, send, attachments, { stepTurn: stepTurn === true });
       } catch (err) {
         send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {

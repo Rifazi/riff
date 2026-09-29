@@ -203,8 +203,18 @@ export interface SessionRecord {
     qa: TranscriptEntry[];
   };
 
+  // Absent on sessions from a server older than usage tracking.
+  usage?: Record<'requirements' | 'plan' | 'coding' | 'qa', TokenUsage>;
+
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
 export type AgentEvent =
@@ -214,7 +224,8 @@ export type AgentEvent =
   | { type: 'done'; text: string; isError: boolean }
   | { type: 'error'; message: string }
   | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
-  | { type: 'continuation'; hop: number; maxHops: number };
+  | { type: 'continuation'; hop: number; maxHops: number }
+  | { type: 'usage'; usage: TokenUsage };
 
 export type Provider = 'claude' | 'anthropic' | 'openai' | 'google';
 export const PROVIDERS: Provider[] = ['claude', 'anthropic', 'openai', 'google'];
@@ -228,6 +239,10 @@ export function providerNeedsApiKey(provider: Provider): boolean {
 export interface RoleModelConfig {
   provider: Provider;
   model: string;
+  // Coding only: model for plan steps tagged light. Unset = provider default, '' = off.
+  lightModel?: string;
+  // Coordinator only: try Riff's built-in local model first. Unset = on.
+  useLocalModel?: boolean;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
@@ -247,6 +262,8 @@ export interface SettingsResponse {
   credentials: Record<Provider, { hasKey: boolean }>;
   models: Record<Role, RoleModelConfig>;
   knownModels: Record<Provider, string[]>;
+  defaultLightModels: Record<Provider, string>;
+  localModel: { available: boolean; model: string | null; reason: string | null };
   jira: RedactedJiraSettings;
 }
 

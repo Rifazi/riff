@@ -246,6 +246,41 @@ below) — never inside the target repo.
    `lib/dev-sessions/agents.ts`, `useTeamRun`), with lead chat behind a
    toggle.
 
+11. User asked for cheaper models on lower-effort work, automatically.
+   `write_plan_doc` steps take an optional `effort` (`light` | `standard`,
+   default standard); the plan agent tags mechanical, fully-specified steps
+   light. `agents/model-routing.ts` resolves the coding role's `lightModel`
+   (unset = `DEFAULT_LIGHT_MODEL` for the provider, `''` = off). Only
+   automatic step turns route: the Coding tab's kickoff/Continue/auto-run
+   send `stepTurn: true`, and the coordinator's coding turns count as step
+   turns. Human-typed follow-ups, QA fixes and reconciliation always use the
+   coding model. The requirements, plan and QA roles are never routed; QA is
+   the check on light work. If the light turn errors or its step isn't
+   `done` afterwards, the coding model resumes the same conversation in the
+   same request with an escalation prompt. Claude sessions accept a
+   different model on `resume`, and this was verified live. Team workstreams
+   whose steps are all light start on the light model and escalate the same
+   way; a resumed member always gets the full model.
+
+12. User asked to use Riff's free local Qwen (the built-in summary model)
+   wherever it can do the job. `agents/local-llm.ts` drives Riff's
+   `llama-helper` binary directly: JSON lines over stdin/stdout, the Qwen
+   3.5 non-thinking template, and the GGUF from Riff's
+   `models/summary/` data dir (4B, else 2B). The process is kept warm and
+   exits after 5 idle minutes or on stdin EOF. It has no tool calling, so it
+   only fits single-shot calls. The coordinator's continue/ready decision
+   is the only one of those; every agent role is a tool-calling loop and
+   stays on its configured model. The coordinator tries local first
+   (`models.coordinator.useLocalModel`, unset = on) and falls back to its
+   configured model on any error or unparseable reply. On a 12-case
+   decision set run 3 times, Qwen 4B scored 34/36 and Haiku 11/12, but
+   only after two changes that fixed failures seen first on Qwen:
+   `DECISION_INSTRUCTIONS` now says "ready" whenever the agent is waiting
+   on the human, and `hasUnansweredQuestion` also treats a `?` in the
+   agent's closing paragraph as a pending question, so no model is asked.
+   Without them, Qwen answered the agent's questions on the human's behalf.
+   Every remaining miss stopped early, which is the safe direction.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

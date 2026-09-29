@@ -29,6 +29,29 @@ const AGENT = AGENT_PERSONAS.coding;
 const MAX_AUTO_RUN_ATTEMPTS = 20;
 const CODING_KICKOFF_MESSAGE = 'Please implement the approved plan.';
 
+// Client-side twin of the server's compactQaFindings (sessions/qa-findings.ts)
+// for when /qa/findings isn't available: result, failing checks, and the
+// unchecked criteria / [blocking] lines — never the whole report.
+function compactQaReport(markdown: string): string {
+  const field = (key: string) => markdown.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1].trim();
+  const failed = [
+    ['lint', 'lint'],
+    ['unit tests', 'unit-tests'],
+    ['integration tests', 'integration-tests'],
+  ]
+    .filter(([, key]) => field(key) === 'fail')
+    .map(([name]) => name);
+  const findings = markdown
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^- \[ \]/.test(l) || /^- \[blocking\]/i.test(l))
+    .map((l) => l.replace(/^- \[(?: |blocking)\]\s*/i, ''));
+  let text = `QA result: ${field('result') ?? '?'}`;
+  if (failed.length > 0) text += ` — failing checks: ${failed.join(', ')}`;
+  text += findings.length > 0 ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  return text;
+}
+
 export function CodingStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
   const queryClient = useQueryClient();
@@ -134,15 +157,25 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.coordinatorEnabled, session.transcripts.coding.length, streaming]);
 
-  const handleSend = (message: string, attachments?: AttachmentInput[]) =>
-    send(`/api/sessions/${sessionId}/coding/message`, message, refresh, (event) => {
-      // Refresh on every tool result so the branch, diff and commits appear
-      // as the agent works instead of only when the whole turn finishes.
-      if (event.type === 'tool_result') {
-        queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-        queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
-      }
-    }, attachments);
+  // stepTurn: an automatic "do the next checklist step" message (kickoff,
+  // Continue, auto-run) — the only kind the server may route to the light
+  // model when the step is tagged light. Anything the human types isn't one.
+  const handleSend = (message: string, attachments?: AttachmentInput[], stepTurn = false) =>
+    send(
+      `/api/sessions/${sessionId}/coding/message`,
+      message,
+      refresh,
+      (event) => {
+        // Refresh on every tool result so the branch, diff and commits appear
+        // as the agent works instead of only when the whole turn finishes.
+        if (event.type === 'tool_result') {
+          queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+          queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
+        }
+      },
+      attachments,
+      stepTurn ? { stepTurn: true } : undefined
+    );
 
   // Kick off automatically when reached with no branch and nothing said.
   const kickedOff = useRef(false);
@@ -154,7 +187,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     if (kickedOff.current) return;
     kickedOff.current = true;
     if (session.coordinatorEnabled) return;
-    void handleSend(CODING_KICKOFF_MESSAGE);
+    void handleSend(CODING_KICKOFF_MESSAGE, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming, planDoc, teamMode]);
 
@@ -166,9 +199,20 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     if (kickedOffQaFix.current) return;
     kickedOffQaFix.current = true;
     void (async () => {
-      const report = await api.getQaReport(sessionId);
+      // Only what needs fixing — the full report stays in the QA tab. If the
+      // findings can't be fetched (e.g. an agent server started before
+      // /qa/findings existed), trim the full report here rather than relay it.
+      const text = await api
+        .getQaFindings(sessionId)
+        .then((r) => r.text)
+        .catch(() =>
+          api
+            .getQaReport(sessionId)
+            .then((r) => (r.markdown ? compactQaReport(r.markdown) : null))
+            .catch(() => null)
+        );
       const findings =
-        report.markdown ?? 'QA sent this back for fixes, but the report content could not be loaded — check the QA tab for details.';
+        text ?? 'QA sent this back for fixes, but the findings could not be loaded — check the QA tab for details.';
       void handleSend(
         `QA sent this back for fixes. Please address the findings below, then stop for review as usual once done:\n\n${findings}`
       );
@@ -211,7 +255,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       return;
     }
     autoRunAttempts.current += 1;
-    void handleSend('Continue with the next step.');
+    void handleSend('Continue with the next step.', undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRun, session.coordinatorEnabled, approved, streaming, error, plan, allStepsDone]);
 
@@ -280,7 +324,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               <CodingPlanChecklist steps={plan} />
               {canContinue && (
                 <div className="flex flex-wrap items-center gap-4">
-                  <Button size="sm" variant="blue" onClick={() => handleSend('Continue with the next step.')}>
+                  <Button size="sm" variant="blue" onClick={() => handleSend('Continue with the next step.', undefined, true)}>
                     <Play />
                     Continue to next step
                   </Button>

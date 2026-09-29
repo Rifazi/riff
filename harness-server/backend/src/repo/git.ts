@@ -75,9 +75,14 @@ export async function stageAndCommit(repoRoot: string, branchName: string, messa
   return result.commit;
 }
 
-export async function diffAgainstBase(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<string> {
+export async function diffAgainstBase(
+  repoRoot: string,
+  branchName: string,
+  baseBranch = DEFAULT_BASE_BRANCH,
+  pathspecs: string[] = []
+): Promise<string> {
   const git = client(repoRoot);
-  return git.raw(['diff', `${baseBranch}...${branchName}`]);
+  return git.raw(['diff', `${baseBranch}...${branchName}`, ...(pathspecs.length ? ['--', ...pathspecs] : [])]);
 }
 
 export async function diffStatAgainstBase(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<string> {

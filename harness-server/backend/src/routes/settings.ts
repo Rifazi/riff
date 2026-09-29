@@ -26,6 +26,12 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         if (roleModelConfig && !isProvider(roleModelConfig.provider)) {
           return reply.code(400).send({ error: `unknown provider: ${roleModelConfig.provider}` });
         }
+        if (roleModelConfig?.lightModel !== undefined && typeof roleModelConfig.lightModel !== 'string') {
+          return reply.code(400).send({ error: 'lightModel must be a string' });
+        }
+        if (roleModelConfig?.useLocalModel !== undefined && typeof roleModelConfig.useLocalModel !== 'boolean') {
+          return reply.code(400).send({ error: 'useLocalModel must be a boolean' });
+        }
       }
     }
     const updated = await updateSettings(body);

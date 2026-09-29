@@ -3,7 +3,9 @@ import path from 'node:path';
 import { config } from '../../config.js';
 import { getApp } from '../../apps/apps-store.js';
 import { baseBranchFor } from '../../apps/apps.js';
-import { getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
+import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
+import { getRoleModelConfig } from '../../settings/settings-store.js';
+import { lightModelFor, planStepEfforts } from '../model-routing.js';
 import type { CodingTeamMember, SessionRecord, TeamMemberStatus } from '../../sessions/session.js';
 import { readPlanDoc } from '../../sessions/plan-doc.js';
 import {
@@ -169,14 +171,50 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     await setStatus(member.id, 'running');
     const latest = (await getSession(sessionId))!;
     const fresh = latest.codingTeam!.members.find((m) => m.id === member.id)!;
-    await runWorkstreamAgent({
-      session: latest,
-      app,
-      member: fresh,
-      teammates: latest.codingTeam!.members,
-      worktreePath,
-      onEvent: (event) => emit({ type: 'team_member_event', memberId: member.id, event }),
-    });
+    const onEvent = (event: AgentEvent) => emit({ type: 'team_member_event', memberId: member.id, event });
+
+    // Light-model routing: a workstream whose steps are all tagged light
+    // starts on the cheaper model — only on its first run; a resumed one
+    // gets the full model. If the light run throws or leaves any of its
+    // steps unfinished, the full model picks up the same conversation.
+    const lightModel = lightModelFor(await getRoleModelConfig('coding'));
+    const efforts = await planStepEfforts(latest);
+    const light =
+      lightModel && fresh.transcript.length === 0 && fresh.stepIds.every((id) => efforts.get(id) === 'light') ? lightModel : null;
+
+    if (light) {
+      await appendTeamTranscriptEntry(sessionId, member.id, { role: 'system', text: `Light workstream — running on ${light}.` });
+      let failed = false;
+      try {
+        await runWorkstreamAgent({ session: latest, app, member: fresh, teammates: latest.codingTeam!.members, worktreePath, onEvent, model: light });
+      } catch {
+        failed = true;
+      }
+      const after = (await getSession(sessionId))!;
+      const done = fresh.stepIds.every((id) => after.codingPlan?.find((s) => s.id === id)?.status === 'done');
+      if (failed || !done) {
+        const { model } = await getRoleModelConfig('coding');
+        await appendTeamTranscriptEntry(sessionId, member.id, {
+          role: 'system',
+          text: `↑ ${light} didn't finish this workstream — handing it to ${model}.`,
+        });
+        const again = after.codingTeam!.members.find((m) => m.id === member.id)!;
+        await runWorkstreamAgent({
+          session: after,
+          app,
+          member: again,
+          teammates: after.codingTeam!.members,
+          worktreePath,
+          onEvent,
+          prompt:
+            `A lighter model (${light}) worked on this workstream just now but didn't finish it cleanly. Review what ` +
+            'it did in your checkout — commits and uncommitted changes — fix anything wrong or missing, then finish ' +
+            'the remaining steps and leave nothing uncommitted.',
+        });
+      }
+    } else {
+      await runWorkstreamAgent({ session: latest, app, member: fresh, teammates: latest.codingTeam!.members, worktreePath, onEvent });
+    }
 
     if (await hasUncommittedChanges(worktreePath)) {
       await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`);

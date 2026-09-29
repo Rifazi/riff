@@ -181,6 +181,9 @@ export const api = {
   getQaReport: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/report`)).then((r) => json<{ markdown: string | null }>(r)),
 
+  getQaFindings: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/findings`)).then((r) => json<{ text: string | null }>(r)),
+
   approveQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 

@@ -9,6 +9,16 @@ import { planWorkstreamSchema, validateWorkstreams } from '../../sessions/plan-d
 export const planStepSchema = z.object({
   id: z.string().describe('Short stable slug, e.g. "schema", "primary-adapter", "cdk-stateful"'),
   title: z.string().describe('Short human-readable title, e.g. "Add the acme-inventory JSON schema"'),
+  effort: z
+    .enum(['light', 'standard'])
+    .optional()
+    .describe(
+      'Which model this step needs. "light" runs it on a cheaper model: only for mechanical, fully-specified work ' +
+        'that closely follows an existing pattern — docs or README updates, config/wiring, renames, adding a test ' +
+        'modelled on a neighbouring one, a copy of an existing adapter with the differences spelled out. "standard" ' +
+        '(the default) for anything with design decisions, new logic, security, data migrations, cross-cutting or ' +
+        'ambiguous changes. When in doubt, standard — a wrong "light" costs a retry, a wrong "standard" only money.'
+    ),
 });
 
 export const writePlanSchema = z.object({

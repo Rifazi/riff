@@ -1,3 +1,5 @@
+import { localModelStatus, type LocalModelStatus } from '../agents/local-llm.js';
+
 export type Provider = 'claude' | 'anthropic' | 'openai' | 'google';
 
 // The three providers that authenticate with a pasted API key, run through
@@ -21,6 +23,13 @@ export function providerNeedsApiKey(provider: Provider): provider is ApiKeyProvi
 export interface RoleModelConfig {
   provider: Provider;
   model: string;
+  // Coding only: the cheaper model plan steps tagged "light" run on (see
+  // agents/model-routing.ts). Unset = the provider's default light model;
+  // '' = off, every step runs on `model`.
+  lightModel?: string;
+  // Coordinator only: try Riff's built-in local model (agents/local-llm.ts)
+  // before `model`. Unset = on.
+  useLocalModel?: boolean;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
@@ -70,6 +79,15 @@ export const DEFAULT_SETTINGS: HarnessSettings = {
   jira: DEFAULT_JIRA_SETTINGS,
 };
 
+// What a light plan step runs on when the coding role's lightModel is unset
+// (agents/model-routing.ts).
+export const DEFAULT_LIGHT_MODEL: Record<Provider, string> = {
+  claude: 'claude-haiku-4-5',
+  anthropic: 'claude-haiku-4-5',
+  openai: 'gpt-4.1-mini',
+  google: 'gemini-2.5-flash',
+};
+
 // A starting point for the UI's model picker — not a restriction. Any
 // provider accepts an arbitrary model ID string; this just saves typing for
 // the common case and gets updated less often than providers ship models.
@@ -96,6 +114,8 @@ export interface RedactedSettings {
   credentials: Record<Provider, { hasKey: boolean }>;
   models: Record<Role, RoleModelConfig>;
   knownModels: Record<Provider, string[]>;
+  defaultLightModels: Record<Provider, string>;
+  localModel: LocalModelStatus;
   jira: RedactedJiraSettings;
 }
 
@@ -107,6 +127,8 @@ export function redactSettings(settings: HarnessSettings): RedactedSettings {
     ) as Record<Provider, { hasKey: boolean }>,
     models: settings.models,
     knownModels: KNOWN_MODELS,
+    defaultLightModels: DEFAULT_LIGHT_MODEL,
+    localModel: localModelStatus(),
     jira: { ...jiraRest, hasToken: Boolean(apiToken.trim()) },
   };
 }

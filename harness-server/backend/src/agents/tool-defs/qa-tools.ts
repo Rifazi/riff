@@ -28,6 +28,36 @@ const TIMEOUTS_MS: Record<CheckCommand, number> = {
   'test:integration': 600_000,
 };
 
+// Diff-body cap for the no-path call. Anything past it is still reachable
+// per file via `path`, so this only trims what gets pushed unasked.
+const DIFF_CHAR_LIMIT = 25_000;
+
+// Changed files that are nearly always noise to review line by line. They
+// still show up in the stat, and `path` fetches any of them on request.
+const DIFF_NOISE_EXCLUDES = [
+  ':(exclude,glob)**/package-lock.json',
+  ':(exclude,glob)**/pnpm-lock.yaml',
+  ':(exclude,glob)**/yarn.lock',
+  ':(exclude,glob)**/Cargo.lock',
+  ':(exclude,glob)**/*.snap',
+  ':(exclude,glob)**/__snapshots__/**',
+  ':(exclude,glob)**/dist/**',
+  ':(exclude,glob)**/build/**',
+  ':(exclude,glob)**/*.min.js',
+  ':(exclude,glob)**/*.map',
+];
+
+const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]/g;
+
+/** Last ~2k chars of a failed command's output, colour codes stripped. */
+export function outputTail(stdout: string, stderr: string, maxChars = 2000): string {
+  const out = stdout.replace(ANSI_RE, '').trim();
+  const err = stderr.replace(ANSI_RE, '').trim();
+  const errPart = err.slice(-Math.floor(maxChars / 2));
+  const outPart = out.slice(-(maxChars - errPart.length));
+  return [outPart, errPart].filter(Boolean).join('\n');
+}
+
 function parseJunitSummary(xml: string): string {
   try {
     const parser = new XMLParser({ ignoreAttributes: false });
@@ -70,10 +100,14 @@ export const runCheckedCommandDescription =
   'repo root, where <script> is this app\'s configured script name for that check (defaults: "lint", "test:ci", ' +
   '"test:integration").';
 
-export const getDiffSchema = z.object({ branchName: z.string() });
+export const getDiffSchema = z.object({
+  branchName: z.string(),
+  path: z.string().optional().describe('Repo-relative file path — return only this file\'s diff'),
+});
 export const getDiffDescription =
-  'Get the full diff and stat summary between the app\'s base branch and this session\'s branch — the actual change set to ' +
-  'review, not the coding agent\'s self-report.';
+  'Get the stat summary and diff between the app\'s base branch and this session\'s branch — the actual change set to ' +
+  'review, not the coding agent\'s self-report. Lockfiles, snapshots and build output are listed in the stat but left ' +
+  `out of the diff body, which is capped at ${DIFF_CHAR_LIMIT} chars; pass \`path\` to get one file's diff in full.`;
 
 /**
  * Closed enum, not a free-form command string — the actual safety mechanism.
@@ -101,7 +135,8 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
           text += '\n\n(no junit.xml found to summarize)';
         }
       }
-      text += `\n\nraw output (tail):\n${stdout.slice(-3000)}\n${stderr.slice(-1000)}`;
+      // A passing run's log is noise the model re-reads on every later step —
+      // the pass/fail line (and junit summary) is all it needs.
       return text;
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
@@ -115,17 +150,25 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
           // no junit.xml — fall through to raw output
         }
       }
-      text += `\n\nraw output (tail):\n${(e.stdout ?? '').slice(-3000)}\n${(e.stderr ?? e.message ?? '').slice(-2000)}`;
+      text += `\n\nraw output (tail):\n${outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
       return text;
     }
   };
 
-  const getDiffExecute = async ({ branchName }: z.infer<typeof getDiffSchema>): Promise<string> => {
+  const getDiffExecute = async ({ branchName, path: filePath }: z.infer<typeof getDiffSchema>): Promise<string> => {
+    if (filePath) {
+      const diff = await diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [filePath]);
+      return diff.trim() ? diff.slice(0, 60_000) : `No changes to ${filePath} on this branch.`;
+    }
     const [diff, stat] = await Promise.all([
-      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
+      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, DIFF_NOISE_EXCLUDES),
       diffStatAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
     ]);
-    return `${stat}\n\n${diff}`.slice(0, 60_000);
+    if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${diff}`;
+    return (
+      `${stat}\n\n${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +
+      'call get_diff again with `path` for any file in the stat above that was cut off]'
+    );
   };
 
   return { runCheckedCommandExecute, getDiffExecute };

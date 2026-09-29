@@ -4,7 +4,7 @@ import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../../config.js';
 import type { AppConfig } from '../../apps/apps.js';
-import { appendTeamTranscriptEntry, mutateSession } from '../../sessions/session-store.js';
+import { appendTeamTranscriptEntry, mutateSession, addStageUsage } from '../../sessions/session-store.js';
 import type { CodingTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
@@ -45,6 +45,10 @@ export interface RunWorkstreamParams {
   teammates: CodingTeamMember[];
   worktreePath: string;
   onEvent: (event: AgentEvent) => void;
+  // Light-model routing (see coding-team.ts): run on this model instead of
+  // the coding role's, and/or with this message instead of the default.
+  model?: string;
+  prompt?: string;
 }
 
 /**
@@ -54,8 +58,18 @@ export interface RunWorkstreamParams {
  * paths it owns. Implements its whole workstream in one turn — nobody
  * reviews between a member's steps.
  */
-export async function runWorkstreamAgent({ session, app, member, teammates, worktreePath, onEvent }: RunWorkstreamParams): Promise<void> {
-  const { provider, model } = await getRoleModelConfig('coding');
+export async function runWorkstreamAgent({
+  session,
+  app,
+  member,
+  teammates,
+  worktreePath,
+  onEvent,
+  model: modelOverride,
+  prompt: promptOverride,
+}: RunWorkstreamParams): Promise<void> {
+  const { provider, model: roleModel } = await getRoleModelConfig('coding');
+  const model = modelOverride ?? roleModel;
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath);
@@ -73,11 +87,11 @@ export async function runWorkstreamAgent({ session, app, member, teammates, work
   const systemPrompt = base + approvedDocs + brief;
 
   const resuming = member.transcript.length > 0;
-  const prompt = resuming
+  const prompt = promptOverride ?? (resuming
     ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
       'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
       'remaining steps and leave nothing uncommitted.'
-    : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`;
+    : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`);
 
   await appendTeamTranscriptEntry(session.id, member.id, { role: 'user', text: prompt });
 
@@ -176,6 +190,7 @@ export async function runWorkstreamAgent({ session, app, member, teammates, work
 }
 
 async function persistEvent(sessionId: string, memberId: string, event: AgentEvent): Promise<void> {
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage);
   if (event.type === 'assistant_text') {
     await appendTeamTranscriptEntry(sessionId, memberId, { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

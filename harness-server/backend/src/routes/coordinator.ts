@@ -33,7 +33,9 @@ const QA_RERUN_MESSAGE =
 const RUN_TURN: Record<StageGroup, (session: SessionRecord, message: string, onEvent: (e: AgentEvent) => void) => Promise<SessionRecord>> = {
   requirements: runRequirementsAgentTurn,
   plan: runPlanAgentTurn,
-  coding: runCodingAgentTurn,
+  // The coordinator only ever drives coding forward step by step, so its
+  // turns are step turns — eligible for light-model routing.
+  coding: (session, message, onEvent) => runCodingAgentTurn(session, message, onEvent, [], { stepTurn: true }),
   qa: runQaAgentTurn,
 };
 

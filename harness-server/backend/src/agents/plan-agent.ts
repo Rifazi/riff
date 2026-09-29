@@ -5,7 +5,7 @@ import matter from 'gray-matter';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession } from '../sessions/session-store.js';
+import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
@@ -203,6 +203,7 @@ export async function runPlanAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+  if (event.type === 'usage') return addStageUsage(sessionId, 'plan', event.usage);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'plan', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

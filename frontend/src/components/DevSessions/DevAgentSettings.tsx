@@ -6,12 +6,14 @@ import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
 import {
   PROVIDERS,
   providerNeedsApiKey,
   type Provider,
   type RedactedJiraSettings,
+  type SettingsResponse,
   type Role,
   type RoleModelConfig,
 } from '@/lib/dev-sessions/types';
@@ -206,7 +208,15 @@ function RoleModelRow({
           variant="blue"
           className="h-9"
           disabled={!dirty || !model.trim() || saving}
-          onClick={() => onSave({ provider, model: model.trim() })}
+          onClick={() =>
+            // A light model is provider-specific: keep it only while the provider stays the same.
+            onSave({
+              provider,
+              model: model.trim(),
+              ...(provider === value.provider && value.lightModel !== undefined ? { lightModel: value.lightModel } : {}),
+              ...(value.useLocalModel !== undefined ? { useLocalModel: value.useLocalModel } : {}),
+            })
+          }
         >
           Save
         </Button>
@@ -307,6 +317,115 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
   );
 }
 
+/**
+ * Coding only: plan steps the plan agent tagged "light" run on this cheaper
+ * model; if it errors or doesn't finish the step, the coding model takes
+ * over in the same turn.
+ */
+function LightStepsRow({
+  value,
+  knownModels,
+  defaultLightModel,
+  onSave,
+  saving,
+}: {
+  value: RoleModelConfig;
+  knownModels: Record<Provider, string[]>;
+  defaultLightModel: string;
+  onSave: (config: RoleModelConfig) => void;
+  saving: boolean;
+}) {
+  const enabled = value.lightModel !== '';
+  const current = value.lightModel || defaultLightModel;
+  const [model, setModel] = useState(current);
+
+  useEffect(() => setModel(current), [current]);
+
+  const dirty = model.trim() !== current;
+  const listId = `dev-agent-light-models-${value.provider}`;
+
+  return (
+    <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
+      <div>
+        <div className="font-medium text-gray-900">Cheaper model for light steps</div>
+        <div className="text-xs text-gray-500">
+          Coding steps the planner marks as mechanical (docs, config, pattern-following) run on this. If it doesn&apos;t
+          finish the step, the coding model takes over. QA always reviews on its own model.
+        </div>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Switch
+          checked={enabled}
+          disabled={saving}
+          onCheckedChange={(on) => onSave({ ...value, lightModel: on ? defaultLightModel : '' })}
+          aria-label="Use a cheaper model for light steps"
+        />
+        <Input
+          list={listId}
+          value={enabled ? model : ''}
+          disabled={!enabled}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={enabled ? 'Model ID' : 'Off — every step uses the coding model'}
+          className="flex-1 font-mono text-xs"
+        />
+        <datalist id={listId}>
+          {(knownModels[value.provider] ?? []).map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        <Button
+          size="sm"
+          variant="blue"
+          className="h-9"
+          disabled={!enabled || !dirty || !model.trim() || saving}
+          onClick={() => onSave({ ...value, lightModel: model.trim() })}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Coordinator only: decide on Riff's built-in local model first, falling back to the coordinator's model. */
+function LocalCoordinatorRow({
+  value,
+  localModel,
+  onSave,
+  saving,
+}: {
+  value: RoleModelConfig;
+  localModel: SettingsResponse['localModel'];
+  onSave: (config: RoleModelConfig) => void;
+  saving: boolean;
+}) {
+  const enabled = value.useLocalModel !== false;
+  return (
+    <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
+      <div>
+        <div className="font-medium text-gray-900">Coordinator on the built-in local model</div>
+        <div className="text-xs text-gray-500">
+          The continue-or-ready decisions run on Riff&apos;s own summary model — free and on this machine. If it&apos;s
+          unavailable or gives an unusable answer, the coordinator model above decides instead.
+        </div>
+      </div>
+      <div className="flex gap-3 items-center">
+        <Switch
+          checked={enabled}
+          disabled={saving}
+          onCheckedChange={(on) => onSave({ ...value, useLocalModel: on })}
+          aria-label="Run the coordinator on the built-in local model"
+        />
+        <span className="text-xs text-gray-600">
+          {localModel.available
+            ? `Using ${localModel.model}`
+            : `Not available: ${localModel.reason ?? 'unknown reason'} — using ${value.model}.`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function DevAgentSettings() {
   const queryClient = useQueryClient();
   const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
@@ -352,6 +471,19 @@ export function DevAgentSettings() {
                   onSave={(config) => saveModelMutation.mutate({ role: role.key, config })}
                 />
               ))}
+              <LocalCoordinatorRow
+                value={settings.models.coordinator}
+                localModel={settings.localModel}
+                saving={saveModelMutation.isPending}
+                onSave={(config) => saveModelMutation.mutate({ role: 'coordinator', config })}
+              />
+              <LightStepsRow
+                value={settings.models.coding}
+                knownModels={settings.knownModels}
+                defaultLightModel={settings.defaultLightModels[settings.models.coding.provider]}
+                saving={saveModelMutation.isPending}
+                onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
+              />
             </Section>
 
             <JiraSettings jira={settings.jira} />

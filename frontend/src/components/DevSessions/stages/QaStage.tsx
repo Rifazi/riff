@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Wrench } from 'lucide-react';
+import { CheckCircle2, Loader2, TriangleAlert, Wrench, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
@@ -15,7 +15,7 @@ import { DeliveryPanel } from '../DeliveryPanel';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
-import { ErrorText, Pill } from '../PageShell';
+import { ErrorText, Notice, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.qa;
@@ -33,10 +33,41 @@ function parseFrontmatterField(markdown: string, field: string): string | null {
 
 function ResultPill({ label, value }: { label: string; value: string | null }) {
   return (
-    <Pill tone={value === 'pass' ? 'green' : value === 'fail' ? 'red' : 'neutral'}>
+    <Pill tone={value === 'pass' ? 'green' : value === 'fail' ? 'red' : value === 'pass-with-notes' ? 'amber' : 'neutral'}>
       {label}: {value ?? '—'}
     </Pill>
   );
+}
+
+// The headline verdict, so pass/fail is obvious before reading the report.
+function QaVerdict({ result }: { result: string | null }) {
+  if (result === 'pass')
+    return (
+      <Notice tone="green">
+        <div className="flex items-center gap-2 font-semibold">
+          <CheckCircle2 className="h-4 w-4" /> QA passed
+        </div>
+      </Notice>
+    );
+  if (result === 'pass-with-notes')
+    return (
+      <Notice tone="amber">
+        <div className="flex items-center gap-2 font-semibold">
+          <TriangleAlert className="h-4 w-4" /> QA passed with notes
+        </div>
+        <div className="mt-0.5 text-xs">Check the findings below before marking it reviewed.</div>
+      </Notice>
+    );
+  if (result === 'fail')
+    return (
+      <Notice tone="red">
+        <div className="flex items-center gap-2 font-semibold">
+          <XCircle className="h-4 w-4" /> QA failed
+        </div>
+        <div className="mt-0.5 text-xs">Send it back for fixes, or reject the session.</div>
+      </Notice>
+    );
+  return null;
 }
 
 export function QaStage({ session }: { session: SessionRecord }) {
@@ -98,6 +129,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // Once merged or an MR is open, fixes on the branch no longer reach anything.
   const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed');
   const markdown = report?.markdown ?? null;
+  const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
 
   return (
     <StageLayout
@@ -126,17 +158,21 @@ export function QaStage({ session }: { session: SessionRecord }) {
           badge={reviewed ? <Pill tone="green">Reviewed</Pill> : null}
           notices={
             markdown && (
-              <div className="flex flex-wrap gap-1.5">
-                <ResultPill label="result" value={parseFrontmatterField(markdown, 'result')} />
-                <ResultPill label="lint" value={parseFrontmatterField(markdown, 'lint')} />
-                <ResultPill label="unit tests" value={parseFrontmatterField(markdown, 'unit-tests')} />
-                <ResultPill label="integration tests" value={parseFrontmatterField(markdown, 'integration-tests')} />
-              </div>
+              <>
+                <QaVerdict result={qaResult} />
+                <div className="flex flex-wrap gap-1.5">
+                  <ResultPill label="result" value={qaResult} />
+                  <ResultPill label="lint" value={parseFrontmatterField(markdown, 'lint')} />
+                  <ResultPill label="unit tests" value={parseFrontmatterField(markdown, 'unit-tests')} />
+                  <ResultPill label="integration tests" value={parseFrontmatterField(markdown, 'integration-tests')} />
+                </div>
+              </>
             )
           }
           footer={
             <>
-              {!delivered && (
+              {/* Nothing to fix on a clean pass. */}
+              {!delivered && qaResult !== 'pass' && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -165,9 +201,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
                 rejectDisabled={reviewed || streaming}
                 rejectBusy={rejectMutation.isPending}
               />
-              {reviewed && session.branch && (
-                <DeliveryPanel session={session} qaResult={markdown ? parseFrontmatterField(markdown, 'result') : null} />
-              )}
+              {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}
             </>
           }
         />

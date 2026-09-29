@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { assertWritable, type FileToolDeps } from './file-tools.js';
+import { outputTail } from './qa-tools.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,18 +31,18 @@ export function createRunPrettierExecute(deps: FileToolDeps) {
     const absolutePaths = files.map((f) => assertWritable(f, deps.repoRoot, deps.writablePaths));
 
     try {
-      const { stdout, stderr } = await execFileAsync('npx', ['prettier', '--write', ...absolutePaths], {
+      await execFileAsync('npx', ['prettier', '--write', ...absolutePaths], {
         cwd: deps.repoRoot,
         timeout: 30_000,
         maxBuffer: 2_000_000,
       });
-      return `Formatted ${files.length} file(s): ${files.join(', ')}\n\n${stdout}${stderr}`.trim();
+      return `Formatted ${files.length} file(s): ${files.join(', ')}`;
     } catch (err: unknown) {
       // Not a guardrail violation (that throws above) — prettier itself
       // failed, almost always a syntax error in one of the files. That's
       // information for the model to react to, not a broken tool call.
       const e = err as { stdout?: string; stderr?: string; message?: string };
-      return `prettier failed on one or more files.\n\n${(e.stdout ?? '').slice(-2000)}\n${(e.stderr ?? e.message ?? '').slice(-2000)}`;
+      return `prettier failed on one or more files.\n\n${outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
     }
   };
 }

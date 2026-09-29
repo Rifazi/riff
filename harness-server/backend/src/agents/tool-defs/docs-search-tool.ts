@@ -13,10 +13,15 @@ export const searchDocsDescription =
 
 export const readDocSchema = z.object({
   path: z.string().describe('Repo-relative path under docs/, e.g. docs/development.md'),
+  heading: z
+    .string()
+    .optional()
+    .describe('A heading as search_docs shows it, e.g. "Ingestion > Invoices" — returns that section and its subsections only'),
 });
 export const readDocDescription =
-  'Read the full contents of one docs/*.md file by its repo-relative path (e.g. "docs/ingestion/invoices.md"). ' +
-  'Only paths under docs/ are allowed.';
+  'Read one docs/*.md file by its repo-relative path (e.g. "docs/ingestion/invoices.md") — the whole file, or ' +
+  'with `heading` just the section a search_docs result pointed at, including its subsections. Only paths under ' +
+  'docs/ are allowed.';
 
 export function createDocsSearchExecutors(deps: { appId: string }) {
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
@@ -25,11 +30,11 @@ export function createDocsSearchExecutors(deps: { appId: string }) {
     return results.map((r) => `### ${r.file} — ${r.heading}\n${r.content.slice(0, 700)}`).join('\n\n---\n\n');
   };
 
-  const readDocExecute = async ({ path: requestedPath }: z.infer<typeof readDocSchema>): Promise<string> => {
+  const readDocExecute = async ({ path: requestedPath, heading }: z.infer<typeof readDocSchema>): Promise<string> => {
     if (!requestedPath.startsWith('docs/')) {
       throw new Error(`Refused: ${requestedPath} is not under docs/.`);
     }
-    const content = readDocSection(deps.appId, requestedPath);
+    const content = readDocSection(deps.appId, requestedPath, heading);
     if (content === null) {
       throw new Error(`No indexed content found for ${requestedPath}.`);
     }
