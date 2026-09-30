@@ -14,6 +14,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
@@ -104,13 +105,18 @@ export async function runQaAgentTurn(
     }
   }
 
+  // What the human has already provided, so the agent reads it instead of
+  // asking for it again (see sessions/reference-docs.ts).
+  const referenceNote = await referenceDocsTurnNote(session, 'qa', isFirstTurn);
+  if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
+
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
     void persistEvent(session.id, event);
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
     const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
     const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
     const createMcpServer = () =>
@@ -157,7 +163,7 @@ export async function runQaAgentTurn(
       return session;
     }
 
-    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
     const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
     const { runCheckedCommandTool, getDiffTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
     const tools: ToolSet = {

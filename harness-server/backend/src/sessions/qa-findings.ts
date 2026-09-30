@@ -1,8 +1,8 @@
 import matter from 'gray-matter';
 
 /**
- * The part of a QA report that needs acting on: result, failing checks and
- * the blocking findings. Used for the send-back relay to the coding agent
+ * The part of a QA report that needs acting on: result, failing checks, the
+ * blocking findings and the non-blocking notes QA still wants acted on. Used for the send-back relay to the coding agent
  * and to brief a fresh QA pass on what it flagged last time.
  */
 export function compactQaFindings(raw: string): string {
@@ -29,8 +29,21 @@ export function compactQaFindings(raw: string): string {
       .filter((l) => /^- \[ \]/.test(l) || /^- \[blocking\]/i.test(l))
       .map((l) => l.replace(/^- \[(?: |blocking)\]\s*/i, ''));
 
+  // Older reports have no actionable-notes field: their [nit] lines are the
+  // nearest thing.
+  const notes = Array.isArray(d['actionable-notes'])
+    ? (d['actionable-notes'] as unknown[]).map(String)
+    : parsed.content
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^- \[(note|nit)\]/i.test(l))
+        .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''));
+
   let text = `QA result: ${d.result ?? '?'}`;
   if (failedChecks.length > 0) text += ` — failing checks: ${failedChecks.join(', ')}`;
   text += findings.length > 0 ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  if (notes.length > 0) {
+    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n) => `- ${n}`).join('\n')}`;
+  }
   return text;
 }

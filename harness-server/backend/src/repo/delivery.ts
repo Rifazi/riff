@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 
 // Never let git or gh stop and wait for a password prompt nobody can see —
 // fail fast instead, with the error shown in the UI.
-const NON_INTERACTIVE_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
+const NON_INTERACTIVE_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1', GLAB_NO_PROMPT: '1', NO_PROMPT: '1' };
 
 async function run(cmd: string, args: string[], cwd: string, timeoutMs = 120_000): Promise<{ stdout: string; stderr: string }> {
   try {
@@ -32,9 +32,11 @@ export type DeliveryPlan =
       remoteUrl: string;
       host: RemoteHost;
       webUrl: string | null;
-      // How the request gets created: GitLab push options, the GitHub CLI,
-      // or not at all (push only, the human opens it from the link).
-      via: 'gitlab-push-options' | 'gh' | 'push-only';
+      // How the request gets created: the GitLab CLI (full Markdown
+      // description), GitLab push options (one-line description — git
+      // rejects newlines in them), the GitHub CLI, or not at all (push
+      // only, the human opens it from the link).
+      via: 'glab' | 'gitlab-push-options' | 'gh' | 'push-only';
       reason: string;
     };
 
@@ -63,9 +65,9 @@ function hostOf(webUrl: string | null, remoteUrl: string): RemoteHost {
   return 'other';
 }
 
-async function ghReady(cwd: string): Promise<boolean> {
+async function cliReady(cli: 'gh' | 'glab', cwd: string): Promise<boolean> {
   try {
-    await run('gh', ['auth', 'status'], cwd, 15_000);
+    await run(cli, ['auth', 'status'], cwd, 15_000);
     return true;
   } catch {
     return false;
@@ -90,13 +92,16 @@ export async function detectDelivery(repoRoot: string, branch: string, baseBranc
   const where = webUrl ?? remoteUrl;
 
   if (host === 'gitlab') {
+    const glab = await cliReady('glab', repoRoot);
     return {
-      kind: 'merge_request', branch, baseBranch, remote, remoteUrl, host, webUrl, via: 'gitlab-push-options',
-      reason: `Remote "${remote}" is GitLab (${where}) — the branch is pushed and GitLab opens the merge request into ${baseBranch} as part of the push.`,
+      kind: 'merge_request', branch, baseBranch, remote, remoteUrl, host, webUrl, via: glab ? 'glab' : 'gitlab-push-options',
+      reason: glab
+        ? `Remote "${remote}" is GitLab (${where}) — the branch is pushed and a merge request into ${baseBranch} is opened with the GitLab CLI.`
+        : `Remote "${remote}" is GitLab (${where}) — the branch is pushed and GitLab opens the merge request into ${baseBranch} as part of the push (install and log in to glab for a fully formatted description).`,
     };
   }
   if (host === 'github') {
-    const gh = await ghReady(repoRoot);
+    const gh = await cliReady('gh', repoRoot);
     return {
       kind: 'merge_request', branch, baseBranch, remote, remoteUrl, host, webUrl, via: gh ? 'gh' : 'push-only',
       reason: gh
@@ -112,7 +117,10 @@ export async function detectDelivery(repoRoot: string, branch: string, baseBranc
 
 export interface DeliveryText {
   title: string;
+  // Full Markdown body.
   description: string;
+  // One-line version, for GitLab push options (no newlines allowed).
+  summary: string;
 }
 
 /**
@@ -150,7 +158,7 @@ export async function deliver(repoRoot: string, plan: DeliveryPlan, text: Delive
       '-o', 'merge_request.create',
       '-o', `merge_request.target=${plan.baseBranch}`,
       '-o', `merge_request.title=${oneLine(text.title, 250)}`,
-      '-o', `merge_request.description=${oneLine(text.description, 2000)}`,
+      '-o', `merge_request.description=${oneLine(text.summary, 2000)}`,
       '-o', 'merge_request.remove_source_branch'
     );
   }
@@ -164,6 +172,27 @@ export async function deliver(repoRoot: string, plan: DeliveryPlan, text: Delive
       target: plan.baseBranch,
       url,
       detail: url ? `Pushed ${plan.branch} and opened a merge request into ${plan.baseBranch}.` : `Pushed ${plan.branch}; GitLab didn't report a merge request URL — check the project.`,
+      at,
+    };
+  }
+
+  if (plan.via === 'glab') {
+    let url: string | null;
+    try {
+      const out = await run('glab', [
+        'mr', 'create', '--source-branch', plan.branch, '--target-branch', plan.baseBranch,
+        '--title', text.title, '--description', text.description, '--remove-source-branch', '--yes',
+      ], repoRoot);
+      url = /https?:\/\/\S+\/-\/merge_requests\/\d+/.exec(`${out.stdout}\n${out.stderr}`)?.[0] ?? null;
+    } catch (err) {
+      if (!/already exists/i.test((err as Error).message)) throw err;
+      url = /https?:\/\/\S+\/-\/merge_requests\/\d+/.exec((err as Error).message)?.[0] ?? null;
+    }
+    return {
+      kind: 'merge_request',
+      target: plan.baseBranch,
+      url,
+      detail: url ? `Pushed ${plan.branch} and opened a merge request into ${plan.baseBranch}.` : `Pushed ${plan.branch}; glab didn't report a merge request URL — check the project.`,
       at,
     };
   }

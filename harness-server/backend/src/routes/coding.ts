@@ -5,7 +5,7 @@ import { startEventStream } from './sse.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { runCodingAgentTurn } from '../agents/coding-agent.js';
-import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
+import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import { diffAgainstBase, diffStatAgainstBase, commitLogAgainstBase } from '../repo/git.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
@@ -47,7 +47,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
 
       let attachments;
       try {
-        attachments = await parseAttachments(rawAttachments ?? []);
+        attachments = await saveAsReferenceDocs(session.id, await parseAttachments(rawAttachments ?? []));
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }

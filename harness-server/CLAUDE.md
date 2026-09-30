@@ -388,6 +388,53 @@ below) — never inside the target repo.
    (etc.) keeps its theme but no longer matches a preset. It shows as its
    own "Current" theme, and saving writes `basedOn: null`.
 
+17. User asked for the requirements agent to reach the web, but only when
+   they specifically ask. `tool-defs/fetch-url-tool.ts` adds `fetch_url`
+   (both engines; HTML stripped, 20k chars, text types only, loopback/private
+   hosts refused on every redirect hop). It is always registered, so old
+   calls in replayed AI-SDK history stay valid, but its execute refuses
+   unless the turn enabled it. `routes/requirements.ts` enables it only when
+   the human's typed message passes `wantsWebAccess`: an "online"/"search the
+   web" phrase, or a URL plus a read verb. Attachments, meeting transcripts
+   and coordinator turns never enable it. An enabled turn gets
+   `WEB_ACCESS_TURN_NOTE` prepended to its prompt, not the system prompt,
+   because of resume and because an app's prompt override replaces the base
+   prompt. No web search tool: `fetch_url` only reads pages.
+
+18. User asked for QA findings the coder should act on to reach it even when
+   the branch technically passes. `write_qa_report` gained optional
+   `actionableNotes` (frontmatter `actionable-notes`). The guidance lives in
+   the schema description as well as the base prompt, because an app's
+   prompt override replaces the base prompt. A `pass` with notes is stored
+   as `pass-with-notes`, so the "Send back for fixes" button shows.
+   `compactQaFindings`, and its client twin in `CodingStage.tsx`, relay the
+   notes under "Also address" after the blocking list. For older reports
+   without the field, they use the body's `[note]`/`[nit]` lines instead.
+   The re-run brief uses the same summary, so the next QA pass checks the
+   notes too. Send-back is still the human's click.
+
+19. User asked to stop re-attaching the same documentation because each
+   agent asked for it again. Attachments used to be one-shot, inlined into
+   a single message of a single stage. Now `sessions/reference-docs.ts`
+   keeps **reference docs** under `state/reference-docs/` (gitignored, never
+   in the target repo) at two scopes: a session's (every chat attachment is
+   saved there by the four `*/message` routes via `saveAsReferenceDocs`) and
+   an app's (added on the Apps page, shared by all its sessions; a session
+   doc can be moved there with `/reference-docs/:docId/share`). They are
+   indexed like docs/ but with long heading-less text chunked into
+   6k-character "(part n of m)" sections. `search_docs` and `read_doc`
+   cover them under `reference/app/…` and `reference/session/…` paths.
+   `read_doc` returns an outline instead of more than 40k characters. Each
+   stage learns what exists from `referenceDocsTurnNote`, prepended to the
+   turn prompt and not the system prompt, for the same resume/override
+   reasons as step 17. It is sent only when the set changes, tracked in
+   `session.referenceDocsSeen`, so it isn't re-billed every turn. Team
+   workstreams get the list in their per-run system prompt. An attachment
+   over 30k characters is sent as a pointer to its reference path instead
+   of in full. Split children inherit copies. Session and app deletion
+   remove theirs. UI: a "Reference docs" button on the session header and
+   on each app card (`components/DevSessions/ReferenceDocs.tsx`).
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -530,8 +577,13 @@ exist standalone).
   only once QA is marked reviewed. It detects the repo shape itself: no
   remote → `--no-ff` merge into the trunk locally, leaving the trunk
   checked out for the next session. A remote → push, then open the MR: via
-  GitLab push options (`merge_request.create`, no CLI needed), via `gh pr
-  create` for GitHub when gh is logged in, else push-only plus a link. The
+  `glab mr create` when glab is logged in, else GitLab push options
+  (`merge_request.create`, no CLI needed, one-line description since push
+  options can't hold newlines), via `gh pr create` for GitHub when gh is
+  logged in, else push-only plus a link. The description
+  (`repo/delivery-text.ts`) never names Riff: a summary written by the local
+  Qwen (fallback: the requirements doc's first paragraph + commits), a QA
+  results table, and collapsed commits / files / full QA report. The
   trunk is resolved live by `resolveBaseBranch`: `main` if it exists
   locally or on a remote, else `master`, else the app's stored base
   branch. git/gh run with prompts disabled, so missing credentials fail

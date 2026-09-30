@@ -14,6 +14,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
@@ -159,6 +160,11 @@ export async function runCodingAgentTurn(
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
+  // What the human has already provided, so the agent reads it instead of
+  // asking for it again (see sessions/reference-docs.ts).
+  const referenceNote = await referenceDocsTurnNote(session, 'coding', isFirstTurn);
+  if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
+
   const onBranchCreated = async (branchName: string) => {
     await updateSession(session.id, { branch: branchName, stage: 'coding-in-progress' });
   };
@@ -216,7 +222,7 @@ export async function runCodingAgentTurn(
 
   async function runEngine(): Promise<{ isError: boolean }> {
     if (provider === 'claude') {
-      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
       const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
       const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
       const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({ repoRoot: app.repoRoot });
@@ -267,7 +273,7 @@ export async function runCodingAgentTurn(
         return { isError: true };
       }
 
-      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
       const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
       const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
       const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });

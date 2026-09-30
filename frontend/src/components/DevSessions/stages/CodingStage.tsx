@@ -11,6 +11,7 @@ import type { AttachmentInput, CodingTeamMember, SessionRecord } from '@/lib/dev
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA, TEAM_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
 import { useTeamRun } from '@/lib/dev-sessions/useTeamRun';
+import { autoRunStopReason, progressOf } from '@/lib/dev-sessions/auto-run';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
@@ -23,15 +24,17 @@ import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.coding;
 
-// Generous cap on consecutive auto-continues — a step may legitimately need
-// a retry (e.g. after a lint failure). Guards against a plan whose steps
-// never advance rather than limiting normal use.
+// Generous cap on consecutive auto-continues. A turn that makes no progress
+// already stops auto-run (see autoRunStopReason) — this only bounds a plan
+// that keeps shuffling step statuses without ever finishing.
 const MAX_AUTO_RUN_ATTEMPTS = 20;
+const CONTINUE_MESSAGE = 'Continue with the next step.';
 const CODING_KICKOFF_MESSAGE = 'Please implement the approved plan.';
 
 // Client-side twin of the server's compactQaFindings (sessions/qa-findings.ts)
-// for when /qa/findings isn't available: result, failing checks, and the
-// unchecked criteria / [blocking] lines — never the whole report.
+// for when /qa/findings isn't available: result, failing checks, the
+// unchecked criteria / [blocking] lines and the non-blocking notes — never
+// the whole report.
 function compactQaReport(markdown: string): string {
   const field = (key: string) => markdown.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1].trim();
   const failed = [
@@ -46,9 +49,17 @@ function compactQaReport(markdown: string): string {
     .map((l) => l.trim())
     .filter((l) => /^- \[ \]/.test(l) || /^- \[blocking\]/i.test(l))
     .map((l) => l.replace(/^- \[(?: |blocking)\]\s*/i, ''));
+  const notes = markdown
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^- \[(note|nit)\]/i.test(l))
+    .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''));
   let text = `QA result: ${field('result') ?? '?'}`;
   if (failed.length > 0) text += ` — failing checks: ${failed.join(', ')}`;
   text += findings.length > 0 ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  if (notes.length > 0) {
+    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n) => `- ${n}`).join('\n')}`;
+  }
   return text;
 }
 
@@ -64,6 +75,8 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
   const [autoRun, setAutoRun] = useState(false);
+  // Why auto-run last stopped on its own, shown until it's restarted.
+  const [autoRunStopped, setAutoRunStopped] = useState<string | null>(null);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
@@ -160,8 +173,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // stepTurn: an automatic "do the next checklist step" message (kickoff,
   // Continue, auto-run) — the only kind the server may route to the light
   // model when the step is tagged light. Anything the human types isn't one.
-  const handleSend = (message: string, attachments?: AttachmentInput[], stepTurn = false) =>
-    send(
+  const handleSend = (message: string, attachments?: AttachmentInput[], stepTurn = false) => {
+    setAutoRunStopped(null);
+    return send(
       `/api/sessions/${sessionId}/coding/message`,
       message,
       refresh,
@@ -176,6 +190,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       attachments,
       stepTurn ? { stepTurn: true } : undefined
     );
+  };
 
   // Kick off automatically when reached with no branch and nothing said.
   const kickedOff = useRef(false);
@@ -237,31 +252,71 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   }, [session.id, session.codingReconciliationPending, streaming]);
 
   // Auto-run: a mechanical "keep clicking Continue" loop over the checklist,
-  // mutually exclusive with the coordinator. Stops the moment anything
-  // needs a human: approval, an error, or the attempt cap.
+  // mutually exclusive with the coordinator. Driven as an explicit loop so
+  // each turn's outcome is checked against the refetched session before the
+  // next one — it stops the moment anything needs a human: approval, a failed
+  // turn, a question, a turn that made no progress, or the attempt cap.
   const plan = session.codingPlan;
   const allStepsDone = plan ? plan.every((s) => s.status === 'done') : true;
   const approved = Boolean(session.codingApprovedAt);
-  const autoRunAttempts = useRef(0);
-  useEffect(() => {
-    if (!autoRun) return;
-    if (session.coordinatorEnabled) return;
-    if (streaming) return;
-    if (error) return;
-    if (approved) return;
-    if (!plan || allStepsDone) return;
-    if (autoRunAttempts.current >= MAX_AUTO_RUN_ATTEMPTS) {
-      setAutoRun(false);
-      return;
+  const autoRunActive = useRef(false);
+  useEffect(
+    () => () => {
+      autoRunActive.current = false;
+    },
+    []
+  );
+
+  const stopAutoRun = (reason: string | null) => {
+    autoRunActive.current = false;
+    setAutoRun(false);
+    setAutoRunStopped(reason);
+  };
+
+  const fetchSession = () =>
+    queryClient.fetchQuery({ queryKey: ['session', sessionId], queryFn: () => api.getSession(sessionId), staleTime: 0 });
+  const fetchCommitCount = (branch: string | null) =>
+    branch
+      ? queryClient
+          .fetchQuery({ queryKey: ['coding-diff', sessionId, branch], queryFn: () => api.getCodingDiff(sessionId), staleTime: 0 })
+          .then((d) => d.commits.length)
+          .catch(() => 0)
+      : Promise.resolve(0);
+
+  const runAutoLoop = async () => {
+    autoRunActive.current = true;
+    setAutoRun(true);
+    setAutoRunStopped(null);
+    let current = session;
+    let commits = await fetchCommitCount(current.branch);
+    for (let attempt = 0; attempt < MAX_AUTO_RUN_ATTEMPTS; attempt++) {
+      if (!autoRunActive.current) return;
+      if (current.coordinatorEnabled) return stopAutoRun(`${COORDINATOR_PERSONA.name} took over this session.`);
+      if (current.codingApprovedAt) return stopAutoRun(null);
+      if (!current.codingPlan || current.codingPlan.every((s) => s.status === 'done')) return stopAutoRun(null);
+
+      const before = progressOf(current, commits);
+      const turn = await handleSend(CONTINUE_MESSAGE, undefined, true);
+      try {
+        current = await fetchSession();
+      } catch (err) {
+        return stopAutoRun(`couldn't reload the session — ${err instanceof Error ? err.message : String(err)}`);
+      }
+      commits = await fetchCommitCount(current.branch);
+      // Turned off mid-turn: that turn was allowed to finish, nothing more.
+      if (!autoRunActive.current) return;
+      const reason = autoRunStopReason(turn, before, progressOf(current, commits), current);
+      if (reason) return stopAutoRun(reason);
     }
-    autoRunAttempts.current += 1;
-    void handleSend('Continue with the next step.', undefined, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoRun, session.coordinatorEnabled, approved, streaming, error, plan, allStepsDone]);
+    stopAutoRun(`it hit the limit of ${MAX_AUTO_RUN_ATTEMPTS} steps in a row — check the checklist, then turn it back on to keep going.`);
+  };
 
   const entries = streaming ? [...session.transcripts.coding, ...overlay] : session.transcripts.coding;
   const hasCommits = Boolean(session.branch) && (diffData?.commits.length ?? 0) > 0;
   const canContinue = Boolean(plan) && !allStepsDone && !streaming && !approved && !teamMode;
+  // The switch stays up for the whole run (turns included) so it can always
+  // be turned off.
+  const showStepControls = canContinue || autoRun;
   const busy = streaming || teamActive;
   const canStartTeam =
     teamMode && !teamActive && !approved && (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
@@ -322,12 +377,18 @@ export function CodingStage({ session }: { session: SessionRecord }) {
           {plan && plan.length > 0 && (
             <div className="flex-shrink-0 space-y-2">
               <CodingPlanChecklist steps={plan} />
-              {canContinue && (
+              {showStepControls && (
                 <div className="flex flex-wrap items-center gap-4">
-                  <Button size="sm" variant="blue" onClick={() => handleSend('Continue with the next step.', undefined, true)}>
-                    <Play />
-                    Continue to next step
-                  </Button>
+                  {!autoRun && (
+                    <Button
+                      size="sm"
+                      variant="blue"
+                      onClick={() => void handleSend(CONTINUE_MESSAGE, undefined, true)}
+                    >
+                      <Play />
+                      Continue to next step
+                    </Button>
+                  )}
                   <label
                     className="flex items-center gap-2 text-sm text-gray-700"
                     title={
@@ -339,15 +400,17 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                     <Switch
                       checked={autoRun}
                       disabled={session.coordinatorEnabled}
-                      onCheckedChange={(checked) => {
-                        autoRunAttempts.current = 0;
-                        setAutoRun(checked);
-                      }}
+                      onCheckedChange={(checked) =>
+                        checked
+                          ? void runAutoLoop()
+                          : stopAutoRun(streaming ? 'you turned it off. The step already running will finish, then nothing more is sent.' : null)
+                      }
                     />
                     Auto-run remaining steps
                   </label>
                 </div>
               )}
+              {autoRunStopped && !autoRun && <Notice tone="amber">Auto-run stopped: {autoRunStopped}</Notice>}
             </div>
           )}
           <ChatPane

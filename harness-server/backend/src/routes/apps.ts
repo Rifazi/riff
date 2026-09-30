@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { listApps, getApp, createApp, updateApp, deleteApp, AppInUseError } from '../apps/apps-store.js';
 import { docsDirFor, readRepoUrl, validateRepoRoot, describeSetup, baseBranchFor, InvalidRepoRootError, type CheckCommands } from '../apps/apps.js';
 import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-index.js';
+import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
 import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts-store.js';
 import { readBasePrompt } from '../agents/prompts.js';
@@ -93,6 +94,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     try {
       await deleteApp(request.params.id);
       removeIndex(request.params.id);
+      await removeAllReferenceDocs({ kind: 'app', appId: request.params.id });
       return reply.code(204).send();
     } catch (err) {
       if (err instanceof AppInUseError) return reply.code(409).send({ error: err.message });

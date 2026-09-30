@@ -16,6 +16,7 @@ import { SetupNotices, toSetupReport, type SetupReport } from '@/components/DevS
 import { ThemeStudio } from '@/components/DevSessions/themes/ThemeStudio';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
 import { ExternalAnchor } from '@/components/DevSessions/ExternalAnchor';
+import { AppReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
 
 const DEFAULT_CHECK_COMMANDS: Record<keyof CheckCommands, string> = {
   lint: 'lint',
@@ -178,6 +179,7 @@ function AppCard({ app }: { app: AppConfig }) {
               Handbook
             </ExternalAnchor>
           </Button>
+          <AppReferenceDocsButton appId={app.id} appName={app.name} />
         </>
       }
     >

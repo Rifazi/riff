@@ -1,18 +1,20 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { readDocSection, searchDocs } from '../../repo/docs-index.js';
+import { readReferenceDoc, searchReferenceDocs } from '../../sessions/reference-docs.js';
 
 export const searchDocsSchema = z.object({
   query: z.string().describe('Keywords to search for, e.g. "square d cash sale format"'),
 });
 export const searchDocsDescription =
   'Full-text search over this repo\'s docs/ markdown files (architecture, ingestion, transmission, ops, API). ' +
+  'Also searches the reference documents the human attached (paths under reference/). ' +
   'Returns the top matching sections (truncated previews) with their file path and heading — use read_doc ' +
   'for a section\'s full text. Use this before proposing anything — this repo documents its own conventions ' +
   'in detail.';
 
 export const readDocSchema = z.object({
-  path: z.string().describe('Repo-relative path under docs/, e.g. docs/development.md'),
+  path: z.string().describe('Repo-relative path under docs/ (e.g. docs/development.md), or a reference document path (reference/…)'),
   heading: z
     .string()
     .optional()
@@ -20,19 +22,30 @@ export const readDocSchema = z.object({
 });
 export const readDocDescription =
   'Read one docs/*.md file by its repo-relative path (e.g. "docs/ingestion/invoices.md") — the whole file, or ' +
-  'with `heading` just the section a search_docs result pointed at, including its subsections. Only paths under ' +
-  'docs/ are allowed.';
+  'with `heading` just the section a search_docs result pointed at, including its subsections. Also reads the ' +
+  'reference documents the human attached (reference/… paths). Only paths under docs/ or reference/ are allowed.';
 
-export function createDocsSearchExecutors(deps: { appId: string }) {
+// sessionId adds that session's own reference documents to the app's.
+export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string }) {
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
-    const results = searchDocs(deps.appId, query, 4);
+    const results = [
+      ...searchDocs(deps.appId, query, 4),
+      ...(await searchReferenceDocs(deps.appId, deps.sessionId, query, 4)),
+    ]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4);
     if (results.length === 0) return `No docs sections matched "${query}".`;
     return results.map((r) => `### ${r.file} — ${r.heading}\n${r.content.slice(0, 700)}`).join('\n\n---\n\n');
   };
 
   const readDocExecute = async ({ path: requestedPath, heading }: z.infer<typeof readDocSchema>): Promise<string> => {
+    if (requestedPath.startsWith('reference/')) {
+      const content = await readReferenceDoc(deps.appId, deps.sessionId, requestedPath, heading);
+      if (content === null) throw new Error(`No reference document at ${requestedPath}.`);
+      return content;
+    }
     if (!requestedPath.startsWith('docs/')) {
-      throw new Error(`Refused: ${requestedPath} is not under docs/.`);
+      throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/.`);
     }
     const content = readDocSection(deps.appId, requestedPath, heading);
     if (content === null) {
@@ -44,7 +57,7 @@ export function createDocsSearchExecutors(deps: { appId: string }) {
   return { searchDocsExecute, readDocExecute };
 }
 
-export function createDocsSearchTools(deps: { appId: string }) {
+export function createDocsSearchTools(deps: { appId: string; sessionId?: string }) {
   const { searchDocsExecute, readDocExecute } = createDocsSearchExecutors(deps);
   return {
     searchDocsTool: tool({ description: searchDocsDescription, inputSchema: searchDocsSchema, execute: searchDocsExecute }),

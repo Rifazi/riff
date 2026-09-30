@@ -126,6 +126,8 @@ export interface CodingTeamState {
   finishedAt: string | null;
 }
 
+export type ReferenceDocsStage = 'requirements' | 'plan' | 'coding' | 'qa';
+
 export interface SessionRecord {
   id: string;
   sessionKey: string; // e.g. "API-1234" or a kebab-slug — shared across requirements doc, branch, QA report
@@ -252,6 +254,10 @@ export interface SessionRecord {
     coding: string | null;
     qa: string | null;
   };
+
+  // Which set of reference documents (sessions/reference-docs.ts) each stage
+  // has been told about, so the list is only re-sent when it changes.
+  referenceDocsSeen: Partial<Record<ReferenceDocsStage, string>>;
 
   // Running token totals per stage (team members count toward coding), so
   // the cost of each stage is visible and changes to it measurable.

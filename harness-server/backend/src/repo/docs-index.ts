@@ -9,7 +9,7 @@ export interface DocSection {
   content: string;
 }
 
-interface ScoredSection extends DocSection {
+export interface ScoredSection extends DocSection {
   score: number;
 }
 
@@ -28,7 +28,7 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length > 1);
 }
 
-function splitIntoSections(relPath: string, markdown: string): DocSection[] {
+export function splitIntoSections(relPath: string, markdown: string): DocSection[] {
   const lines = markdown.split('\n');
   const result: DocSection[] = [];
   const headingStack: { level: number; text: string }[] = [];
@@ -130,9 +130,14 @@ export function getIndexedAt(appId: string): number {
 }
 
 export function searchDocs(appId: string, query: string, k = 5): ScoredSection[] {
+  return scoreSections(sectionsByApp.get(appId) ?? [], query, k);
+}
+
+// Shared with sessions/reference-docs.ts, which searches the human's
+// attached reference documents the same way.
+export function scoreSections(sections: DocSection[], query: string, k: number): ScoredSection[] {
   const queryTerms = tokenize(query);
   if (queryTerms.length === 0) return [];
-  const sections = sectionsByApp.get(appId) ?? [];
 
   const scored: ScoredSection[] = sections.map((section) => {
     const haystack = tokenize(`${section.heading} ${section.content}`);
@@ -169,15 +174,22 @@ export function searchDocs(appId: string, query: string, k = 5): ScoredSection[]
  * the file's headings, when `heading` matches nothing.
  */
 export function readDocSection(appId: string, relPath: string, heading?: string): string | null {
+  const matches = selectSections(sectionsByApp.get(appId) ?? [], relPath, heading);
+  return matches && matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
+}
+
+// The sections readDocSection returns, before joining — null when the file
+// isn't indexed at all.
+export function selectSections(sections: DocSection[], relPath: string, heading?: string): DocSection[] | null {
   const normalized = relPath.replace(/^\/+/, '');
-  const sections = sectionsByApp.get(appId) ?? [];
   let matches = sections.filter((s) => s.file === normalized);
   if (matches.length === 0) return null;
   if (heading) {
     const wanted = heading.trim().toLowerCase();
     const inSection = matches.filter((s) => {
       const h = s.heading.toLowerCase();
-      return h === wanted || h.startsWith(`${wanted} > `);
+      // "(part n of m)": a long heading-less section split by reference-docs.ts.
+      return h === wanted || h.startsWith(`${wanted} > `) || h.startsWith(`${wanted} (part `);
     });
     if (inSection.length === 0) {
       throw new Error(
@@ -186,7 +198,7 @@ export function readDocSection(appId: string, relPath: string, heading?: string)
     }
     matches = inSection;
   }
-  return matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
+  return matches;
 }
 
 export function listIndexedFiles(appId: string): string[] {

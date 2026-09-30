@@ -55,7 +55,7 @@ function QaVerdict({ result }: { result: string | null }) {
         <div className="flex items-center gap-2 font-semibold">
           <TriangleAlert className="h-4 w-4" /> QA passed with notes
         </div>
-        <div className="mt-0.5 text-xs">Check the findings below before marking it reviewed.</div>
+        <div className="mt-0.5 text-xs">Nothing blocks, but there are notes to act on — send it back so they get fixed, or mark it reviewed as is.</div>
       </Notice>
     );
   if (result === 'fail')

@@ -10,8 +10,10 @@ import { isSessionKeyInUse } from '../sessions/session-keys.js';
 import type { SessionRecord, SplitProposal } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
 import { runRequirementsAgentTurn } from '../agents/requirements-agent.js';
-import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
+import { wantsWebAccess } from '../agents/tool-defs/fetch-url-tool.js';
+import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import { copyMeetingSource, readMeetingSourceAttachment } from '../sessions/meeting-source.js';
+import { copyReferenceDocs } from '../sessions/reference-docs.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 
 export async function registerRequirementsRoutes(app: FastifyInstance): Promise<void> {
@@ -32,7 +34,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
       // of a mid-stream error event.
       let attachments;
       try {
-        attachments = await parseAttachments(rawAttachments ?? []);
+        attachments = await saveAsReferenceDocs(session.id, await parseAttachments(rawAttachments ?? []));
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
@@ -86,7 +88,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
       };
 
       try {
-        await runRequirementsAgentTurn(session, message, send, attachments);
+        await runRequirementsAgentTurn(session, message, send, attachments, { webAccess: wantsWebAccess(message) });
       } catch (err) {
         send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
@@ -263,6 +265,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
     const children: SessionRecord[] = [];
     for (const [i, part] of proposal.parts.entries()) {
       const sourceMeeting = session.sourceMeeting ? await copyMeetingSource(session.sourceMeeting, ids[i]) : null;
+      await copyReferenceDocs({ kind: 'session', sessionId: session.id }, { kind: 'session', sessionId: ids[i] });
       children.push(
         await createSession({
           id: ids[i],

@@ -5,30 +5,14 @@ import { startEventStream } from './sse.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
-import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
+import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
-import matter from 'gray-matter';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { deliver, detectDelivery } from '../repo/delivery.js';
+import { buildDeliveryText } from '../repo/delivery-text.js';
 import { resolveBaseBranch } from '../repo/git.js';
-import type { SessionRecord } from '../sessions/session.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
-
-async function deliveryText(session: SessionRecord): Promise<{ title: string; description: string }> {
-  let qa = '';
-  if (session.qaReportPath) {
-    try {
-      const parsed = matter(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'));
-      const d = parsed.data as Record<string, unknown>;
-      qa = `QA: ${d.result ?? '?'} (lint ${d.lint ?? '?'}, unit tests ${d['unit-tests'] ?? '?'}, integration ${d['integration-tests'] ?? '?'})\n\n${parsed.content.trim()}`;
-    } catch {
-      // report unreadable — ship without it
-    }
-  }
-  const description = `${session.title} (${session.sessionKey}), built with Riff Dev Sessions.\n\n${qa}`.slice(0, 60_000);
-  return { title: `${session.sessionKey}: ${session.title}`, description };
-}
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -44,7 +28,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
 
       let attachments;
       try {
-        attachments = await parseAttachments(rawAttachments ?? []);
+        attachments = await saveAsReferenceDocs(session.id, await parseAttachments(rawAttachments ?? []));
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
@@ -171,7 +155,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     const app = await getApp(session.appId);
     try {
       const plan = await detectDelivery(app.repoRoot, session.branch, await resolveBaseBranch(app.repoRoot, baseBranchFor(app)));
-      const result = await deliver(app.repoRoot, plan, await deliveryText(session));
+      const result = await deliver(app.repoRoot, plan, await buildDeliveryText(session, app.repoRoot, plan.baseBranch));
       return updateSession(session.id, { delivery: result });
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });

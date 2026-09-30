@@ -31,6 +31,17 @@ export interface AttachmentInput {
   data: string;
 }
 
+/** A document every agent can read without it being re-attached — see harness-server's sessions/reference-docs.ts. */
+export interface ReferenceDoc {
+  id: string;
+  name: string;
+  chars: number;
+  addedAt: string;
+  scope: 'app' | 'session';
+  /** What the agents read it by, e.g. reference/session/api-spec-pdf.md. */
+  path: string;
+}
+
 export type CodingStepStatus = 'pending' | 'in_progress' | 'done';
 
 export interface CodingPlanStep {
@@ -253,7 +264,7 @@ export type DeliveryPlan =
       remoteUrl: string;
       host: 'github' | 'gitlab' | 'other';
       webUrl: string | null;
-      via: 'gitlab-push-options' | 'gh' | 'push-only';
+      via: 'glab' | 'gitlab-push-options' | 'gh' | 'push-only';
       reason: string;
     };
 

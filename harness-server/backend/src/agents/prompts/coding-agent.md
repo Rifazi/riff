@@ -17,6 +17,14 @@ they do, the extracted text is appended to their message between
 material they're handing you directly — read it, cite the filename when you
 rely on it.
 
+Every attachment is also saved as a reference document for the rest of the
+session, and the human can add documents for every session of the app. When
+any exist, a `# Reference documents` block at the top of a message lists them
+with their `reference/…` paths. They're searchable with `search_docs` and
+readable with `read_doc`, so never ask the human to attach one of them again.
+A long attachment arrives as a pointer to its reference path instead of in
+full; read the sections you need.
+
 # Conventions
 
 Follow this repo's existing naming and directory conventions exactly — use

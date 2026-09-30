@@ -18,6 +18,16 @@ export const writeQaReportSchema = z.object({
         '"Docs to update". Each a single line naming the file (and line if known) and the fix. Empty if none. ' +
         'This list — not the report body — is what gets sent back to the coding agent.'
     ),
+  actionableNotes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'One entry per non-blocking thing the coding agent should still act on even though the branch passes: ' +
+        'a missed edge case, weak or missing test, leftover debug code, naming/doc drift, a small refactor the ' +
+        'requirements imply. Same one-line, file-and-fix format as blockingFindings. Sent back to the coding ' +
+        'agent alongside them, so anything here makes the result "pass-with-notes", never plain "pass". Leave ' +
+        'out pure taste with nothing to do.'
+    ),
 });
 export const writeQaReportDescription =
   'Write (or overwrite) the QA report for this session. Pass the full markdown BODY only (summary, ' +
@@ -37,7 +47,12 @@ export function createWriteQaReportExecute(sessionInfo: {
     unitTests,
     integrationTests,
     blockingFindings,
+    actionableNotes = [],
   }: z.infer<typeof writeQaReportSchema>): Promise<string> => {
+    // A "pass" with things still to act on would hide the send-back button
+    // and read as nothing-to-do, so it's always pass-with-notes.
+    if (result === 'pass' && actionableNotes.length > 0) result = 'pass-with-notes';
+
     await fs.mkdir(config.qaReportsDir, { recursive: true });
     const filePath = path.join(config.qaReportsDir, `${sessionInfo.sessionKey}.md`);
 
@@ -62,6 +77,7 @@ export function createWriteQaReportExecute(sessionInfo: {
       'unit-tests': unitTests,
       'integration-tests': integrationTests,
       'blocking-findings': blockingFindings,
+      'actionable-notes': actionableNotes,
     };
 
     const fileContents = matter.stringify(`\n${markdownBody.trim()}\n`, frontmatter);

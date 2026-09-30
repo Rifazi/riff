@@ -7,6 +7,7 @@ import { slugify, type SessionRecord } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
 import { isSessionKeyInUse } from '../sessions/session-keys.js';
 import { cleanupTeamWorktrees } from '../agents/team/coding-team.js';
+import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { listApps } from '../apps/apps-store.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -72,7 +73,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
 
   // Human-only, permanent. Removes this project's own records for the
   // session (its state file, and the requirements/plan/QA docs it wrote
-  // under artifacts/) — never touches Customer-EDI, so a session's branch
+  // under artifacts/, its meeting source and reference docs) — never touches Customer-EDI, so a session's branch
   // and commits (if any) are left exactly as they are for manual cleanup.
   app.delete<{ Params: { id: string } }>('/api/sessions/:id', async (request, reply) => {
     const session = await getSession(request.params.id);
@@ -86,6 +87,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     }
 
     await removeMeetingSource(session.sourceMeeting);
+    await removeAllReferenceDocs({ kind: 'session', sessionId: session.id });
     await cleanupTeamWorktrees(session);
     await deleteSession(session.id);
     return reply.code(204).send();

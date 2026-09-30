@@ -7,10 +7,12 @@ import type {
   DeliveryPlan,
   Integration,
   JiraSettingsFields,
+  AttachmentInput,
   MeetingSourceInput,
   PlanStepSummary,
   PlanWorkstream,
   Provider,
+  ReferenceDoc,
   Role,
   RoleModelConfig,
   SessionRecord,
@@ -31,6 +33,13 @@ export const AGENT_SERVER_URL = process.env.NEXT_PUBLIC_AGENT_SERVER_URL ?? 'htt
 
 export function apiUrl(path: string): string {
   return `${AGENT_SERVER_URL}${path}`;
+}
+
+async function noContent(res: Response): Promise<void> {
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Request failed: ${res.status}`);
+  }
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -266,6 +275,35 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     }).then((r) => json<SessionRecord>(r)),
+
+  listAppReferenceDocs: (appId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/reference-docs`)).then((r) => json<ReferenceDoc[]>(r)),
+
+  addAppReferenceDocs: (appId: string, attachments: AttachmentInput[]) =>
+    fetch(apiUrl(`/api/apps/${appId}/reference-docs`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attachments }),
+    }).then((r) => json<ReferenceDoc[]>(r)),
+
+  removeAppReferenceDoc: (appId: string, docId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/reference-docs/${docId}`), { method: 'DELETE' }).then(noContent),
+
+  listSessionReferenceDocs: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs`)).then((r) => json<{ app: ReferenceDoc[]; session: ReferenceDoc[] }>(r)),
+
+  addSessionReferenceDocs: (id: string, attachments: AttachmentInput[]) =>
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attachments }),
+    }).then((r) => json<ReferenceDoc[]>(r)),
+
+  removeSessionReferenceDoc: (id: string, docId: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs/${docId}`), { method: 'DELETE' }).then(noContent),
+
+  shareReferenceDocWithApp: (id: string, docId: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs/${docId}/share`), { method: 'POST' }).then((r) => json<ReferenceDoc>(r)),
 
   listIntegrations: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/integrations`)).then((r) => json<Integration[]>(r)),
 

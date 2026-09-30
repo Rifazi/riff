@@ -16,6 +16,9 @@ export const config = {
   stateDir: path.join(HARNESS_ROOT, 'state'),
   sessionsStateDir: path.join(HARNESS_ROOT, 'state', 'sessions'),
   meetingSourcesDir: path.join(HARNESS_ROOT, 'state', 'meeting-sources'),
+  // Documents the human attached for the agents (sessions/reference-docs.ts)
+  // — under state/, so gitignored like meeting sources.
+  referenceDocsDir: path.join(HARNESS_ROOT, 'state', 'reference-docs'),
   // Requirements/plan/QA docs — reviewable deliverables of *this* project's
   // process, not of any target app, so they live here rather than in a
   // target repo. Global across apps: sessionKey is already required to be

@@ -13,6 +13,7 @@ import { getApp } from '../apps/apps-store.js';
 import { docsDirFor, baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createWriteRequirementsTool } from './tool-defs/write-requirements-tool.js';
@@ -20,6 +21,7 @@ import { askMultipleChoiceTool, askQuestionTool } from './tool-defs/ask-question
 import { createProposeSplitTool } from './tool-defs/propose-split-tool.js';
 import { createProposeThemeTool } from './tool-defs/propose-theme-tool.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
+import { createFetchUrlTool, WEB_ACCESS_TURN_NOTE } from './tool-defs/fetch-url-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createWriteRequirementsToolClaude } from './tool-defs-claude/write-requirements-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
@@ -27,6 +29,7 @@ import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-t
 import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
+import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
 const TOOL_NAMES = [
@@ -38,14 +41,19 @@ const TOOL_NAMES = [
   'propose_split',
   'propose_theme',
   'audit_theme',
+  'fetch_url',
 ];
 
 export async function runRequirementsAgentTurn(
   session: SessionRecord,
   userMessage: string,
   onEvent: (event: AgentEvent) => void,
-  attachments: ParsedAttachment[] = []
+  attachments: ParsedAttachment[] = [],
+  // Only the human's own typed message can turn this on (routes/requirements.ts
+  // checks it with wantsWebAccess) — coordinator-driven turns never do.
+  options: { webAccess?: boolean } = {}
 ): Promise<SessionRecord> {
+  const webAccess = options.webAccess ?? false;
   await appendTranscriptEntry(session.id, 'requirements', { role: 'user', text: userMessage });
   let prompt = await applyAttachments(session.id, 'requirements', userMessage, attachments);
 
@@ -104,13 +112,22 @@ export async function runRequirementsAgentTurn(
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
+  // Per-turn, so it rides in the prompt rather than systemPrompt (same
+  // resume reason as above) — and an app's prompt override can't drop it.
+  if (webAccess) prompt = `${WEB_ACCESS_TURN_NOTE}\n\n---\n\n${prompt}`;
+
+  // What the human has already provided, so the agent reads it instead of
+  // asking for it again (see sessions/reference-docs.ts).
+  const referenceNote = await referenceDocsTurnNote(session, 'requirements', isFirstTurn);
+  if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
+
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
     void persistEvent(session.id, event);
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -124,6 +141,7 @@ export async function runRequirementsAgentTurn(
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
           createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
+          createFetchUrlToolClaude({ enabled: webAccess }),
         ],
       });
 
@@ -148,7 +166,7 @@ export async function runRequirementsAgentTurn(
       return session;
     }
 
-    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
@@ -158,6 +176,7 @@ export async function runRequirementsAgentTurn(
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
       propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
+      fetch_url: createFetchUrlTool({ enabled: webAccess }),
     };
 
     const { updatedHistory } = await runAgentTurn({

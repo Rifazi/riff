@@ -7,6 +7,7 @@ import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { AttachmentInput, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona } from '@/lib/dev-sessions/agents';
+import { ACCEPTED_ATTACHMENT_TYPES, readAttachments } from '@/lib/dev-sessions/attachments';
 
 interface ChatPaneProps {
   entries: TranscriptEntry[];
@@ -38,25 +39,6 @@ const ASK_QUESTION_TOOL = 'ask_question';
 // batched into the same "answer everything asked since the last message"
 // flow below.
 const QUESTION_TOOL_NAMES = new Set([ASK_MULTIPLE_CHOICE_TOOL, ASK_QUESTION_TOOL]);
-
-// Mirrors the cap in harness-server/backend/src/agents/attachments.ts —
-// checked here too so an oversized file is rejected before a round trip.
-const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
-const ACCEPTED_ATTACHMENT_TYPES = '.pdf,.txt,.md,.markdown,.csv,.json,.yml,.yaml,text/plain,text/markdown,application/pdf';
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      // result is "data:<mediaType>;base64,<data>" — the backend expects
-      // only the payload after the comma.
-      const result = reader.result as string;
-      resolve(result.slice(result.indexOf(',') + 1));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error(`Failed to read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
-}
 
 function stripToolPrefix(name: string | undefined): string {
   return (name ?? '').replace(/^mcp__[^_]+(-[^_]+)?__/, '');
@@ -348,20 +330,8 @@ export function ChatPane({
   const handleFilesSelected = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     setAttachError(null);
-    const files = Array.from(fileList);
-    const oversized = files.find((f) => f.size > MAX_ATTACHMENT_BYTES);
-    if (oversized) {
-      setAttachError(`${oversized.name} is over the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)}MB attachment limit.`);
-      return;
-    }
     try {
-      const read = await Promise.all(
-        files.map(async (file) => ({
-          name: file.name,
-          mediaType: file.type || 'application/octet-stream',
-          data: await readFileAsBase64(file),
-        }))
-      );
+      const read = await readAttachments(fileList);
       setPendingFiles((prev) => [...prev, ...read]);
     } catch (err) {
       setAttachError(err instanceof Error ? err.message : String(err));
@@ -518,7 +488,7 @@ export function ChatPane({
             type="button"
             size="icon"
             variant="outline"
-            title="Attach a PDF or text file"
+            title="Attach a PDF or text file — it stays available to every agent in this session"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled}
           >

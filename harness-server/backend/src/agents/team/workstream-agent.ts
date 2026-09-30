@@ -13,6 +13,7 @@ import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client.js';
 import { loadApprovedDocsForCoding } from '../coding-agent.js';
+import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from '../tool-defs/code-search-tool.js';
 import { createFileTools } from '../tool-defs/file-tools.js';
@@ -87,7 +88,8 @@ export async function runWorkstreamAgent({
     `Your branch: ${member.branch}\n\nYour steps, in order:\n${member.stepIds.map((id) => `- id: "${id}", title: "${stepTitle(id)}"`).join('\n')}\n\n` +
     `Your owned paths (the only places you can write):\n${member.ownedPaths.map((p) => `- ${p}`).join('\n')}\n\n` +
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
-  const systemPrompt = base + themeBriefingFor(worktreePath, 'coding') + approvedDocs + brief;
+  const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
+  const systemPrompt = base + themeBriefingFor(worktreePath, 'coding') + approvedDocs + brief + (referenceDocs ? `\n\n${referenceDocs}` : '');
 
   const resuming = member.transcript.length > 0;
   const prompt = promptOverride ?? (resuming
@@ -107,7 +109,7 @@ export async function runWorkstreamAgent({
   const steps = { sessionId: session.id, stepIds: member.stepIds };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
     const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude(scoped);
     const { gitCommitTool } = createGitToolsClaude({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
     const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: worktreePath, checkCommands: app.checkCommands });
@@ -160,7 +162,7 @@ export async function runWorkstreamAgent({
   const apiKey = await getCredential(provider);
   if (!apiKey) throw new Error(`No API key configured for ${provider} — add one in Settings.`);
 
-  const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+  const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
   const { readFileTool, writeFileTool, editFileTool } = createFileTools(scoped);
   const { gitCommitTool } = createGitTools({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
   const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands });

@@ -16,6 +16,7 @@ import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
+import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
@@ -105,13 +106,18 @@ export async function runPlanAgentTurn(
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
+  // What the human has already provided, so the agent reads it instead of
+  // asking for it again (see sessions/reference-docs.ts).
+  const referenceNote = await referenceDocsTurnNote(session, 'plan', isFirstTurn);
+  if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
+
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
     void persistEvent(session.id, event);
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
     const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
     const createMcpServer = () =>
       createSdkMcpServer({
@@ -154,7 +160,7 @@ export async function runPlanAgentTurn(
       return session;
     }
 
-    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id });
+    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
     const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
     const tools: ToolSet = {
       search_docs: searchDocsTool,

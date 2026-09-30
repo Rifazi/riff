@@ -62,6 +62,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.splitFrom ??= null;
   session.splitBrief ??= null;
   session.splitKickoffPending ??= false;
+  session.referenceDocsSeen ??= {};
   session.usage ??= { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
   session.themeProposal ??= null;
   session.themeContextSeen ??= {};
@@ -174,6 +175,7 @@ export async function createSession(input: {
     transcripts: { requirements: [], plan: [], coding: [], qa: [] },
     histories: { requirements: [], plan: [], coding: [], qa: [] },
     claudeSessionIds: { requirements: null, plan: null, coding: null, qa: null },
+    referenceDocsSeen: {},
     usage: { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE },
     createdAt: now,
     updatedAt: now,

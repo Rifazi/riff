@@ -1,8 +1,12 @@
 import { PDFParse } from 'pdf-parse';
 import { appendTranscriptEntry } from '../sessions/session-store.js';
+import { addReferenceDocs } from '../sessions/reference-docs.js';
 
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const MAX_EXTRACTED_CHARS = 200_000;
+// A saved attachment longer than this goes into the turn as a pointer to its
+// reference doc instead of in full — the agent reads the parts it needs.
+const MAX_INLINE_CHARS = 30_000;
 
 export interface AttachmentInput {
   name: string;
@@ -14,6 +18,9 @@ export interface AttachmentInput {
 export interface ParsedAttachment {
   name: string;
   text: string;
+  // Set once saved as one of the session's reference docs (see
+  // saveAsReferenceDocs) — the read_doc path for it.
+  referencePath?: string;
 }
 
 /**
@@ -67,6 +74,16 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
 }
 
 /**
+ * Saves a chat message's attachments as the session's reference docs, so
+ * every later stage and agent can read them without the human attaching
+ * them again. Returns them with referencePath set.
+ */
+export async function saveAsReferenceDocs(sessionId: string, attachments: ParsedAttachment[]): Promise<ParsedAttachment[]> {
+  const saved = await addReferenceDocs({ kind: 'session', sessionId }, attachments);
+  return attachments.map((att, i) => ({ ...att, referencePath: saved[i].path }));
+}
+
+/**
  * Logs one transcript entry per attachment (so the chat shows what was
  * attached without dumping the full extracted text into a bubble) and
  * returns the prompt string to actually send to the model: the human's
@@ -84,12 +101,19 @@ export async function applyAttachments(
   for (const att of attachments) {
     await appendTranscriptEntry(sessionId, stage, {
       role: 'system',
-      text: `Attached: ${att.name} (${att.text.length.toLocaleString()} characters extracted)`,
+      text: `Attached: ${att.name} (${att.text.length.toLocaleString()} characters extracted${
+        att.referencePath ? ' — saved for every agent in this session' : ''
+      })`,
     });
   }
 
   const blocks = attachments
-    .map((att) => `--- Attached file: ${att.name} ---\n${att.text}\n--- end ${att.name} ---`)
+    .map((att) =>
+      att.referencePath && att.text.length > MAX_INLINE_CHARS
+        ? `--- Attached file: ${att.name} (${att.text.length.toLocaleString()} characters — too long to paste here; ` +
+          `saved as ${att.referencePath}, so search it with search_docs and read the sections you need with read_doc) ---`
+        : `--- Attached file: ${att.name} ---\n${att.text}\n--- end ${att.name} ---`
+    )
     .join('\n\n');
 
   return `${userMessage}\n\n${blocks}`;

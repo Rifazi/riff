@@ -8,7 +8,7 @@ import { getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
 import type { PlanWorkstream } from '../sessions/session.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
-import { parseAttachments, type AttachmentInput } from '../agents/attachments.js';
+import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { getJiraSettings } from '../settings/settings-store.js';
 import { createTicketsFromPlan, type JiraPlanRecord } from '../jira/create-tickets-from-plan.js';
@@ -26,7 +26,7 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
 
       let attachments;
       try {
-        attachments = await parseAttachments(rawAttachments ?? []);
+        attachments = await saveAsReferenceDocs(session.id, await parseAttachments(rawAttachments ?? []));
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }

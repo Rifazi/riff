@@ -10,6 +10,7 @@ import { api } from '@/lib/dev-sessions/api';
 import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
 import { ErrorText, LoadingState, PageShell, Pill } from '@/components/DevSessions/PageShell';
 import { StageStepper } from '@/components/DevSessions/StageStepper';
+import { SessionReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
 import { RequirementsStage } from '@/components/DevSessions/stages/RequirementsStage';
 import { PlanStage } from '@/components/DevSessions/stages/PlanStage';
 import { CodingStage } from '@/components/DevSessions/stages/CodingStage';
@@ -75,7 +76,12 @@ function SessionView() {
           )}
         </span>
       }
-      actions={back}
+      actions={
+        <>
+          <SessionReferenceDocsButton session={session} />
+          {back}
+        </>
+      }
     >
       <div className="flex-shrink-0 mb-3">
         <StageStepper session={session} current={stage} />
