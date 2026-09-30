@@ -53,14 +53,116 @@ export interface AppConfig {
   checkCommands: CheckCommands;
   docsDir: string;
   repoUrl: string | null;
+  // Read from the repo's theme/theme.json; null when it has no theme.
+  theme: AppThemeSummary | null;
+}
+
+export interface AppThemeSummary {
+  name: string;
+  basedOn: string | null;
+  // Differs from the preset it started from (or started from none).
+  customized: boolean;
+  // False when theme.json was hand-edited and the CSS not regenerated yet.
+  inSync: boolean;
+}
+
+// What setup did on disk, in plain words, and what it couldn't do.
+export interface SetupSteps {
+  actions: string[];
+  warnings: string[];
 }
 
 // What adding an app (or pointing it at a new folder) set up on disk.
 export interface AppWriteResult extends AppConfig {
   docsInitialized: boolean;
   // Absent when an update didn't change the repository path.
-  git?: { baseBranch: string; actions: string[]; warnings: string[] };
+  git?: SetupSteps & { baseBranch: string };
+  // Only when a theme was picked while adding the app.
+  themeResult?: SetupSteps;
 }
+
+export type ThemeMode = 'light' | 'dark';
+
+export interface ThemeColors {
+  bg: string;
+  surface: string;
+  surfaceMuted: string;
+  border: string;
+  text: string;
+  textMuted: string;
+  primary: string;
+  onPrimary: string;
+  success: string;
+  warning: string;
+  danger: string;
+  info: string;
+}
+
+export type Density = 'compact' | 'comfortable' | 'spacious';
+
+// Mirrors harness-server's ThemeDefinition: what an app's theme/theme.json holds.
+export interface ThemeDefinition {
+  name: string;
+  description: string;
+  fonts: { sans: string; heading: string; mono: string };
+  headingWeight: number;
+  radius: { sm: number; md: number; lg: number; full: number };
+  borderWidth: number;
+  shadow: { sm: string; md: string };
+  density: Density;
+  light: ThemeColors;
+  dark: ThemeColors;
+}
+
+// The CSS custom properties a theme sets in each mode, rendered server-side
+// by the same code that writes the app's tokens.css.
+export type ThemeTokens = Record<ThemeMode, Record<string, string>>;
+
+export interface ThemePreset {
+  id: string;
+  theme: ThemeDefinition;
+  tokens: ThemeTokens;
+}
+
+export interface ThemesResponse {
+  presets: ThemePreset[];
+  // The shared ui-* component rules, scoped to [data-ui-theme]: the same
+  // CSS a saved theme writes to the repo.
+  componentsCss: string;
+}
+
+export interface AppThemeState {
+  current: { theme: ThemeDefinition; basedOn: string | null; inSync: boolean; tokens: ThemeTokens } | null;
+  // Set when theme.json exists but doesn't hold a valid theme.
+  error: string | null;
+}
+
+// A theme being picked or edited, before it's saved to an app.
+export interface ThemeDraft {
+  theme: ThemeDefinition;
+  basedOn: string | null;
+}
+
+export interface ThemeProposal extends ThemeDraft {
+  summary: string;
+  proposedAt: string;
+}
+
+// How far an app's code has adopted its theme; the same facts the agents'
+// audit_theme tool reports.
+export interface ThemeAudit {
+  theme: { name: string; inSync: boolean } | null;
+  importedFrom: string[];
+  hardCoded: { total: number; byFile: { file: string; count: number; samples: { line: number; text: string }[] }[] };
+  legacyTokens: { file: string; names: string[] }[];
+  collisions: { file: string; names: string[] }[];
+  tailwind: { file: string; usesThemeTokens: boolean }[];
+  componentLibraries: string[];
+  scannedFiles: number;
+  truncated: boolean;
+}
+
+export type ThemeApplyResult = SetupSteps & { theme: AppThemeSummary };
 
 export interface SessionMeetingSource {
   meetingId: string;
@@ -192,6 +294,7 @@ export interface SessionRecord {
   meetingKickoffPending: boolean;
 
   splitProposal: SplitProposal | null;
+  themeProposal: ThemeProposal | null;
   splitInto: string[];
   splitFrom: SessionSplitOrigin | null;
   splitKickoffPending: boolean;

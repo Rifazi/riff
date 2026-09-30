@@ -63,6 +63,8 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.splitBrief ??= null;
   session.splitKickoffPending ??= false;
   session.usage ??= { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
+  session.themeProposal ??= null;
+  session.themeContextSeen ??= {};
   return session;
 }
 
@@ -167,6 +169,8 @@ export async function createSession(input: {
     splitFrom: input.splitFrom ?? null,
     splitBrief: input.splitBrief ?? null,
     splitKickoffPending: Boolean(input.splitBrief),
+    themeProposal: null,
+    themeContextSeen: {},
     transcripts: { requirements: [], plan: [], coding: [], qa: [] },
     histories: { requirements: [], plan: [], coding: [], qa: [] },
     claudeSessionIds: { requirements: null, plan: null, coding: null, qa: null },

@@ -3,15 +3,17 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, FileCode2, Loader2, Plug, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, FileCode2, Loader2, Palette, Plug, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
-import type { AppConfig, AppWriteResult, CheckCommands, Role } from '@/lib/dev-sessions/types';
+import type { AppConfig, AppWriteResult, CheckCommands, Role, ThemeDraft } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 import { SESSIONS_HREF } from '@/lib/dev-sessions/stage';
 import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell, Pill } from '@/components/DevSessions/PageShell';
+import { SetupNotices, toSetupReport, type SetupReport } from '@/components/DevSessions/SetupNotices';
+import { ThemeStudio } from '@/components/DevSessions/themes/ThemeStudio';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
 import { ExternalAnchor } from '@/components/DevSessions/ExternalAnchor';
 
@@ -29,41 +31,15 @@ const ROLES: { key: Role; label: string }[] = [
   { key: 'coordinator', label: `Coordinator — ${COORDINATOR_PERSONA.name}` },
 ];
 
-interface SetupReport {
-  done: string[];
-  warnings: string[];
-}
-
-// Turns what the server set up on disk (docs/, git) into notices; null when
-// it did nothing worth mentioning.
+// Turns what the server set up on disk (docs/, git, theme) into notices;
+// null when it did nothing worth mentioning.
 function setupReport(result: AppWriteResult): SetupReport | null {
-  const done = [
-    ...(result.docsInitialized ? [`Created docs/ at ${result.docsDir} — add markdown there for the agents to search.`] : []),
-    ...(result.git?.actions ?? []),
-  ];
-  if (result.git) done.push(`Coding sessions will branch off ${result.git.baseBranch}.`);
-  const warnings = result.git?.warnings ?? [];
-  return done.length > 0 || warnings.length > 0 ? { done, warnings } : null;
-}
-
-function SetupNotices({ report }: { report: SetupReport | null }) {
-  if (!report) return null;
-  return (
-    <>
-      {report.done.length > 0 && (
-        <Notice tone="green">
-          {report.done.map((line) => (
-            <div key={line}>{line}</div>
-          ))}
-        </Notice>
-      )}
-      {report.warnings.map((line) => (
-        <Notice key={line} tone="amber">
-          {line}
-        </Notice>
-      ))}
-    </>
-  );
+  const docs = result.docsInitialized ? [`Created docs/ at ${result.docsDir} — add markdown there for the agents to search.`] : [];
+  const git = result.git && {
+    actions: [...result.git.actions, `Coding sessions will branch off ${result.git.baseBranch}.`],
+    warnings: result.git.warnings,
+  };
+  return toSetupReport(docs, git, result.themeResult);
 }
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -179,6 +155,12 @@ function AppCard({ app }: { app: AppConfig }) {
       actions={
         <>
           <Button size="sm" variant="outline" asChild>
+            <Link href={`/dev-sessions/apps/theme?appId=${encodeURIComponent(app.id)}`}>
+              <Palette />
+              Theme
+            </Link>
+          </Button>
+          <Button size="sm" variant="outline" asChild>
             <Link href={`/dev-sessions/apps/integrations?appId=${encodeURIComponent(app.id)}`}>
               <Plug />
               Integrations
@@ -209,6 +191,16 @@ function AppCard({ app }: { app: AppConfig }) {
         <div className="text-xs text-gray-500 pl-[152px]">
           docs: <code>{app.docsDir}</code>
           {' · '}base branch: <code>{app.baseBranch}</code>
+          {' · '}theme:{' '}
+          {app.theme ? (
+            <>
+              <code>{app.theme.name}</code>
+              {app.theme.customized && ' (customized)'}
+              {!app.theme.inSync && <span className="text-amber-700"> · generated CSS out of date, regenerate on the Theme page</span>}
+            </>
+          ) : (
+            'none'
+          )}
           {app.repoUrl && (
             <>
               {' · '}repo: <code>{app.repoUrl}</code>
@@ -283,6 +275,8 @@ export default function AppsPage() {
 
   const [name, setName] = useState('');
   const [repoRoot, setRepoRoot] = useState('');
+  const [themeDraft, setThemeDraft] = useState<ThemeDraft | null>(null);
+  const [showThemes, setShowThemes] = useState(false);
   const [validation, setValidation] = useState<{ ok: boolean; error?: string; note?: string } | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createReport, setCreateReport] = useState<SetupReport | null>(null);
@@ -293,10 +287,12 @@ export default function AppsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => api.createApp({ name, repoRoot }),
+    mutationFn: () => api.createApp({ name, repoRoot, ...(themeDraft ?? {}) }),
     onSuccess: (result) => {
       setName('');
       setRepoRoot('');
+      setThemeDraft(null);
+      setShowThemes(false);
       setValidation(null);
       setCreateError(null);
       setCreateReport(setupReport(result));
@@ -343,6 +339,20 @@ export default function AppsPage() {
               An existing checkout, an empty folder, or a new folder to create. A folder that isn&apos;t a git repo yet gets{' '}
               <code>git init</code>, a starter <code>.gitignore</code> and an initial commit; a missing <code>docs/</code> is created.
             </p>
+            <FieldRow label="Theme">
+              <div>
+                <Disclosure
+                  label={themeDraft ? `${themeDraft.theme.name} — change` : 'Pick a theme (optional)'}
+                  open={showThemes}
+                  onToggle={() => setShowThemes((v) => !v)}
+                />
+              </div>
+            </FieldRow>
+            {showThemes && (
+              <div className="pl-[152px]">
+                <ThemeStudio value={themeDraft} onChange={setThemeDraft} appName={name.trim() || undefined} allowNone />
+              </div>
+            )}
             <div className="flex gap-2 pl-[152px]">
               <Button size="sm" variant="outline" disabled={!repoRoot.trim() || validateMutation.isPending} onClick={() => validateMutation.mutate()}>
                 {validateMutation.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}

@@ -8,6 +8,9 @@ import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, upda
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
+import { themeContextForTurn } from '../themes/theme-context.js';
+import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
+import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -37,6 +40,7 @@ const TOOL_NAMES = [
   'search_docs',
   'read_doc',
   'search_code',
+  'audit_theme',
   'read_file',
   'write_file',
   'edit_file',
@@ -82,6 +86,9 @@ export async function runCodingAgentTurn(
   const isFirstTurn = provider === 'claude' ? !session.claudeSessionIds.coding : session.histories.coding.length === 0;
 
   let systemPrompt = override ?? promptTemplate;
+  const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
+  systemPrompt += themeContext.system;
+  prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) {
     if (!session.requirementsPath) {
       throw new Error('Cannot start the coding stage without an approved requirements document.');
@@ -222,6 +229,7 @@ export async function runCodingAgentTurn(
             searchDocsToolClaude,
             readDocToolClaude,
             createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+            createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             readFileToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
@@ -269,6 +277,7 @@ export async function runCodingAgentTurn(
         search_docs: searchDocsTool,
         read_doc: readDocTool,
         search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+        audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         read_file: readFileTool,
         write_file: writeFileTool,
         edit_file: editFileTool,

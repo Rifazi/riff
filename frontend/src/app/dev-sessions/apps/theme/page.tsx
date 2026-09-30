@@ -1,0 +1,136 @@
+'use client';
+
+import { Suspense, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Paintbrush, RefreshCw, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { api } from '@/lib/dev-sessions/api';
+import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
+import type { ThemeApplyResult, ThemeDraft } from '@/lib/dev-sessions/types';
+import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell } from '@/components/DevSessions/PageShell';
+import { SetupNotices, toSetupReport, type SetupReport } from '@/components/DevSessions/SetupNotices';
+import { ThemeStudio } from '@/components/DevSessions/themes/ThemeStudio';
+import { ThemeAdoptionCard } from '@/components/DevSessions/themes/ThemeAdoptionCard';
+import { useThemes } from '@/components/DevSessions/themes/ThemeFrame';
+import { sameTheme } from '@/components/DevSessions/themes/theme-utils';
+
+function ThemeView() {
+  const appId = useSearchParams().get('appId');
+  const queryClient = useQueryClient();
+  const { data: apps, isLoading } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
+  const { data: themeState } = useQuery({
+    queryKey: ['app-theme', appId],
+    queryFn: () => api.getAppTheme(appId!),
+    enabled: Boolean(appId),
+  });
+  const { data: themes } = useThemes();
+  const app = apps?.find((a) => a.id === appId);
+  const current = themeState?.current ?? null;
+
+  // Until the user picks or edits, the draft is the saved theme (or the first preset).
+  const [edit, setEdit] = useState<ThemeDraft | null>(null);
+  const fallback = current ?? (themes?.presets[0] ? { theme: themes.presets[0].theme, basedOn: themes.presets[0].id } : null);
+  const draft = edit ?? (fallback && { theme: fallback.theme, basedOn: fallback.basedOn });
+  const unchanged = Boolean(current && draft && sameTheme(current.theme, draft.theme));
+
+  const [report, setReport] = useState<SetupReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const onDone = {
+    onSuccess: (result: ThemeApplyResult) => {
+      setError(null);
+      setEdit(null);
+      setReport(toSetupReport([], result));
+      queryClient.invalidateQueries({ queryKey: ['apps'] });
+      queryClient.invalidateQueries({ queryKey: ['app-theme', appId] });
+      queryClient.invalidateQueries({ queryKey: ['theme-audit', appId] });
+    },
+    onError: (err: Error) => {
+      setReport(null);
+      setError(err.message);
+    },
+  };
+  const saveMutation = useMutation({ mutationFn: () => api.saveAppTheme(appId!, draft!), ...onDone });
+  const regenerateMutation = useMutation({ mutationFn: () => api.regenerateAppTheme(appId!), ...onDone });
+  const busy = saveMutation.isPending || regenerateMutation.isPending;
+
+  return (
+    <PageShell
+      title={`${app?.name ?? 'App'} theme`}
+      subtitle={
+        <>
+          The app&apos;s look is defined in one file, <code>theme/theme.json</code>. Saving here writes it, regenerates the CSS
+          tokens and shared <code>ui-*</code> components every view reuses, and commits them on the base branch. You can also ask{' '}
+          {AGENT_PERSONAS.requirements.name} in a Dev Session to change the theme.
+        </>
+      }
+      actions={
+        <Button variant="outline" asChild>
+          <Link href="/dev-sessions/apps">
+            <ArrowLeft />
+            Apps
+          </Link>
+        </Button>
+      }
+    >
+      {isLoading && <LoadingState />}
+      {!isLoading && !app && <EmptyState>App not found.</EmptyState>}
+      {app && (
+        <div className="space-y-4">
+        {current && <ThemeAdoptionCard appId={app.id} appName={app.name} themeName={current.theme.name} />}
+        <Card
+          title={current ? `Current theme: ${current.theme.name}` : 'No theme yet'}
+          actions={
+            <>
+              {edit && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setEdit(null)}>
+                  <RotateCcw />
+                  Reset
+                </Button>
+              )}
+              <Button size="sm" variant="blue" disabled={!draft || unchanged || busy} onClick={() => saveMutation.mutate()}>
+                <Paintbrush />
+                {saveMutation.isPending ? 'Saving…' : unchanged ? 'Saved' : current ? 'Save theme' : 'Apply theme'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            {themeState?.error && (
+              <Notice tone="red">
+                <code>theme/theme.json</code> can&apos;t be used: {themeState.error} Fix the file, or save a theme here to replace it.
+              </Notice>
+            )}
+            {current && !current.inSync && (
+              <Notice tone="amber">
+                <div className="flex items-center justify-between gap-3">
+                  <span>
+                    The generated CSS doesn&apos;t match <code>theme/theme.json</code>: it was edited by hand, or generated by
+                    an older version of Riff.
+                  </span>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => regenerateMutation.mutate()}>
+                    <RefreshCw />
+                    {regenerateMutation.isPending ? 'Regenerating…' : 'Regenerate CSS'}
+                  </Button>
+                </div>
+              </Notice>
+            )}
+            <SetupNotices report={report} />
+            <ErrorText>{error}</ErrorText>
+            <ThemeStudio value={draft} onChange={(next) => setEdit(next)} current={current} appName={app.name} />
+          </div>
+        </Card>
+        </div>
+      )}
+    </PageShell>
+  );
+}
+
+export default function ThemePage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <ThemeView />
+    </Suspense>
+  );
+}

@@ -8,6 +8,9 @@ import { appendTeamTranscriptEntry, mutateSession, addStageUsage } from '../../s
 import type { CodingTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
+import { themeBriefingFor } from '../../themes/theme-context.js';
+import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
+import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client.js';
 import { loadApprovedDocsForCoding } from '../coding-agent.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
@@ -84,7 +87,7 @@ export async function runWorkstreamAgent({
     `Your branch: ${member.branch}\n\nYour steps, in order:\n${member.stepIds.map((id) => `- id: "${id}", title: "${stepTitle(id)}"`).join('\n')}\n\n` +
     `Your owned paths (the only places you can write):\n${member.ownedPaths.map((p) => `- ${p}`).join('\n')}\n\n` +
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
-  const systemPrompt = base + approvedDocs + brief;
+  const systemPrompt = base + themeBriefingFor(worktreePath, 'coding') + approvedDocs + brief;
 
   const resuming = member.transcript.length > 0;
   const prompt = promptOverride ?? (resuming
@@ -112,6 +115,7 @@ export async function runWorkstreamAgent({
       searchDocsToolClaude,
       readDocToolClaude,
       createSearchCodeToolClaude({ repoRoot: worktreePath }),
+      createAuditThemeToolClaude({ repoRoot: worktreePath }),
       readFileToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
@@ -125,6 +129,7 @@ export async function runWorkstreamAgent({
       'search_docs',
       'read_doc',
       'search_code',
+      'audit_theme',
       'read_file',
       'write_file',
       'edit_file',
@@ -163,6 +168,7 @@ export async function runWorkstreamAgent({
     search_docs: searchDocsTool,
     read_doc: readDocTool,
     search_code: createSearchCodeTool({ repoRoot: worktreePath }),
+    audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
     read_file: readFileTool,
     write_file: writeFileTool,
     edit_file: editFileTool,

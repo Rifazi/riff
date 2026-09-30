@@ -15,6 +15,13 @@ import type {
   RoleModelConfig,
   SessionRecord,
   SettingsResponse,
+  AppThemeState,
+  ThemeApplyResult,
+  ThemeAudit,
+  ThemeDefinition,
+  ThemeDraft,
+  ThemeTokens,
+  ThemesResponse,
 } from './types';
 
 // The agent server the Riff desktop app starts alongside itself (see
@@ -46,7 +53,7 @@ export const api = {
       body: JSON.stringify({ repoRoot }),
     }).then((r) => json<{ ok: boolean; error?: string; note?: string }>(r)),
 
-  createApp: (input: { name: string; repoRoot: string; checkCommands?: CheckCommands }) =>
+  createApp: (input: { name: string; repoRoot: string; checkCommands?: CheckCommands; theme?: ThemeDefinition; basedOn?: string | null }) =>
     fetch(apiUrl('/api/apps'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -67,6 +74,39 @@ export const api = {
         throw new Error(body.error ?? `Request failed: ${r.status}`);
       }
     }),
+
+  listThemes: () => fetch(apiUrl('/api/themes')).then((r) => json<ThemesResponse>(r)),
+
+  previewTheme: (theme: ThemeDefinition) =>
+    fetch(apiUrl('/api/themes/preview'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme }),
+    }).then((r) => json<{ tokens: ThemeTokens }>(r)),
+
+  getAppTheme: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/theme`)).then((r) => json<AppThemeState>(r)),
+
+  saveAppTheme: (appId: string, draft: ThemeDraft) =>
+    fetch(apiUrl(`/api/apps/${appId}/theme`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    }).then((r) => json<ThemeApplyResult>(r)),
+
+  getThemeAudit: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/theme/audit`)).then((r) => json<ThemeAudit>(r)),
+
+  regenerateAppTheme: (appId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/theme/regenerate`), { method: 'POST' }).then((r) => json<ThemeApplyResult>(r)),
+
+  applyThemeProposal: (sessionId: string, draft: ThemeDraft) =>
+    fetch(apiUrl(`/api/sessions/${sessionId}/theme-proposal/apply`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft),
+    }).then((r) => json<ThemeApplyResult>(r)),
+
+  dismissThemeProposal: (sessionId: string) =>
+    fetch(apiUrl(`/api/sessions/${sessionId}/theme-proposal/dismiss`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
   getAppPrompts: (id: string) => fetch(apiUrl(`/api/apps/${id}/prompts`)).then((r) => json<AppPrompts>(r)),
 

@@ -78,3 +78,18 @@ export function splitKickoffMessage(session: SessionRecord): string {
     `Please write the requirements for this part only — "${session.title}". Keep the other parts' scope out, search the docs for context, and ask me about anything the brief leaves open before writing the document.`,
   ].join('\n');
 }
+
+// Opening message for a session started from an app's Theme page to move
+// the app's code onto its theme (see ThemeAdoptionCard).
+export const THEME_MIGRATION_KICKOFF = 'theme-migration';
+
+export function themeMigrationKickoffMessage(themeName: string): string {
+  return [
+    `I want to migrate this app's existing styling onto its "${themeName}" UI theme (theme/theme.json).`,
+    '',
+    'Run audit_theme to see where it stands, then write the requirements for the migration: wiring theme/index.css in, ' +
+      "aliasing and then removing the app's own tokens, moving shared components and views onto the theme's tokens and " +
+      'ui-* components, and removing hard-coded colors. The app should look the same or better afterwards. Ask me ' +
+      'about anything the audit leaves open, such as whether light mode should be supported.',
+  ].join('\n');
+}

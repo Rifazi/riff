@@ -11,6 +11,7 @@ import { registerQaRoutes } from './routes/qa.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerAppRoutes } from './routes/apps.js';
 import { registerCoordinatorRoutes } from './routes/coordinator.js';
+import { registerThemeRoutes } from './routes/themes.js';
 import { recoverInterruptedTeams } from './agents/team/coding-team.js';
 
 async function main() {
@@ -55,6 +56,7 @@ async function main() {
   await registerSettingsRoutes(app);
   await registerAppRoutes(app);
   await registerCoordinatorRoutes(app);
+  await registerThemeRoutes(app);
 
   app.get('/api/health', async () => ({ ok: true }));
 

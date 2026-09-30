@@ -1,5 +1,6 @@
 import type { ModelMessage } from 'ai';
 import type { TokenUsage } from '../agents/sdk-client.js';
+import type { ThemeDefinition } from '../themes/presets.js';
 
 export type SessionStage =
   | 'requirements-in-progress'
@@ -65,6 +66,16 @@ export interface SplitPart {
 export interface SplitProposal {
   rationale: string;
   parts: SplitPart[];
+  proposedAt: string;
+}
+
+// A theme the requirements agent suggested (propose_theme). Like a split,
+// it only ever becomes real when the human applies it from the theme
+// picker, possibly after editing it there.
+export interface ThemeProposal {
+  theme: ThemeDefinition;
+  basedOn: string | null;
+  summary: string;
   proposedAt: string;
 }
 
@@ -204,6 +215,12 @@ export interface SessionRecord {
   // message — one-shot, same lifecycle as meetingKickoffPending.
   splitBrief: string | null;
   splitKickoffPending: boolean;
+
+  // Pending until the human applies or dismisses it in the theme picker.
+  themeProposal: ThemeProposal | null;
+  // Which theme (a theme.json fingerprint, or "none") each stage's agent was
+  // last briefed on, so a mid-session theme change re-briefs it next turn.
+  themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa', string>>;
 
   // Human-readable, for the UI's chat panes.
   transcripts: {

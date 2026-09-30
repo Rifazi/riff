@@ -9,6 +9,9 @@ import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, a
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
+import { themeContextForTurn } from '../themes/theme-context.js';
+import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
+import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
@@ -30,6 +33,7 @@ const TOOL_NAMES = [
   'search_docs',
   'read_doc',
   'search_code',
+  'audit_theme',
   'read_file',
   'write_plan_doc',
   'ask_multiple_choice',
@@ -53,6 +57,9 @@ export async function runPlanAgentTurn(
   const isFirstTurn = provider === 'claude' ? !session.claudeSessionIds.plan : session.histories.plan.length === 0;
 
   let systemPrompt = override ?? promptTemplate;
+  const themeContext = await themeContextForTurn(session, 'plan', app.repoRoot, isFirstTurn);
+  systemPrompt += themeContext.system;
+  prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) {
     if (!session.requirementsPath) {
       throw new Error('Cannot start the plan stage without an approved requirements document.');
@@ -114,6 +121,7 @@ export async function runPlanAgentTurn(
           searchDocsToolClaude,
           readDocToolClaude,
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+          createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           readFileToolClaude,
           createWritePlanToolClaude({
             sessionKey: session.sessionKey,
@@ -152,6 +160,7 @@ export async function runPlanAgentTurn(
       search_docs: searchDocsTool,
       read_doc: readDocTool,
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+      audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       read_file: readFileTool,
       write_plan_doc: createWritePlanTool({
         sessionKey: session.sessionKey,

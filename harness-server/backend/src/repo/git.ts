@@ -233,6 +233,24 @@ export async function setupGitRepo(repoRoot: string, opts: { docsCreated: boolea
   return { baseBranch, actions, warnings };
 }
 
+/**
+ * Commits just `files` (other dirty paths are left alone), on whatever is
+ * checked out. Returns why nothing was committed, if nothing was.
+ */
+export async function commitPaths(
+  repoRoot: string,
+  files: string[],
+  message: string
+): Promise<'committed' | 'unchanged' | 'no-identity'> {
+  const git = client(repoRoot);
+  if (!(await hasCommitIdentity(git))) return 'no-identity';
+  await git.add(files);
+  const staged = (await git.diff(['--cached', '--name-only', '--', ...files])).trim();
+  if (!staged) return 'unchanged';
+  await git.commit(message, files);
+  return 'committed';
+}
+
 // ---- Coding team: worktrees and merges -----------------------------------
 
 // Serializes operations that touch one repo's shared state (the main

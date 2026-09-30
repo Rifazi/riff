@@ -18,10 +18,15 @@ import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createWriteRequirementsTool } from './tool-defs/write-requirements-tool.js';
 import { askMultipleChoiceTool, askQuestionTool } from './tool-defs/ask-question-tool.js';
 import { createProposeSplitTool } from './tool-defs/propose-split-tool.js';
+import { createProposeThemeTool } from './tool-defs/propose-theme-tool.js';
+import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createWriteRequirementsToolClaude } from './tool-defs-claude/write-requirements-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
 import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-tool.js';
+import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-tool.js';
+import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { summarizeAppTheme } from '../themes/apply-theme.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
 const TOOL_NAMES = [
@@ -31,6 +36,8 @@ const TOOL_NAMES = [
   'ask_multiple_choice',
   'ask_question',
   'propose_split',
+  'propose_theme',
+  'audit_theme',
 ];
 
 export async function runRequirementsAgentTurn(
@@ -58,6 +65,13 @@ export async function runRequirementsAgentTurn(
     } catch {
       // docs/README.md missing — proceed without the manifest preamble
     }
+    const theme = summarizeAppTheme(app.repoRoot);
+    systemPrompt +=
+      `\n\n# UI theme\n\n${theme ? `This app's current UI theme is "${theme.name}".` : 'This app has no UI theme yet.'} ` +
+      'Changes to its look (colors, fonts, roundness, density, branding) go through propose_theme, which opens the theme ' +
+      "picker for the human. Don't put them in a requirements document. Moving the app's existing code onto the theme " +
+      '(wiring theme/index.css in, replacing its own tokens and hard-coded colors, restyling shared components) IS code ' +
+      'work: scope it with audit_theme and write a normal requirements document for it.';
   }
 
   // Coding already has a branch — this conversation is revising
@@ -108,6 +122,8 @@ export async function runRequirementsAgentTurn(
           askMultipleChoiceToolClaude,
           askQuestionToolClaude,
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
+          createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
+          createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
         ],
       });
 
@@ -140,6 +156,8 @@ export async function runRequirementsAgentTurn(
       ask_multiple_choice: askMultipleChoiceTool,
       ask_question: askQuestionTool,
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
+      propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
+      audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
     };
 
     const { updatedHistory } = await runAgentTurn({

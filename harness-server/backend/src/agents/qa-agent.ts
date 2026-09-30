@@ -8,6 +8,9 @@ import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, a
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
+import { themeContextForTurn } from '../themes/theme-context.js';
+import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
+import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -31,6 +34,7 @@ const TOOL_NAMES = [
   'search_docs',
   'read_doc',
   'search_code',
+  'audit_theme',
   'read_file',
   'get_diff',
   'run_checked_command',
@@ -75,7 +79,7 @@ export async function runQaAgentTurn(
     session.qaRerunPending = false;
   }
   await appendTranscriptEntry(session.id, 'qa', { role: 'user', text: userMessage });
-  const prompt = await applyAttachments(session.id, 'qa', userMessage, attachments);
+  let prompt = await applyAttachments(session.id, 'qa', userMessage, attachments);
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('qa');
@@ -85,6 +89,9 @@ export async function runQaAgentTurn(
   const isFirstTurn = provider === 'claude' ? !session.claudeSessionIds.qa : session.histories.qa.length === 0;
 
   let systemPrompt = override ?? promptTemplate;
+  const themeContext = await themeContextForTurn(session, 'qa', app.repoRoot, isFirstTurn);
+  systemPrompt += themeContext.system;
+  prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) {
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
     systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
@@ -114,6 +121,7 @@ export async function runQaAgentTurn(
           searchDocsToolClaude,
           readDocToolClaude,
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+          createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           readFileToolClaude,
           getDiffToolClaude,
           runCheckedCommandToolClaude,
@@ -156,6 +164,7 @@ export async function runQaAgentTurn(
       search_docs: searchDocsTool,
       read_doc: readDocTool,
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+      audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       read_file: readFileTool,
       get_diff: getDiffTool,
       run_checked_command: runCheckedCommandTool,

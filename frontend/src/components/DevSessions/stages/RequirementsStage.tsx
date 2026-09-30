@@ -1,19 +1,20 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { sessionHref, stageGroupFor } from '@/lib/dev-sessions/stage';
-import { meetingKickoffMessage, splitKickoffMessage } from '@/lib/dev-sessions/meeting';
+import { meetingKickoffMessage, splitKickoffMessage, THEME_MIGRATION_KICKOFF, themeMigrationKickoffMessage } from '@/lib/dev-sessions/meeting';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { SplitLinks, SplitProposalCard } from '../SplitPanel';
+import { ThemeProposalPanel } from '../ThemeProposalPanel';
 import { ErrorText, Notice, Pill } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
@@ -23,6 +24,7 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
   const queryClient = useQueryClient();
   const router = useRouter();
+  const kickoff = useSearchParams().get('kickoff');
   const { data: doc } = useQuery({
     queryKey: ['requirements-doc', sessionId, session.requirementsPath],
     queryFn: () => api.getRequirementsDoc(sessionId),
@@ -104,6 +106,19 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     void handleSend(splitKickoffMessage(session));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.splitKickoffPending, streaming]);
+
+  // Started from an app's Theme page to migrate the app onto its theme:
+  // open with the migration brief. Only into an empty conversation, so a
+  // reload of the same URL never sends it twice.
+  const kickedOffThemeMigration = useRef(false);
+  useEffect(() => {
+    if (kickoff !== THEME_MIGRATION_KICKOFF) return;
+    if (session.transcripts.requirements.length > 0 || streaming) return;
+    if (kickedOffThemeMigration.current) return;
+    kickedOffThemeMigration.current = true;
+    void api.getAppTheme(session.appId).then((state) => handleSend(themeMigrationKickoffMessage(state.current?.theme.name ?? 'current')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, kickoff, session.transcripts.requirements.length, streaming]);
 
   // Coordinator auto-start: the moment this stage is reached with
   // coordinator mode on and nothing said yet, drive it automatically.
@@ -203,6 +218,19 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
                 />
               )}
               <ErrorText>{splitError?.message ?? null}</ErrorText>
+              <ThemeProposalPanel
+                session={session}
+                agentName={AGENT.name}
+                disabled={streaming}
+                onApplied={(result, edited) => {
+                  refresh();
+                  void handleSend(
+                    `I applied the "${result.theme.name}" theme${edited ? ' after adjusting it in the picker' : ''}. It's saved in theme/theme.json, ` +
+                      "so that theme change is done. It doesn't need a requirements document or an in-app theme picker."
+                  );
+                }}
+                onDismissed={refresh}
+              />
               {reopenedHere && (
                 <Notice tone="amber">
                   Reopened mid-coding — branch <code>{session.branch}</code> has existing work. Changes here are

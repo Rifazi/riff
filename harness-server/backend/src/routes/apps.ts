@@ -7,6 +7,7 @@ import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts
 import { readBasePrompt } from '../agents/prompts.js';
 import { listIntegrations } from '../repo/integrations.js';
 import { assertPathAllowed, PathNotAllowedError } from '../repo/guardrails.js';
+import { applyThemePreset, saveAppTheme, summarizeAppTheme, ThemeApplyError, type ThemeApplyResult } from '../themes/apply-theme.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -19,6 +20,7 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     checkCommands: app.checkCommands ?? {},
     docsDir: docsDirFor(app),
     repoUrl: readRepoUrl(app),
+    theme: summarizeAppTheme(app.repoRoot),
   };
 }
 
@@ -42,16 +44,29 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.post<{ Body: { name: string; repoRoot: string; checkCommands?: CheckCommands } }>('/api/apps', async (request, reply) => {
-    const { name, repoRoot, checkCommands } = request.body ?? {};
+  app.post<{
+    Body: { name: string; repoRoot: string; checkCommands?: CheckCommands; themeId?: string; theme?: unknown; basedOn?: string | null };
+  }>('/api/apps', async (request, reply) => {
+    const { name, repoRoot, checkCommands, themeId, theme, basedOn } = request.body ?? {};
     if (!name?.trim() || !repoRoot?.trim()) {
       return reply.code(400).send({ error: 'name and repoRoot are required' });
     }
     try {
       const { app: created, docsInitialized, git } = await createApp({ name, repoRoot, checkCommands });
+      // The app exists by now, so a theme that can't be applied is reported
+      // as a warning rather than failing the whole create.
+      let themeResult: Omit<ThemeApplyResult, 'theme'> | undefined;
+      if (themeId || theme) {
+        try {
+          themeResult = theme ? await saveAppTheme(created, theme, basedOn ?? null) : await applyThemePreset(created, themeId!);
+        } catch (err) {
+          if (!(err instanceof ThemeApplyError)) throw err;
+          themeResult = { actions: [], warnings: [err.message] };
+        }
+      }
       await buildDocsIndex(created);
       watchDocsForChanges(created);
-      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized, git });
+      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized, git, themeResult });
     } catch (err) {
       if (err instanceof InvalidRepoRootError) return reply.code(400).send({ error: err.message });
       throw err;

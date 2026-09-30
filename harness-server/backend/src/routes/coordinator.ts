@@ -82,6 +82,10 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
           break;
         }
+        if (session.themeProposal) {
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to apply or dismiss the proposed theme.' });
+          break;
+        }
         if (session.splitProposal) {
           // Only a human can accept or dismiss a split.
           send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to accept or dismiss the proposed split.' });

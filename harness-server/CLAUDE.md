@@ -281,6 +281,113 @@ below) — never inside the target repo.
    Without them, Qwen answered the agent's questions on the human's behalf.
    Every remaining miss stopped early, which is the safe direction.
 
+13. User asked for default themes for new and existing apps, with theming
+   code that's consistent and reusable across pages, and a visual picker.
+   `themes/presets.ts` holds six presets (light + dark colors, fonts,
+   radius, border width, shadows, density) and is the only place theme
+   values live. `themes/theme-css.ts` renders a preset two ways from the
+   same rules: repo files (tokens on `:root`, dark via
+   `prefers-color-scheme` unless `<html data-theme>` pins it, components
+   in `@layer ui`) and the preview stylesheet (tokens scoped to
+   `[data-ui-theme="<id>"]`, mode via `data-ui-mode`, component rules once).
+   Components reference only tokens (hover/soft/focus are derived with
+   `color-mix`, badge/alert tones via a local `--tone`), so there's one
+   component stylesheet for every theme. `apply-theme.ts` writes `theme/`
+   + `docs/theme.md` (indexed by search_docs) and commits just those paths
+   on the base branch under `withRepoLock`. It refuses on another branch,
+   so theme files never land in a feature branch, and over a `theme/` it
+   didn't generate (marker: `generatedBy` in `theme/theme.json`). Which
+   theme is applied is read from that manifest, like `readRepoUrl`, never
+   stored. The theme rules travel as a prompt section appended after the
+   prompt override (same reasoning as step 9: an override replaces the
+   base prompt), on plan/coding/QA first turns and every team member.
+   Verified on a scratch server copy + scratch repos: apply, idempotent
+   re-apply (no commit), switch, create-with-theme, both refusals, and the
+   generated CSS in a plain HTML page in light/dark/pinned modes. An agent
+   actually building UI against a theme has not been exercised.
+
+14. User asked to edit themes, to have the theme defined in one file in the
+   target project that components and views reference (easy to swap),
+   and to be able to ask the requirements tab for a change and get the
+   theme picker. `theme/theme.json` became the app's **definition** (was a
+   generated manifest): `{ about, generatedBy, basedOn, theme }`, where
+   `theme` is a `ThemeDefinition` (presets are now only starting points,
+   `ThemePreset = ThemeDefinition & { id }`). `saveAppTheme` validates any
+   definition (`themes/theme-schema.ts`) and regenerates the CSS + docs
+   from it. `readAppTheme` compares the generated files against a fresh
+   render to report `inSync`, so a hand edit shows a "Regenerate CSS"
+   button (`regenerateAppTheme`). The preview no longer ships per-preset
+   scoped CSS: `/api/themes` returns preset token maps plus the component
+   CSS once, `/api/themes/preview` renders token maps for unsaved edits,
+   and `ThemeFrame` sets them as inline custom properties. The editor never
+   re-implements the renderer. Requirements got `propose_theme`
+   (`tool-defs/propose-theme-tool.ts`): a preset or the app's current theme
+   plus partial `changes`, merged and validated, stored as
+   `session.themeProposal`. Like a split, only the human applies it
+   (`POST /api/sessions/:id/theme-proposal/apply`, optionally with an edited
+   definition) or dismisses it, and the coordinator waits on it. The
+   Requirements tab opens the picker dialog automatically when a proposal
+   arrives, and after applying it sends a chat message so the agent knows.
+   The when-to-use guidance is in the tool description plus a short
+   first-turn system-prompt note, for the usual reason that overrides
+   replace the base prompt. Live-verified on a scratch server copy: editing
+   and saving on the Theme page, hand edit → out of sync → regenerate, CSS
+   injection rejected, and a real requirements turn (claude provider) that
+   called propose_theme, auto-opened the picker and applied/committed.
+
+15. User asked for the coding agent to know the theme-picker flow, build
+   apps on the theme, and migrate existing apps onto it. Theme context is
+   now per role (`themes/theme-docs.ts` `themeBriefing(role, name)`: the
+   shared rules, the fact that the picker belongs to Riff and not the app,
+   and a plan/coding/QA-specific part with the migration order), delivered
+   by `themes/theme-context.ts`. It goes in the system prompt on a stage's
+   first turn and in the turn prompt whenever `theme.json`'s fingerprint
+   differs from `session.themeContextSeen[role]`, so a resumed Claude
+   session still hears about a theme applied mid-session. Team members
+   always get it in their fresh system prompt. New read-only
+   `audit_theme` tool (`themes/theme-audit.ts`, for requirements, plan,
+   coding, team members and QA) scans all tracked and untracked
+   non-ignored files, unlike `search_code`, which is hard-wired to
+   src/ and infra/. It reports whether theme/index.css is imported, hard-coded color
+   literals, app-defined CSS tokens, **collisions** (app tokens with a
+   theme token's name: they override the theme by load order and can't be
+   aliased, since `--x: var(--x)` is circular, so a migration deletes them),
+   Tailwind configs and component libraries. The Theme page shows the same
+   audit (`GET /api/apps/:id/theme/audit`, `ThemeAdoptionCard`) with a
+   "Start migration session" button (a session plus `?kickoff=theme-migration`,
+   sent once into an empty requirements chat). `assertWritable` now refuses
+   writes (write_file, edit_file, run_prettier) to a Riff-generated
+   `theme/` or `docs/theme.md`. The requirements agent treats migrating
+   code onto the theme as a normal requirements doc, and theme
+   picking/editing as picker-only. `inSync` now compares only the generated
+   CSS, since `docs/theme.md` also changes when a Riff update rewords it.
+   The theme's base `body` rule resets `margin`. Live-verified on a scratch
+   server copy with a legacy app built to have colliding tokens, other
+   tokens and hard-coded colors, given approved requirements and a
+   high-level plan: the coding agent (claude provider) ran audit_theme,
+   wired the theme in, deleted the collisions, aliased the rest, moved
+   Button and markup onto ui-* classes, pinned dark, and re-audited to 0
+   hard-coded colors, never touching theme/. The page rendered correctly
+   before and after. Also verified: the write guard, a mid-session re-brief
+   after a theme switch, and the adoption card → migration kickoff. The
+   migration's plan and QA stages were not run by real agents.
+
+16. User asked for the presets to use color theory and have fun, memorable
+   names. They're now Blueberry Fizz (complementary), Grape Soda
+   (split-complementary), Matcha Latte (analogous), Peach Cobbler
+   (analogous plus one complementary accent), Midnight Arcade (triadic) and
+   Zine Machine (achromatic with Bauhaus spot colors). They keep the
+   old slots' shape, fonts and density. Each palette was built in OKLCH
+   from its harmony's hues, and each color's lightness was then tuned
+   until it passed WCAG AA where it's used, in both modes: text and muted
+   text on bg/surface/surfaceMuted, onPrimary on primary, primary as link
+   text on surfaces, and white on danger (the destructive button). That is
+   why light-mode primaries are darker than dark-mode ones. The tuned hex
+   values are committed in presets.ts; the throwaway generator isn't. The
+   preset ids changed, so an app whose theme.json says `basedOn: "slate"`
+   (etc.) keeps its theme but no longer matches a preset. It shows as its
+   own "Current" theme, and saving writes `basedOn: null`.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

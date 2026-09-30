@@ -3,6 +3,7 @@ import path from 'node:path';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { assertPathAllowed, PathNotAllowedError } from '../../repo/guardrails.js';
+import { isGeneratedThemePath } from '../../themes/apply-theme.js';
 
 // Same "anything under repoRoot except the always-forbidden paths" scope as
 // read_file — target repos aren't all shaped like the original Customer-EDI
@@ -62,6 +63,12 @@ export const editFileDescription =
  */
 export function assertWritable(requestedPath: string, repoRoot: string, writablePaths?: string[]): string {
   const absolute = assertPathAllowed(requestedPath, WRITE_ALLOWED_ROOTS, repoRoot);
+  if (isGeneratedThemePath(repoRoot, path.relative(repoRoot, absolute))) {
+    throw new PathNotAllowedError(
+      `${requestedPath} is generated from the app's UI theme (theme/theme.json) by Riff. Don't edit it: style your code with ` +
+        "the theme's tokens, and if the theme itself needs to change, tell the human to change it in Riff's theme picker."
+    );
+  }
   if (!writablePaths) return absolute;
   try {
     return assertPathAllowed(requestedPath, writablePaths, repoRoot);
