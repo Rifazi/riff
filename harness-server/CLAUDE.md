@@ -435,6 +435,50 @@ below) — never inside the target repo.
    remove theirs. UI: a "Reference docs" button on the session header and
    on each app card (`components/DevSessions/ReferenceDocs.tsx`).
 
+20. User asked to spend fewer tokens, using the local Qwen where it helps.
+   Measured first: coding was 80-95% of every session, nearly all of it
+   cache reads, because one conversation ran across every plan step (the
+   worst one: 11 "Continue with the next step" turns, 528 tool calls,
+   126.8M tokens) and `read_file` was 70-85% of tool-result text (68 of
+   158 reads in that session re-read a file just edited). Now the single
+   coding agent starts a **new conversation** (`session.codingContext`:
+   step id, start entry, last size) when an automatic step turn is for a
+   different step than the conversation started on, for a QA fix
+   (`qaFix`), when the last one ended at 90k+ tokens, or when a branch
+   exists but no conversation does. Reconciliation turns always resume. A
+   continuation hop inside a turn (single agent and team members) compacts
+   at 110k instead of resuming (`compaction` in `sdk-client.ts`, which now
+   reports each turn's `contextTokens`). Every new conversation opens with
+   a handoff (`agents/handoff.ts`): checklist, commits, diff stat and
+   `git status` read from the repo, the files changed and read, and notes
+   (Done / In progress / Learned / Next) written by local Qwen from the old
+   conversation's activity log. Without Qwen, the agent's last message is
+   used instead of the notes. On the 126.8M session, one step's 320k
+   characters became a 10k-character handoff in about 20s. A compacted
+   conversation also gets the full first-turn system prompt back
+   (requirements, plan, theme, reference docs), since a resumed turn's
+   prompt leaves them out. `read_file` pages are now 300 lines and 16k
+   characters. `edit_file`/`write_file` report the lines they changed, and
+   the tool descriptions and base prompt say not to re-read a file to check
+   an edit. A Qwen docs stage was considered and not built: doc edits are
+   a few steps of a coding run, and a 4B model rewriting whole pages
+   drops content. Not live-verified with a real coding run yet.
+
+21. User asked for a visual of token usage in Settings. `addStageUsage` now
+   also appends each turn's usage to `state/usage-log.jsonl`
+   (`sessions/usage-log.ts`; kept after a session is deleted, since the
+   tokens were still spent). `GET /api/usage?days=7|30|90`
+   (`routes/usage.ts`) totals the log per day, stage, token type and
+   session. A session's totals beyond what the log holds (everything from
+   before the log existed) are dated to that stage's last transcript
+   activity before logging began and flagged `estimated`. UI: Settings →
+   Dev Agents → Token usage (`components/DevSessions/TokenUsagePanel.tsx`):
+   a range filter, stat tiles, a stacked daily chart by stage with hover
+   tooltips and a table view, the token-type split, and the top sessions.
+   Stage colors are slots 1-4 of the dataviz reference palette, checked
+   with its validator; coding and QA are under 3:1 on white, so the
+   legend and the table view are always there.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -458,6 +502,7 @@ backend/src/
     settings-store.ts        — reads/writes backend/local-settings.json
     prompts-store.ts          — per-app, per-role system prompt overrides; reads/writes backend/local-prompts.json, seeds the legacy app's overrides from prompts/customer-edi-legacy/*.md the first time it's read
   agents/
+    handoff.ts               — the opening note of a new coding conversation (step boundary, QA fix, compaction): repo state + Qwen-written notes on the previous conversation
     sdk-client.ts            — BOTH engines: runAgentTurn() (AI SDK: resolveLanguageModel() switches on ApiKeyProvider, streamText() with stopWhen: stepCountIs(20)) and runClaudeAgentTurn()/testClaudeLogin() (Claude Agent SDK: query(), MCP server, resume: sessionId, cwd: the session's app's repoRoot) — both normalize to the same AgentEvent union so routes/frontend don't care which ran
     requirements-agent.ts, plan-agent.ts, coding-agent.ts, qa-agent.ts — one per role: resolve the session's app, load prompt (app override, else the checked-in base) + role's model config, branch on provider === 'claude' to pick engine + matching tool set (tool-defs/ vs tool-defs-claude/) built against that app's repoRoot, persist transcript + (history or claudeSessionId)
     prompts.ts                — readBasePrompt(role): the checked-in file for a role, or coordinator-agent.ts's DECISION_INSTRUCTIONS constant for "coordinator" (which has no file) — used by the Apps page's "view base prompt"

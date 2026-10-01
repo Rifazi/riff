@@ -344,6 +344,7 @@ export type AgentEvent =
   | { type: 'error'; message: string }
   | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
+  | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage };
 
 export type Provider = 'claude' | 'anthropic' | 'openai' | 'google';
@@ -432,3 +433,31 @@ export interface RolePrompt {
 }
 
 export type AppPrompts = Record<Role, RolePrompt>;
+
+export type UsageStage = 'requirements' | 'plan' | 'coding' | 'qa';
+export type UsageRange = 7 | 30 | 90;
+
+// GET /api/usage (harness-server routes/usage.ts). `estimated` = tokens from
+// before per-turn logging began, dated to each stage's last activity.
+export interface UsageReport {
+  days: UsageRange;
+  since: string;
+  trackedSince: string | null;
+  totals: {
+    usage: TokenUsage;
+    byStage: Record<UsageStage, TokenUsage>;
+    estimated: number;
+    sessions: number;
+  };
+  daily: { date: string; byStage: Record<UsageStage, number>; estimated: number }[];
+  sessions: {
+    id: string;
+    title: string;
+    appName: string | null;
+    exists: boolean;
+    lastAt: string;
+    turns: number;
+    byStage: Record<UsageStage, number>;
+    usage: TokenUsage;
+  }[];
+}

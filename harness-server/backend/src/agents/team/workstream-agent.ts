@@ -4,14 +4,15 @@ import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../../config.js';
 import type { AppConfig } from '../../apps/apps.js';
-import { appendTeamTranscriptEntry, mutateSession, addStageUsage } from '../../sessions/session-store.js';
+import { appendTeamTranscriptEntry, getSession, mutateSession, addStageUsage } from '../../sessions/session-store.js';
 import type { CodingTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
 import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
-import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client.js';
+import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
+import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
 import { loadApprovedDocsForCoding } from '../coding-agent.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
@@ -33,6 +34,9 @@ import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-to
 
 const CODING_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TEAM_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-team-member.md');
+
+// Same threshold as the single coding agent (coding-agent.ts).
+const COMPACT_AT_TOKENS = 110_000;
 
 const noBranchCreation = async () => {
   throw new Error('Team members work on a branch created for them — there is no branch to create.');
@@ -100,7 +104,39 @@ export async function runWorkstreamAgent({
 
   await appendTeamTranscriptEntry(session.id, member.id, { role: 'user', text: prompt });
 
+  // A workstream runs as one long turn, so it compacts at continuation hops
+  // (agents/handoff.ts) rather than re-sending every earlier step.
+  const contextLog = new ContextLog([
+    ...entriesSince(member.transcript, member.contextStartEntryId),
+    { role: 'user', text: prompt },
+  ]);
+  const compaction: CompactionOptions = {
+    atTokens: COMPACT_AT_TOKENS,
+    handoff: async () => {
+      const latest = await getSession(session.id);
+      const handoff = await buildHandoff({
+        reason: 'Your workstream conversation reached its tool-call budget and had grown large.',
+        entries: contextLog.entries,
+        repoRoot: worktreePath,
+        branch: member.branch,
+        baseBranch: session.branch ?? undefined,
+        checklist: (latest?.codingPlan ?? []).filter((s) => member.stepIds.includes(s.id)),
+      });
+      contextLog.reset();
+      const marker = await appendTeamTranscriptEntry(session.id, member.id, {
+        role: 'system',
+        text: '⟲ New conversation — this one had grown large, so it was summarized into a handoff note to save tokens.',
+      });
+      await mutateSession(session.id, (s) => {
+        const m = s.codingTeam?.members.find((x) => x.id === member.id);
+        if (m) m.contextStartEntryId = marker.id;
+      });
+      return { prompt: handoff };
+    },
+  };
+
   const wrappedOnEvent = (event: AgentEvent) => {
+    contextLog.record(event);
     onEvent(event);
     void persistEvent(session.id, member.id, event);
   };
@@ -151,6 +187,7 @@ export async function runWorkstreamAgent({
       prompt,
       cwd: worktreePath,
       onEvent: wrappedOnEvent,
+      compaction,
     });
     await mutateSession(session.id, (s) => {
       const m = s.codingTeam?.members.find((x) => x.id === member.id);
@@ -190,6 +227,7 @@ export async function runWorkstreamAgent({
     history: member.history,
     prompt,
     onEvent: wrappedOnEvent,
+    compaction,
   });
   await mutateSession(session.id, (s) => {
     const m = s.codingTeam?.members.find((x) => x.id === member.id);

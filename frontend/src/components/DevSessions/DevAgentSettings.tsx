@@ -21,6 +21,7 @@ import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 import { AgentServerBanner } from './AgentServerBanner';
 import { ExternalAnchor } from './ExternalAnchor';
 import { LoadingState, Pill } from './PageShell';
+import { TokenUsagePanel } from './TokenUsagePanel';
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   claude: 'Claude (subscription login)',
@@ -485,6 +486,8 @@ export function DevAgentSettings() {
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />
             </Section>
+
+            <TokenUsagePanel />
 
             <JiraSettings jira={settings.jira} />
           </>

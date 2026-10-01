@@ -118,6 +118,15 @@ export interface CodingTeamMember extends PlanWorkstream {
   transcript: TranscriptEntry[];
   history: ModelMessage[];
   claudeSessionId: string | null;
+  // The transcript entry the member's current conversation started after
+  // (agents/handoff.ts) — null = the start of its transcript.
+  contextStartEntryId?: string | null;
+}
+
+export interface CodingContext {
+  stepId: string | null;
+  startEntryId: string | null;
+  tokens: number;
 }
 
 export interface CodingTeamState {
@@ -163,6 +172,13 @@ export interface SessionRecord {
   // — the members' own transcripts live here, not in transcripts.coding
   // (which stays the lead's single-agent chat for follow-ups after merge).
   codingTeam: CodingTeamState | null;
+  // The single coding agent's current conversation: the plan step it was
+  // started for, the transcript entry it started after (null = the start),
+  // and its size after its last turn. coding-agent.ts starts a fresh
+  // conversation, opened with a handoff (agents/handoff.ts), when the next
+  // automatic step turn is for a different step, for a QA fix, or when this
+  // one got large — instead of re-sending every earlier step on each call.
+  codingContext: CodingContext | null;
 
   qaReportPath: string | null;
   // How the reviewed branch was shipped (repo/delivery.ts): merged into the

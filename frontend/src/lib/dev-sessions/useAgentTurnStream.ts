@@ -72,6 +72,16 @@ export function useAgentTurnStream() {
           timestamp: new Date().toISOString(),
         },
       ]);
+    } else if (event.type === 'compacted') {
+      setOverlay((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: 'system',
+          text: `⟲ New conversation — this one reached ${Math.round(event.contextTokens / 1000)}k tokens, so it continues from a handoff note.`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } else if (event.type === 'error') {
       setError(event.message);
     }

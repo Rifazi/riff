@@ -24,6 +24,8 @@ import type {
   ThemeDraft,
   ThemeTokens,
   ThemesResponse,
+  UsageRange,
+  UsageReport,
 } from './types';
 
 // The agent server the Riff desktop app starts alongside itself (see
@@ -243,6 +245,8 @@ export const api = {
     fetch(apiUrl(`/api/sessions/${id}/qa/send-back`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
   getSettings: () => fetch(apiUrl('/api/settings')).then((r) => json<SettingsResponse>(r)),
+
+  getUsage: (days: UsageRange) => fetch(apiUrl(`/api/usage?days=${days}`)).then((r) => json<UsageReport>(r)),
 
   updateSettings: (patch: {
     credentials?: Partial<Record<Provider, string | null>>;

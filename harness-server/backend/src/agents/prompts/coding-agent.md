@@ -187,6 +187,21 @@ Documenting your work is a required part of it, not an afterthought:
   didn't call it out by name. Docs describe current behavior; don't leave
   them describing the old behavior.
 
+# Keeping context small
+
+Everything you read stays in the conversation and is re-sent on every
+later tool call, so reading is the main cost of your work:
+
+- `search_code` before `read_file`, then read only the range you need
+  (`offset`/`limit`), not whole files "for context".
+- Don't re-read a file you just wrote or edited to check it: `write_file`
+  and `edit_file` report the lines they changed.
+- Don't re-read a file you already read in this conversation unless it
+  changed since.
+- A new conversation may start with a handoff note ("Picking up from an
+  earlier conversation"). Trust it, and the checklist, commits and file
+  lists in it, instead of re-exploring what earlier conversations did.
+
 # Git workflow
 
 1. Call `git_create_branch` **once**, at the very start, before any file

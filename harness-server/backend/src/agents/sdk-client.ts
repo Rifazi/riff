@@ -59,6 +59,7 @@ export type AgentEvent =
   | { type: 'error'; message: string }
   | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
+  | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage };
 
 // Bounds automatic continuation (see runAgentTurn/runClaudeAgentTurn below):
@@ -72,6 +73,22 @@ const CONTINUATION_PROMPT =
   "You were stopped only because this turn reached its tool-call budget — you have NOT finished and this is " +
   "not an error to report. Continue exactly where you left off: do not restate progress, do not repeat " +
   "completed writes/commits/tool calls, just proceed with the remaining work.";
+const CONTINUATION_AFTER_COMPACTION_PROMPT =
+  "You were stopped only because the previous conversation reached its tool-call budget — the work is NOT " +
+  "finished. Continue from the state above: don't redo anything already committed or listed as done, just " +
+  "proceed with the remaining work.";
+
+// Context compaction at a continuation hop: a context at or over `atTokens`
+// isn't resumed — the next hop starts a fresh conversation that opens with
+// `handoff()` (agents/handoff.ts) instead. Every later step of a resumed
+// context re-reads all of it, so this bounds what one long turn can cost.
+// `systemPrompt`, when returned, replaces the turn's own for the fresh
+// conversation — a resumed turn's system prompt can be the short form that
+// leaves out what the conversation's first turn already carried.
+export interface CompactionOptions {
+  atTokens: number;
+  handoff: () => Promise<{ prompt: string; systemPrompt?: string }>;
+}
 
 export interface RunAgentTurnParams {
   systemPrompt: string;
@@ -82,6 +99,7 @@ export interface RunAgentTurnParams {
   history: ModelMessage[];
   prompt: string;
   onEvent: (event: AgentEvent) => void;
+  compaction?: CompactionOptions;
 }
 
 export interface RunAgentTurnResult {
@@ -89,6 +107,10 @@ export interface RunAgentTurnResult {
   resultText: string;
   isError: boolean;
   usage: TokenUsage;
+  // The prompt size of the turn's last model call — what the next step of
+  // this conversation would re-send. Callers use it to decide whether to
+  // start their next turn in a fresh conversation.
+  contextTokens: number;
 }
 
 interface RunAgentTurnOnceResult extends RunAgentTurnResult {
@@ -178,6 +200,8 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     const responseMessages = await result.responseMessages;
     const updatedHistory: ModelMessage[] = [...history, { role: 'user', content: prompt }, ...responseMessages];
     const finishReason = await result.finishReason;
+    const steps = await result.steps;
+    const contextTokens = steps.at(-1)?.usage.inputTokens ?? 0;
     const total = await result.totalUsage;
     const cacheRead = total.inputTokenDetails?.cacheReadTokens ?? 0;
     const cacheWrite = total.inputTokenDetails?.cacheWriteTokens ?? 0;
@@ -189,11 +213,11 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     };
 
     onEvent({ type: 'done', text: fullText, isError: sawError });
-    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage };
+    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage, contextTokens };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE };
+    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE, contextTokens: 0 };
   }
 }
 
@@ -209,15 +233,24 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
   let hop = 0;
   let currentHistory = params.history;
   let currentPrompt = params.prompt;
+  let systemPrompt = params.systemPrompt;
   let result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
   let usage = result.usage;
 
   while (result.finishReason === 'tool-calls' && hop < MAX_CONTINUATION_HOPS) {
     hop += 1;
     onEvent({ type: 'continuation', hop, maxHops: MAX_CONTINUATION_HOPS });
-    currentHistory = result.updatedHistory;
-    currentPrompt = CONTINUATION_PROMPT;
-    result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
+    if (params.compaction && result.contextTokens >= params.compaction.atTokens) {
+      const handoff = await params.compaction.handoff();
+      onEvent({ type: 'compacted', contextTokens: result.contextTokens });
+      systemPrompt = handoff.systemPrompt ?? systemPrompt;
+      currentHistory = [];
+      currentPrompt = `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`;
+    } else {
+      currentHistory = result.updatedHistory;
+      currentPrompt = CONTINUATION_PROMPT;
+    }
+    result = await runAgentTurnOnce({ ...params, systemPrompt, history: currentHistory, prompt: currentPrompt });
     usage = addUsage(usage, result.usage);
   }
   onEvent({ type: 'usage', usage });
@@ -228,10 +261,17 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
       resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
       usage,
+      contextTokens: result.contextTokens,
     };
   }
 
-  return { updatedHistory: result.updatedHistory, resultText: result.resultText, isError: result.isError, usage };
+  return {
+    updatedHistory: result.updatedHistory,
+    resultText: result.resultText,
+    isError: result.isError,
+    usage,
+    contextTokens: result.contextTokens,
+  };
 }
 
 // --- Claude subscription (OAuth login) engine ---------------------------
@@ -274,6 +314,7 @@ export interface RunClaudeAgentTurnParams {
   prompt: string;
   cwd: string;
   onEvent: (event: AgentEvent) => void;
+  compaction?: CompactionOptions;
 }
 
 export interface RunClaudeAgentTurnResult {
@@ -281,6 +322,8 @@ export interface RunClaudeAgentTurnResult {
   resultText: string;
   isError: boolean;
   usage: TokenUsage;
+  // Same as RunAgentTurnResult.contextTokens.
+  contextTokens: number;
 }
 
 interface RunClaudeAgentTurnOnceResult extends RunClaudeAgentTurnResult {
@@ -308,6 +351,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   let subtype: string | null = null;
   let gotResult = false;
   let usage: TokenUsage = ZERO_USAGE;
+  let contextTokens = 0;
 
   const stream = query({
     prompt,
@@ -345,6 +389,8 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
           break;
         }
         case 'assistant': {
+          const u = message.message.usage;
+          if (u) contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
           for (const block of message.message.content) {
             if (block.type === 'text') {
               onEvent({ type: 'assistant_text', text: block.text });
@@ -401,14 +447,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
     // turn into a raw, unretried error the human would see instead of the
     // continuation loop below picking it up).
     if (gotResult) {
-      return { sdkSessionId, resultText, isError, subtype, usage };
+      return { sdkSessionId, resultText, isError, subtype, usage, contextTokens };
     }
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage };
+    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens };
   }
 
-  return { sdkSessionId, resultText, isError, subtype, usage };
+  return { sdkSessionId, resultText, isError, subtype, usage, contextTokens };
 }
 
 /**
@@ -423,13 +469,26 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
 export async function runClaudeAgentTurn(params: RunClaudeAgentTurnParams): Promise<RunClaudeAgentTurnResult> {
   const { onEvent } = params;
   let hop = 0;
+  let systemPrompt = params.systemPrompt;
   let result = await runClaudeAgentTurnOnce(params);
   let usage = result.usage;
 
   while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < MAX_CONTINUATION_HOPS) {
     hop += 1;
     onEvent({ type: 'continuation', hop, maxHops: MAX_CONTINUATION_HOPS });
-    result = await runClaudeAgentTurnOnce({ ...params, resumeSessionId: result.sdkSessionId, prompt: CONTINUATION_PROMPT });
+    if (params.compaction && result.contextTokens >= params.compaction.atTokens) {
+      const handoff = await params.compaction.handoff();
+      onEvent({ type: 'compacted', contextTokens: result.contextTokens });
+      systemPrompt = handoff.systemPrompt ?? systemPrompt;
+      result = await runClaudeAgentTurnOnce({
+        ...params,
+        systemPrompt,
+        resumeSessionId: null,
+        prompt: `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`,
+      });
+    } else {
+      result = await runClaudeAgentTurnOnce({ ...params, systemPrompt, resumeSessionId: result.sdkSessionId, prompt: CONTINUATION_PROMPT });
+    }
     usage = addUsage(usage, result.usage);
   }
   onEvent({ type: 'usage', usage });
@@ -440,10 +499,17 @@ export async function runClaudeAgentTurn(params: RunClaudeAgentTurnParams): Prom
       resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
       usage,
+      contextTokens: result.contextTokens,
     };
   }
 
-  return { sdkSessionId: result.sdkSessionId, resultText: result.resultText, isError: result.isError, usage };
+  return {
+    sdkSessionId: result.sdkSessionId,
+    resultText: result.resultText,
+    isError: result.isError,
+    usage,
+    contextTokens: result.contextTokens,
+  };
 }
 
 /**

@@ -300,6 +300,11 @@ export async function hasUncommittedChanges(repoRoot: string): Promise<boolean> 
   return out.trim().length > 0;
 }
 
+/** `git status --short` for the working tree, node_modules left out. */
+export async function shortStatus(repoRoot: string): Promise<string> {
+  return client(repoRoot).raw(['status', '--short', '--', '.', ':(exclude)node_modules']);
+}
+
 export async function commitAll(repoRoot: string, message: string): Promise<string | null> {
   const git = client(repoRoot);
   await git.raw(['add', '-A', '--', '.', ':(exclude)node_modules']);

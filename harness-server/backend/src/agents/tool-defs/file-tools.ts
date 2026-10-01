@@ -24,7 +24,13 @@ export const WRITE_ALLOWED_ROOTS = ['.'];
 // protects the AI-SDK engine (anthropic/openai/google), which has no
 // equivalent built-in guard of its own and would otherwise just blow
 // straight through context/cost on a huge file.
-const DEFAULT_LINE_LIMIT = 600;
+//
+// Every read stays in the conversation and is re-sent on each later step,
+// so file reads were most of what coding conversations cost: a page is
+// 300 lines and at most READ_CHAR_LIMIT characters (cut at a line break),
+// whichever comes first.
+const DEFAULT_LINE_LIMIT = 300;
+const READ_CHAR_LIMIT = 16_000;
 
 export const readFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/adapters/primary/foo/foo.ts'),
@@ -34,8 +40,10 @@ export const readFileSchema = z.object({
 export const readFileDescription =
   'Read a file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own runtime ' +
   `state). Files over ${DEFAULT_LINE_LIMIT} lines are truncated to the first ${DEFAULT_LINE_LIMIT} unless you pass ` +
-  `offset and/or limit — use those to page through the rest (e.g. offset: ${DEFAULT_LINE_LIMIT + 1}). For a large file, ` +
-  'search_code for the part you need first, then read just that range.';
+  `offset and/or limit — use those to page through the rest (e.g. offset: ${DEFAULT_LINE_LIMIT + 1}). Every read stays ` +
+  'in your context for the rest of the conversation, so read only what you need: for a large file, search_code for ' +
+  "the part you need first, then read just that range. Don't re-read a file you just wrote or edited to check it — " +
+  'write_file and edit_file report the lines they changed.';
 
 export const writeFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/schemas/acme-inventory.schema.json'),
@@ -53,7 +61,8 @@ export const editFileSchema = z.object({
 });
 export const editFileDescription =
   'Replace an exact, unique occurrence of oldText with newText in an existing file anywhere in the repo (same ' +
-  'scope as write_file). Fails if oldText is not found or occurs more than once — read the file first.';
+  'scope as write_file). Fails if oldText is not found or occurs more than once — read the file first. On success it ' +
+  "returns the line range newText now occupies; the file then matches what you sent, so don't re-read it to check.";
 
 /**
  * For a coding-team member: `writablePaths` are the paths its workstream
@@ -91,16 +100,25 @@ export function createFileExecutors(deps: FileToolDeps) {
     const absolute = assertPathAllowed(requestedPath, ['.'], deps.repoRoot);
     const content = await fs.readFile(absolute, 'utf8');
 
-    if (offset === undefined && limit === undefined) {
-      const totalLines = content.split('\n').length;
-      if (totalLines <= DEFAULT_LINE_LIMIT) return content;
-    }
-
     const lines = content.split('\n');
     const totalLines = lines.length;
+    if (offset === undefined && limit === undefined && totalLines <= DEFAULT_LINE_LIMIT && content.length <= READ_CHAR_LIMIT) {
+      return content;
+    }
+
     const start = Math.max(0, (offset ?? 1) - 1);
-    const end = Math.min(start + (limit ?? DEFAULT_LINE_LIMIT), totalLines);
-    const slice = lines.slice(start, end).join('\n');
+    let end = Math.min(start + (limit ?? DEFAULT_LINE_LIMIT), totalLines);
+    let chars = 0;
+    for (let i = start; i < end; i++) {
+      chars += lines[i].length + 1;
+      if (chars > READ_CHAR_LIMIT && i > start) {
+        end = i;
+        break;
+      }
+    }
+    let slice = lines.slice(start, end).join('\n');
+    // One enormous line (minified code, a data blob) still gets the cap.
+    if (slice.length > READ_CHAR_LIMIT) slice = `${slice.slice(0, READ_CHAR_LIMIT)} [… line cut at ${READ_CHAR_LIMIT} chars]`;
     const continuation = end < totalLines ? ` — more remains, pass offset: ${end + 1} to continue` : '';
     return `[lines ${start + 1}-${end} of ${totalLines}${continuation}]\n${slice}`;
   };
@@ -113,9 +131,10 @@ export function createFileExecutors(deps: FileToolDeps) {
       .catch(() => false);
     await fs.mkdir(path.dirname(absolute), { recursive: true });
     await fs.writeFile(absolute, content, 'utf8');
+    const lineCount = content.split('\n').length;
     return existed
-      ? `Wrote ${requestedPath} (replaced the existing file — for partial changes to existing files, edit_file is much cheaper)`
-      : `Wrote ${requestedPath}`;
+      ? `Wrote ${requestedPath} (${lineCount} lines; replaced the existing file — for partial changes to existing files, edit_file is much cheaper)`
+      : `Wrote ${requestedPath} (${lineCount} lines)`;
   };
 
   const editFileExecute = async ({ path: requestedPath, oldText, newText }: z.infer<typeof editFileSchema>): Promise<string> => {
@@ -128,8 +147,12 @@ export function createFileExecutors(deps: FileToolDeps) {
     if (occurrences > 1) {
       throw new Error(`oldText occurs ${occurrences} times in ${requestedPath} — must be unique.`);
     }
-    await fs.writeFile(absolute, content.replace(oldText, newText), 'utf8');
-    return `Edited ${requestedPath}`;
+    const updated = content.replace(oldText, newText);
+    await fs.writeFile(absolute, updated, 'utf8');
+    const firstLine = content.slice(0, content.indexOf(oldText)).split('\n').length;
+    const lastLine = firstLine + newText.split('\n').length - 1;
+    const range = newText ? `lines ${firstLine}-${lastLine}` : `removed at line ${firstLine}`;
+    return `Edited ${requestedPath} (${range} of ${updated.split('\n').length})`;
   };
 
   return { readFileExecute, writeFileExecute, editFileExecute };

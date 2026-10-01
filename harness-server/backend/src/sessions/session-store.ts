@@ -7,6 +7,7 @@ import type { SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionSt
 import { slugify } from './session.js';
 import { LEGACY_APP_ID } from '../apps/apps.js';
 import { addUsage, ZERO_USAGE, type TokenUsage } from '../agents/sdk-client.js';
+import { appendUsageLog } from './usage-log.js';
 
 type StageKey = 'requirements' | 'plan' | 'coding' | 'qa';
 
@@ -56,6 +57,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.sourceMeeting ??= null;
   session.meetingKickoffPending ??= false;
   session.codingTeam ??= null;
+  session.codingContext ??= null;
   session.delivery ??= null;
   session.splitProposal ??= null;
   session.splitInto ??= [];
@@ -150,6 +152,7 @@ export async function createSession(input: {
     codingApprovedAt: null,
     codingPlan: null,
     codingTeam: null,
+    codingContext: null,
     qaReportPath: null,
     delivery: null,
     qaStatus: null,
@@ -225,6 +228,7 @@ export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsa
   await mutateSession(id, (session) => {
     session.usage[stage] = addUsage(session.usage[stage], usage);
   });
+  await appendUsageLog({ at: new Date().toISOString(), sessionId: id, stage, usage });
   const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
   console.log(
     `[usage] session ${id} ${stage}: ${total} tokens (input ${usage.input}, output ${usage.output}, ` +
@@ -265,9 +269,11 @@ export async function appendTeamTranscriptEntry(
   id: string,
   memberId: string,
   entry: Omit<TranscriptEntry, 'id' | 'timestamp'>
-): Promise<void> {
+): Promise<TranscriptEntry> {
+  const full: TranscriptEntry = { ...entry, id: uuidv4(), timestamp: new Date().toISOString() };
   await mutateSession(id, (session) => {
     const member = session.codingTeam?.members.find((m) => m.id === memberId);
-    member?.transcript.push({ ...entry, id: uuidv4(), timestamp: new Date().toISOString() });
+    member?.transcript.push(full);
   });
+  return full;
 }

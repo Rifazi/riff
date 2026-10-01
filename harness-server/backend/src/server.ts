@@ -13,6 +13,7 @@ import { registerAppRoutes } from './routes/apps.js';
 import { registerCoordinatorRoutes } from './routes/coordinator.js';
 import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
+import { registerUsageRoutes } from './routes/usage.js';
 import { recoverInterruptedTeams } from './agents/team/coding-team.js';
 
 async function main() {
@@ -59,6 +60,7 @@ async function main() {
   await registerCoordinatorRoutes(app);
   await registerThemeRoutes(app);
   await registerReferenceDocRoutes(app);
+  await registerUsageRoutes(app);
 
   app.get('/api/health', async () => ({ ok: true }));
 

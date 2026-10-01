@@ -56,6 +56,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       // post-reconciliation context, whether it's the auto-composed one or
       // the human typing something else instead — clear both flags before
       // the turn runs.
+      const qaFix = session.qaFindingsPending;
       if (session.qaFindingsPending || session.codingReconciliationPending) {
         await updateSession(session.id, { qaFindingsPending: false, codingReconciliationPending: false });
         session.qaFindingsPending = false;
@@ -67,7 +68,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       const send = (event: AgentEvent) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
 
       try {
-        await runCodingAgentTurn(session, message, send, attachments, { stepTurn: stepTurn === true });
+        await runCodingAgentTurn(session, message, send, attachments, { stepTurn: stepTurn === true, qaFix });
       } catch (err) {
         send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
