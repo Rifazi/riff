@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import type { TokenUsage } from '../agents/sdk-client.js';
+import type { TokenUsage, ToolOutputStats } from '../agents/sdk-client.js';
 
 // One line per agent turn's token usage, so usage can be shown over time
 // (Settings → Dev Agents → Token usage, routes/usage.ts). A session's own
@@ -16,6 +16,8 @@ export interface UsageLogEntry {
   sessionId: string;
   stage: UsageStage;
   usage: TokenUsage;
+  // Absent on entries from before tool output was tracked.
+  toolOutput?: ToolOutputStats;
 }
 
 const LOG_PATH = path.join(config.stateDir, 'usage-log.jsonl');

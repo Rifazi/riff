@@ -96,22 +96,52 @@ export function compactOutput(stdout: string, stderr: string, maxChars = 3000): 
 
 const MATCH_LINE_CHARS = 200;
 
-/** `git grep -n` output (path:line:text) grouped under each path, long lines cut. */
-export function groupGrepOutput(stdout: string, maxLines = 100): string {
+// Tracked files that are nearly always noise to search or review line by
+// line: lockfiles, snapshots, build output, minified bundles, source maps.
+// As git pathspecs, for `git grep` and `git diff`.
+export const NOISE_PATHSPECS = [
+  ':(exclude,glob)**/package-lock.json',
+  ':(exclude,glob)**/pnpm-lock.yaml',
+  ':(exclude,glob)**/yarn.lock',
+  ':(exclude,glob)**/Cargo.lock',
+  ':(exclude,glob)**/*.snap',
+  ':(exclude,glob)**/__snapshots__/**',
+  ':(exclude,glob)**/dist/**',
+  ':(exclude,glob)**/build/**',
+  ':(exclude,glob)**/*.min.js',
+  ':(exclude,glob)**/*.map',
+];
+
+/**
+ * `git grep -n -z` output (path NUL line NUL text, with `--` between
+ * context hunks) grouped under each path, long lines cut.
+ */
+export function groupGrepOutput(stdout: string, maxLines = 120): string {
   const groups = new Map<string, string[]>();
   let count = 0;
+  let lastFile: string | undefined;
   for (const line of stdout.split('\n')) {
-    if (!line || count >= maxLines) continue;
-    const m = /^(.+?):(\d+):(.*)$/.exec(line);
-    if (!m) continue;
-    const [, file, lineNo, text] = m;
-    const trimmed = text.trim();
-    const shown = trimmed.length > MATCH_LINE_CHARS ? `${trimmed.slice(0, MATCH_LINE_CHARS)} […]` : trimmed;
+    if (count >= maxLines) break;
+    if (line === '--') {
+      if (lastFile) groups.get(lastFile)!.push('  …');
+      continue;
+    }
+    const parts = line.split('\0');
+    if (parts.length < 3) continue;
+    const [file, lineNo, ...rest] = parts;
+    const text = rest.join(' ').trim();
+    const shown = text.length > MATCH_LINE_CHARS ? `${text.slice(0, MATCH_LINE_CHARS)} […]` : text;
     if (!groups.has(file)) groups.set(file, []);
-    groups.get(file)!.push(`  ${lineNo}: ${shown}`);
+    const hits = groups.get(file)!;
+    // A hunk separator right before the next file's first line says nothing.
+    if (lastFile && lastFile !== file && groups.get(lastFile)!.at(-1) === '  …') groups.get(lastFile)!.pop();
+    hits.push(`  ${lineNo}: ${shown}`);
+    lastFile = file;
     count++;
   }
-  return [...groups].map(([file, hits]) => `${file}\n${hits.join('\n')}`).join('\n');
+  if (lastFile && groups.get(lastFile)!.at(-1) === '  …') groups.get(lastFile)!.pop();
+  const out = [...groups].map(([file, hits]) => `${file}\n${hits.join('\n')}`).join('\n');
+  return count >= maxLines ? `${out}\n[more matches not shown — narrow the query or pass glob]` : out;
 }
 
 /**

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { listSessions } from '../sessions/session-store.js';
 import { listApps } from '../apps/apps-store.js';
 import { readUsageLog, type UsageStage } from '../sessions/usage-log.js';
-import { addUsage, ZERO_USAGE, type TokenUsage } from '../agents/sdk-client.js';
+import { addUsage, ZERO_USAGE, type TokenUsage, type ToolOutputStats } from '../agents/sdk-client.js';
 import type { SessionRecord } from '../sessions/session.js';
 
 // Token usage for Settings → Dev Agents. Built from the per-turn usage log
@@ -18,6 +18,7 @@ interface UsageRecord {
   sessionId: string;
   stage: UsageStage;
   usage: TokenUsage;
+  toolOutput?: ToolOutputStats;
   estimated: boolean;
 }
 
@@ -92,6 +93,8 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const byStage: Record<UsageStage, TokenUsage> = { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
+    // Tool output only exists on turns logged since it was tracked.
+    const byTool = new Map<string, { calls: number; chars: number }>();
     const bySession = new Map<string, { byStage: ByStage; usage: TokenUsage; turns: number; lastAt: string }>();
     for (const r of inRange) {
       const t = total(r.usage);
@@ -101,6 +104,12 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
         if (r.estimated) day.estimated += t;
       }
       byStage[r.stage] = addUsage(byStage[r.stage], r.usage);
+      for (const [tool, s] of Object.entries(r.toolOutput ?? {})) {
+        const acc = byTool.get(tool) ?? { calls: 0, chars: 0 };
+        acc.calls += s.calls;
+        acc.chars += s.chars;
+        byTool.set(tool, acc);
+      }
       const s = bySession.get(r.sessionId) ?? { byStage: zeroByStage(), usage: ZERO_USAGE, turns: 0, lastAt: r.at };
       s.byStage[r.stage] += t;
       s.usage = addUsage(s.usage, r.usage);
@@ -125,6 +134,7 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
         sessions: bySession.size,
       },
       daily: [...daily.values()],
+      toolOutput: [...byTool.entries()].map(([tool, s]) => ({ tool, ...s })).sort((a, b) => b.chars - a.chars),
       sessions: [...bySession.entries()]
         .map(([id, s]) => {
           const session = sessionById.get(id);

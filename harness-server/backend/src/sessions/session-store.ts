@@ -6,7 +6,7 @@ import type { ModelMessage } from 'ai';
 import type { SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionStage, TranscriptEntry } from './session.js';
 import { slugify } from './session.js';
 import { LEGACY_APP_ID } from '../apps/apps.js';
-import { addUsage, ZERO_USAGE, type TokenUsage } from '../agents/sdk-client.js';
+import { addUsage, ZERO_USAGE, type TokenUsage, type ToolOutputStats } from '../agents/sdk-client.js';
 import { appendUsageLog } from './usage-log.js';
 
 type StageKey = 'requirements' | 'plan' | 'coding' | 'qa';
@@ -224,11 +224,11 @@ export async function setClaudeSessionId(id: string, stage: StageKey, sdkSession
   });
 }
 
-export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsage): Promise<void> {
+export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsage, toolOutput?: ToolOutputStats): Promise<void> {
   await mutateSession(id, (session) => {
     session.usage[stage] = addUsage(session.usage[stage], usage);
   });
-  await appendUsageLog({ at: new Date().toISOString(), sessionId: id, stage, usage });
+  await appendUsageLog({ at: new Date().toISOString(), sessionId: id, stage, usage, ...(toolOutput ? { toolOutput } : {}) });
   const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
   console.log(
     `[usage] session ${id} ${stage}: ${total} tokens (input ${usage.input}, output ${usage.output}, ` +

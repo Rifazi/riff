@@ -20,6 +20,7 @@ import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptio
 import { buildHandoff, ContextLog, entriesSince } from './handoff.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
+import { createOutlineFileTool } from './tool-defs/outline-tool.js';
 import { createFileTools } from './tool-defs/file-tools.js';
 import { createGitTools } from './tool-defs/git-tools.js';
 import { createGenerateTools } from './tool-defs/generate-tools.js';
@@ -29,6 +30,7 @@ import { createRunPrettierTool } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
+import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js';
 import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createGitToolsClaude } from './tool-defs-claude/git-tools.js';
 import { createGenerateToolsClaude } from './tool-defs-claude/generate-tools.js';
@@ -44,6 +46,7 @@ const TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'outline_file',
   'write_file',
   'edit_file',
   'git_create_branch',
@@ -301,6 +304,7 @@ export async function runCodingAgentTurn(
             searchDocsToolClaude,
             readDocToolClaude,
             createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+            createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             readFileToolClaude,
             writeFileToolClaude,
@@ -351,6 +355,7 @@ export async function runCodingAgentTurn(
         search_docs: searchDocsTool,
         read_doc: readDocTool,
         search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+        outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         read_file: readFileTool,
         write_file: writeFileTool,
@@ -488,7 +493,7 @@ export function suggestedBranchName(session: SessionRecord): string {
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'coding', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

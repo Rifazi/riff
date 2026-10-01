@@ -405,8 +405,46 @@ export function TokenUsagePanel() {
               </div>
             </div>
           </div>
+
+          {data.toolOutput && data.toolOutput.length > 0 && <ToolOutput rows={data.toolOutput} />}
         </div>
       )}
+    </div>
+  );
+}
+
+// Tool results stay in the conversation and are re-read on every later
+// step, so this is what the cache reads above are mostly made of.
+function ToolOutput({ rows }: { rows: NonNullable<UsageReport['toolOutput']> }) {
+  const totalChars = rows.reduce((acc, r) => acc + r.chars, 0);
+  const shown = rows.slice(0, 8);
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-gray-900">Tool output</h4>
+      <p className="text-xs text-gray-500 mt-0.5 mb-3">
+        What each tool returned to the agents (about 4 characters per token). Every result is re-read on each later step
+        of its conversation, so the biggest rows here are the ones worth trimming.
+      </p>
+      <div className="space-y-3">
+        {shown.map((r) => (
+          <div key={r.tool}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="font-mono text-xs text-gray-700">{r.tool}</span>
+              <span className="tabular-nums">
+                <span className="font-medium text-gray-900">≈{compact(Math.round(r.chars / 4))} tokens</span>
+                <span className="text-gray-500">
+                  {' '}
+                  · {percent(r.chars, totalChars)} · {full(r.calls)} {r.calls === 1 ? 'call' : 'calls'} · ≈
+                  {compact(Math.round(r.chars / 4 / r.calls))} each
+                </span>
+              </span>
+            </div>
+            <div className="h-2 mt-1 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full rounded-full bg-gray-500" style={{ width: `${totalChars > 0 ? (r.chars / totalChars) * 100 : 0}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

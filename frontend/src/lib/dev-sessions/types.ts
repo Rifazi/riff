@@ -450,6 +450,9 @@ export interface UsageReport {
     sessions: number;
   };
   daily: { date: string; byStage: Record<UsageStage, number>; estimated: number }[];
+  // Size of the tool results agents got back, per tool, for turns logged
+  // since this was tracked. Absent from older servers.
+  toolOutput?: { tool: string; calls: number; chars: number }[];
   sessions: {
     id: string;
     title: string;

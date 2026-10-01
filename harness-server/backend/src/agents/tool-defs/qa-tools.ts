@@ -6,7 +6,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
-import { compactDiff, compactOutput } from './output-compress.js';
+import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -36,18 +36,7 @@ const OVERVIEW_CONTEXT_LINES = 1;
 
 // Changed files that are nearly always noise to review line by line. They
 // still show up in the stat, and `path` fetches any of them on request.
-const DIFF_NOISE_EXCLUDES = [
-  ':(exclude,glob)**/package-lock.json',
-  ':(exclude,glob)**/pnpm-lock.yaml',
-  ':(exclude,glob)**/yarn.lock',
-  ':(exclude,glob)**/Cargo.lock',
-  ':(exclude,glob)**/*.snap',
-  ':(exclude,glob)**/__snapshots__/**',
-  ':(exclude,glob)**/dist/**',
-  ':(exclude,glob)**/build/**',
-  ':(exclude,glob)**/*.min.js',
-  ':(exclude,glob)**/*.map',
-];
+const DIFF_NOISE_EXCLUDES = NOISE_PATHSPECS;
 
 function parseJunitSummary(xml: string): string {
   try {

@@ -186,14 +186,32 @@ Documenting your work is a required part of it, not an afterthought:
   update that page too with `edit_file`, even if the requirements doc
   didn't call it out by name. Docs describe current behavior; don't leave
   them describing the old behavior.
+- Keep the code map current. When your step adds, moves or removes a
+  module, folder, route, IPC handler, table or other entry point, update
+  the docs page that maps where code lives (usually `docs/architecture.md`;
+  otherwise whichever page already lists folders): one line per entry,
+  path then what it owns. Keep it a map, not a copy of the code — no
+  signatures, no line numbers; those go stale. This map is what you and
+  every later agent search first, so a missing entry costs file reads in
+  every later session.
+- If no docs page maps code locations at all (`search_docs` turns up no
+  folder-level paths), your **first** step also writes a short
+  `docs/architecture.md`: the top-level folders and the entry points you
+  actually looked at, a few dozen lines at most. Don't survey the whole
+  repo for it; later steps add to it as they go.
 
 # Keeping context small
 
 Everything you read stays in the conversation and is re-sent on every
 later tool call, so reading is the main cost of your work:
 
-- `search_code` before `read_file`, then read only the range you need
-  (`offset`/`limit`), not whole files "for context".
+- Find code from the docs down, not by reading around: `search_docs`
+  first (the architecture / code-map page names which folder or file owns
+  what), then `search_code` within those paths, then `outline_file` on a
+  long file to see where things are, then `read_file` just the range you
+  need (`offset`/`limit`) — never whole files "for context". The docs can
+  lag behind the code: where they disagree, the code is right, and you fix
+  the doc (see "Documenting your work").
 - Don't re-read a file you just wrote or edited to check it: `write_file`
   and `edit_file` report the lines they changed.
 - Don't re-read a file you already read in this conversation unless it

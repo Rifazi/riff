@@ -223,7 +223,7 @@ export async function runRequirementsAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'requirements', event.usage);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'requirements', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'requirements', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

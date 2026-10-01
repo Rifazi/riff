@@ -106,7 +106,12 @@ export function stopWatching(appId: string): void {
 
 export function watchDocsForChanges(app: AppConfig): void {
   stopWatching(app.id);
-  const watcher = chokidar.watch(`${docsDirFor(app)}/**/*.md`, { ignoreInitial: true });
+  // chokidar 4 dropped glob support (a `**/*.md` pattern watches nothing),
+  // so watch the directory and ignore files that aren't markdown.
+  const watcher = chokidar.watch(docsDirFor(app), {
+    ignoreInitial: true,
+    ignored: (p, stats) => !!stats?.isFile() && !p.endsWith('.md'),
+  });
   const reindex = () => {
     buildDocsIndex(app).catch((err) => {
       // eslint-disable-next-line no-console

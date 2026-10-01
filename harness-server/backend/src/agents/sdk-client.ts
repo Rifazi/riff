@@ -51,6 +51,30 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   };
 }
 
+// Characters of tool output a turn fed back to the model, per tool — to see
+// which tools the context goes to (Settings → Dev Agents → Token usage).
+export type ToolOutputStats = Record<string, { calls: number; chars: number }>;
+
+const MCP_TOOL_PREFIX_RE = /^mcp__.*?__/;
+
+/** Wraps onEvent to count each tool result's size under its tool's name. */
+function trackToolOutput(onEvent: (event: AgentEvent) => void) {
+  const names = new Map<string, string>();
+  const stats: ToolOutputStats = {};
+  const tracked = (event: AgentEvent) => {
+    if (event.type === 'tool_call') names.set(event.toolCallId, event.name.replace(MCP_TOOL_PREFIX_RE, ''));
+    if (event.type === 'tool_result') {
+      const name = names.get(event.toolCallId) ?? 'unknown';
+      const chars = typeof event.content === 'string' ? event.content.length : (JSON.stringify(event.content) ?? '').length;
+      const s = (stats[name] ??= { calls: 0, chars: 0 });
+      s.calls += 1;
+      s.chars += chars;
+    }
+    onEvent(event);
+  };
+  return { tracked, stats };
+}
+
 export type AgentEvent =
   | { type: 'assistant_text'; text: string }
   | { type: 'tool_call'; toolCallId: string; name: string; input: unknown }
@@ -60,7 +84,7 @@ export type AgentEvent =
   | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
-  | { type: 'usage'; usage: TokenUsage };
+  | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats };
 
 // Bounds automatic continuation (see runAgentTurn/runClaudeAgentTurn below):
 // when a turn is cut off purely because it hit its own per-call step/turn
@@ -228,8 +252,9 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
  * accumulated history plus a short internal nudge, up to
  * MAX_CONTINUATION_HOPS times, instead of surfacing that as a dead end.
  */
-export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgentTurnResult> {
-  const { onEvent } = params;
+export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAgentTurnResult> {
+  const { tracked: onEvent, stats: toolOutput } = trackToolOutput(rawParams.onEvent);
+  const params = { ...rawParams, onEvent };
   let hop = 0;
   let currentHistory = params.history;
   let currentPrompt = params.prompt;
@@ -253,7 +278,7 @@ export async function runAgentTurn(params: RunAgentTurnParams): Promise<RunAgent
     result = await runAgentTurnOnce({ ...params, systemPrompt, history: currentHistory, prompt: currentPrompt });
     usage = addUsage(usage, result.usage);
   }
-  onEvent({ type: 'usage', usage });
+  onEvent({ type: 'usage', usage, toolOutput });
 
   if (result.finishReason === 'tool-calls' && hop >= MAX_CONTINUATION_HOPS) {
     return {
@@ -466,8 +491,9 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
  * where the last one stopped, no context replay needed. Any other error
  * subtype, or a thrown exception, returns immediately as before.
  */
-export async function runClaudeAgentTurn(params: RunClaudeAgentTurnParams): Promise<RunClaudeAgentTurnResult> {
-  const { onEvent } = params;
+export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): Promise<RunClaudeAgentTurnResult> {
+  const { tracked: onEvent, stats: toolOutput } = trackToolOutput(rawParams.onEvent);
+  const params = { ...rawParams, onEvent };
   let hop = 0;
   let systemPrompt = params.systemPrompt;
   let result = await runClaudeAgentTurnOnce(params);
@@ -491,7 +517,7 @@ export async function runClaudeAgentTurn(params: RunClaudeAgentTurnParams): Prom
     }
     usage = addUsage(usage, result.usage);
   }
-  onEvent({ type: 'usage', usage });
+  onEvent({ type: 'usage', usage, toolOutput });
 
   if (result.subtype === 'error_max_turns' && hop >= MAX_CONTINUATION_HOPS) {
     return {

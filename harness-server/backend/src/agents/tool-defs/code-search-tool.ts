@@ -2,18 +2,26 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
-import { groupGrepOutput } from './output-compress.js';
+import { groupGrepOutput, NOISE_PATHSPECS } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
 export const searchCodeSchema = z.object({
   query: z.string().describe('Pattern to search for, e.g. "ingest.*invoice" or a literal string'),
   glob: z.string().optional().describe('Optional pathspec to narrow the search, e.g. "src/global/adapters/primary/**"'),
+  context: z
+    .number()
+    .int()
+    .min(0)
+    .max(3)
+    .optional()
+    .describe('Lines of surrounding code to show around each match (0-3, default 0) — enough to see a call site without reading the file'),
 });
 export const searchCodeDescription =
-  'Search src/ and infra/ for a keyword or pattern (git grep, case-insensitive, basic regex). ' +
-  'Returns matching lines grouped by file (line number and text only — not full file contents). Use this to check ' +
-  'whether something similar already exists before proposing new code.';
+  'Search the repo\'s tracked files for a keyword or pattern (git grep, case-insensitive, basic regex; lockfiles, ' +
+  'snapshots and build output are skipped). Returns matching lines grouped by file (line number and text only — not ' +
+  'full file contents): up to 3 matches per file, or 10 when `glob` narrows the search. Use this to check whether ' +
+  'something similar already exists before proposing new code, and to find the line range to read_file.';
 
 /**
  * Read-only, match-only code search (file:line, not full file contents) —
@@ -21,9 +29,10 @@ export const searchCodeDescription =
  * read-limited agent role into a de facto full-file reader.
  */
 export function createSearchCodeExecute(deps: { repoRoot: string }) {
-  return async ({ query, glob }: z.infer<typeof searchCodeSchema>): Promise<string> => {
-    const args = ['grep', '-n', '-I', '-i', '--max-count=3', query, '--', 'src', 'infra'];
-    if (glob) args.push(glob);
+  return async ({ query, glob, context }: z.infer<typeof searchCodeSchema>): Promise<string> => {
+    const args = ['grep', '-n', '-z', '-I', '-i', `--max-count=${glob ? 10 : 3}`];
+    if (context) args.push(`-C${context}`);
+    args.push('-e', query, '--', glob ?? '.', ...NOISE_PATHSPECS);
     try {
       const { stdout } = await execFileAsync('git', args, {
         cwd: deps.repoRoot,

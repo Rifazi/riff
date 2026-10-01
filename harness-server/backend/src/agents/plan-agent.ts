@@ -20,11 +20,13 @@ import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
+import { createOutlineFileTool } from './tool-defs/outline-tool.js';
 import { createFileTools } from './tool-defs/file-tools.js';
 import { createWritePlanTool } from './tool-defs/write-plan-tool.js';
 import { askMultipleChoiceTool, askQuestionTool } from './tool-defs/ask-question-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
+import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js';
 import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createWritePlanToolClaude } from './tool-defs-claude/write-plan-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
@@ -36,6 +38,7 @@ const TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'outline_file',
   'write_plan_doc',
   'ask_multiple_choice',
   'ask_question',
@@ -127,6 +130,7 @@ export async function runPlanAgentTurn(
           searchDocsToolClaude,
           readDocToolClaude,
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+          createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           readFileToolClaude,
           createWritePlanToolClaude({
@@ -166,6 +170,7 @@ export async function runPlanAgentTurn(
       search_docs: searchDocsTool,
       read_doc: readDocTool,
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+      outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       read_file: readFileTool,
       write_plan_doc: createWritePlanTool({
@@ -218,7 +223,7 @@ export async function runPlanAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'plan', event.usage);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'plan', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'plan', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

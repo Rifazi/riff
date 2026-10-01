@@ -17,6 +17,7 @@ import { loadApprovedDocsForCoding } from '../coding-agent.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from '../tool-defs/code-search-tool.js';
+import { createOutlineFileTool } from '../tool-defs/outline-tool.js';
 import { createFileTools } from '../tool-defs/file-tools.js';
 import { createGitTools } from '../tool-defs/git-tools.js';
 import { createQaTools } from '../tool-defs/qa-tools.js';
@@ -25,6 +26,7 @@ import { createRunNpmInstallTool } from '../tool-defs/npm-install-tool.js';
 import { createUpdateMyStepsTool } from '../tool-defs/team-steps-tool.js';
 import { createDocsSearchToolsClaude } from '../tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from '../tool-defs-claude/code-search-tool.js';
+import { createOutlineFileToolClaude } from '../tool-defs-claude/outline-tool.js';
 import { createFileToolsClaude } from '../tool-defs-claude/file-tools.js';
 import { createGitToolsClaude } from '../tool-defs-claude/git-tools.js';
 import { createQaToolsClaude } from '../tool-defs-claude/qa-tools.js';
@@ -153,6 +155,7 @@ export async function runWorkstreamAgent({
       searchDocsToolClaude,
       readDocToolClaude,
       createSearchCodeToolClaude({ repoRoot: worktreePath }),
+      createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
       readFileToolClaude,
       writeFileToolClaude,
@@ -169,6 +172,7 @@ export async function runWorkstreamAgent({
       'search_code',
       'audit_theme',
       'read_file',
+      'outline_file',
       'write_file',
       'edit_file',
       'git_commit',
@@ -207,6 +211,7 @@ export async function runWorkstreamAgent({
     search_docs: searchDocsTool,
     read_doc: readDocTool,
     search_code: createSearchCodeTool({ repoRoot: worktreePath }),
+    outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
     read_file: readFileTool,
     write_file: writeFileTool,
@@ -236,7 +241,7 @@ export async function runWorkstreamAgent({
 }
 
 async function persistEvent(sessionId: string, memberId: string, event: AgentEvent): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTeamTranscriptEntry(sessionId, memberId, { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

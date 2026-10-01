@@ -19,12 +19,14 @@ import { compactQaFindings } from '../sessions/qa-findings.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
+import { createOutlineFileTool } from './tool-defs/outline-tool.js';
 import { createFileTools } from './tool-defs/file-tools.js';
 import { createQaTools } from './tool-defs/qa-tools.js';
 import { createWriteQaReportTool } from './tool-defs/write-qa-report-tool.js';
 import { askMultipleChoiceTool, askQuestionTool } from './tool-defs/ask-question-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
+import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js';
 import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createWriteQaReportToolClaude } from './tool-defs-claude/write-qa-report-tool.js';
@@ -37,6 +39,7 @@ const TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'outline_file',
   'get_diff',
   'run_checked_command',
   'write_qa_report',
@@ -127,6 +130,7 @@ export async function runQaAgentTurn(
           searchDocsToolClaude,
           readDocToolClaude,
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+          createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           readFileToolClaude,
           getDiffToolClaude,
@@ -170,6 +174,7 @@ export async function runQaAgentTurn(
       search_docs: searchDocsTool,
       read_doc: readDocTool,
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+      outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       read_file: readFileTool,
       get_diff: getDiffTool,
@@ -210,7 +215,7 @@ export async function runQaAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'qa', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

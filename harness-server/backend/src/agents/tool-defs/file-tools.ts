@@ -42,8 +42,8 @@ export const readFileDescription =
   'Read a file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own runtime ' +
   `state). Files over ${DEFAULT_LINE_LIMIT} lines are truncated to the first ${DEFAULT_LINE_LIMIT} unless you pass ` +
   `offset and/or limit — use those to page through the rest (e.g. offset: ${DEFAULT_LINE_LIMIT + 1}). Every read stays ` +
-  'in your context for the rest of the conversation, so read only what you need: for a large file, search_code for ' +
-  "the part you need first, then read just that range. Don't re-read a file you just wrote or edited to check it — " +
+  'in your context for the rest of the conversation, so read only what you need: for a large file, outline_file or ' +
+  "search_code for the part you need first, then read just that range. Don't re-read a file you just wrote or edited to check it — " +
   'write_file and edit_file report the lines they changed.';
 
 export const writeFileSchema = z.object({

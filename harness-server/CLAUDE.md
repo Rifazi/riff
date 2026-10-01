@@ -497,6 +497,47 @@ below) — never inside the target repo.
    text, so a read lost to compaction can still be fetched. Not measured on
    a real session yet; check `state/usage-log.jsonl` before and after.
 
+23. User asked why agents weren't using the repo's docs as an index. Only QA
+   and plan were told to `search_docs` first, and doc upkeep covered
+   behavior, not where code lives. Now:
+   - **Docs first**: the coding, team-member and QA prompts say docs →
+     `search_code` → `outline_file` → ranged `read_file`; where docs and
+     code disagree, the code wins and the doc gets fixed.
+   - **Code map upkeep**: a step that adds/moves/removes a module, folder,
+     route, handler or table updates the code-map page (usually
+     `docs/architecture.md`, one line per entry, no signatures or line
+     numbers). A repo with no map gets a short one from the first coding
+     step. The plan agent names the map update in the step that adds the
+     module, and in team mode gives doc pages to one workstream that
+     depends on the ones they describe (members can't write outside their
+     paths, and their summaries aren't stored for a lead to apply). QA
+     flags a missing map entry as non-blocking.
+   - **Docs index watcher fix**: `repo/docs-index.ts` watched a
+     `docs/**/*.md` glob, which chokidar 4 doesn't support, so the index
+     never refreshed until a server restart and docs written mid-session
+     weren't searchable. It now watches the directory and ignores non-`.md`
+     files (verified: a new doc is searchable within ~1s).
+   - **`search_code`** searches every tracked file (it was `src/` and
+     `infra/` only, so other layouts found nothing and agents fell back to
+     whole-file reads), skips `NOISE_PATHSPECS` (shared with `get_diff`),
+     takes `context` 0-3 (`git grep -C`), allows 10 matches per file when
+     `glob` narrows it, and passes the query with `-e` so it can't be read
+     as a flag. Output is `-z` and grouped per file.
+   - **`outline_file`** (`tool-defs/outline-tool.ts`, in every agent that
+     has `read_file`): TS/JS via the `typescript` compiler API (imports,
+     functions, classes and methods, types, consts, describe/it blocks,
+     each with its line range), markdown headings, otherwise the
+     shallowest-indented lines. `coding-agent.ts` (25k chars) outlines in
+     1.1k.
+   - **Tool output measurement**: `runAgentTurn`/`runClaudeAgentTurn` count
+     each tool result's characters per tool (`ToolOutputStats`, MCP prefix
+     stripped) and put them on the `usage` event; `addStageUsage` writes
+     them into `usage-log.jsonl`, `GET /api/usage` returns `toolOutput`, and
+     the Token usage panel shows a "Tool output" breakdown (≈ chars ÷ 4
+     tokens). Use it to pick the next thing to trim — a `typecheck` check
+     and related-tests-only runs were deferred until it shows check output
+     matters.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

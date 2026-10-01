@@ -89,7 +89,10 @@ full; read the sections you need.
    with no dependents yet is safe as an early, standalone step; code that
    *consumes* something (wiring, integration points, generated artifacts)
    comes after the steps it depends on, never before. Docs and
-   non-functional cleanup are always safe last.
+   non-functional cleanup are always safe last. When the plan adds a new
+   module, folder, route or other entry point, the step that adds it also
+   updates the docs' code-map page (usually `docs/architecture.md`) — say
+   so in that step.
    If two pieces of work are so tightly coupled that splitting them leaves
    a genuinely broken intermediate state (rare, but real — e.g. a rename
    touching both a type and every call site), keep them in the *same* step
@@ -114,6 +117,11 @@ full; read the sections you need.
      others list in `dependsOn`. A dependent workstream starts from the
      merged result of everything it depends on, so it can import what they
      built.
+   - Docs pages are shared touch points too. Give the pages the plan
+     updates — including the code-map page (usually
+     `docs/architecture.md`) when the plan adds modules — to one workstream
+     that depends on the ones whose code they describe, so it sees their
+     merged work.
    - Keep each workstream's steps in dependency order, same as step 5.
    Only split when it genuinely saves time: at least two workstreams must be
    able to run at the same time, and each should be a meaningful chunk (not
