@@ -52,6 +52,7 @@ export async function buildMeetingSource(input: {
  */
 export function meetingKickoffMessage(session: SessionRecord): string {
   const source = session.sourceMeeting;
+  if (source?.kind === 'journal') return journalKickoffMessage(session);
   const what = source?.includesSummary ? 'transcript and AI summary' : 'transcript';
   const title = source?.meetingTitle ? `"${source.meetingTitle}"` : 'a recorded meeting';
   const when = source?.meetingDate ? ` (${source.meetingDate})` : '';
@@ -64,6 +65,23 @@ export function meetingKickoffMessage(session: SessionRecord): string {
     '4. Then write the requirements document — or, if the meeting really covered several separate features, propose splitting them into separate sessions.',
     '',
     'The transcript is automatic speech-to-text without speaker labels, so names and technical terms may be mis-transcribed — confirm anything important rather than guessing. Cite the meeting in the document\'s Links section.',
+  ].join('\n');
+}
+
+/** Opening message for a session started from a Riff journal (many meetings on one topic). */
+function journalKickoffMessage(session: SessionRecord): string {
+  const source = session.sourceMeeting!;
+  const what = source.includesSummary ? 'its overview, plus the notes' : 'the notes';
+  const when = source.meetingDate ? ` It covers ${source.meetingDate}.` : '';
+  return [
+    `I've attached my journal "${source.meetingTitle}": ${what} and transcript excerpts from every meeting where this topic came up.${when} Please turn it into requirements for this app:`,
+    '',
+    '1. Read the whole journal and pull out the features, changes, problems and decisions that were discussed. Later meetings supersede earlier ones when they disagree.',
+    '2. Search the docs for related context before asking anything they already answer.',
+    '3. Ask me about whatever is ambiguous, contradictory or missing — especially acceptance criteria and non-goals.',
+    '4. Then write the requirements document — or, if the journal really covers several separate features, propose splitting them into separate sessions.',
+    '',
+    "The excerpts are automatic speech-to-text without speaker labels, so names and technical terms may be mis-transcribed — confirm anything important rather than guessing. Cite the journal and the meetings' dates in the document's Links section.",
   ].join('\n');
 }
 

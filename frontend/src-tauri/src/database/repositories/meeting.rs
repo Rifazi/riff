@@ -258,13 +258,29 @@ async fn delete_meeting_with_transaction(
         .execute(&mut *transaction)
         .await?;
 
-    // 3. Delete from transcripts
+    // 3. Delete journal entries and status (notebooks left empty are pruned below)
+    sqlx::query("DELETE FROM notebook_entries WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM journal_meeting_status WHERE meeting_id = ?")
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "DELETE FROM notebooks WHERE auto_created = 1
+         AND NOT EXISTS (SELECT 1 FROM notebook_entries e WHERE e.notebook_id = notebooks.id)",
+    )
+    .execute(&mut *transaction)
+    .await?;
+
+    // 4. Delete from transcripts
     sqlx::query("DELETE FROM transcripts WHERE meeting_id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)
         .await?;
 
-    // 4. Finally, delete the meeting
+    // 5. Finally, delete the meeting
     let result = sqlx::query("DELETE FROM meetings WHERE id = ?")
         .bind(meeting_id)
         .execute(&mut *transaction)

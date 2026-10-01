@@ -67,11 +67,16 @@ function SessionView() {
           </Pill>
           {session.sourceMeeting && (
             <Link
-              href={`/meeting-details?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`}
+              href={
+                session.sourceMeeting.kind === 'journal'
+                  ? `/journal/notebook?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
+                  : `/meeting-details?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
+              }
               className="inline-flex items-center gap-1 text-blue-600 hover:underline"
             >
               <NotebookPen className="w-3.5 h-3.5" />
-              From meeting: {session.sourceMeeting.meetingTitle || 'Untitled meeting'}
+              {session.sourceMeeting.kind === 'journal' ? 'From journal' : 'From meeting'}:{' '}
+              {session.sourceMeeting.meetingTitle || 'Untitled'}
             </Link>
           )}
         </span>

@@ -140,7 +140,10 @@ export default function DevSessionsPage() {
                         </Pill>
                       )}
                       {session.sourceMeeting && (
-                        <Pill tone="blue" title="Started from a meeting transcript">
+                        <Pill
+                          tone="blue"
+                          title={session.sourceMeeting.kind === 'journal' ? 'Started from a journal' : 'Started from a meeting transcript'}
+                        >
                           <NotebookPen className="w-3 h-3" />
                           {session.sourceMeeting.meetingTitle || 'Meeting'}
                         </Pill>

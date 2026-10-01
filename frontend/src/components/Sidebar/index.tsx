@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, Workflow } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, Workflow, LibraryBig } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -10,6 +10,9 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SettingTabs } from '../SettingTabs';
 import { TranscriptModelProps } from '@/components/TranscriptSettings';
 import Analytics from '@/lib/analytics';
+import { useQuery } from '@tanstack/react-query';
+import { journalApi, journalKeys, type MeetingJournalTag } from '@/lib/journal/api';
+import { coverColor } from '@/lib/journal/format';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
@@ -42,6 +45,21 @@ interface SidebarItem {
 const Sidebar: React.FC = () => {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Meetings flow straight into journals: tag each meeting with where its topics went.
+  const { data: journalReview = [] } = useQuery({ queryKey: journalKeys.review, queryFn: journalApi.listReview });
+  const { data: journalTags = [] } = useQuery({ queryKey: journalKeys.tags, queryFn: journalApi.getMeetingTags });
+  const journalTagsByMeeting = useMemo(() => {
+    const map = new Map<string, MeetingJournalTag[]>();
+    for (const tag of journalTags) map.set(tag.meeting_id, [...(map.get(tag.meeting_id) ?? []), tag]);
+    return map;
+  }, [journalTags]);
+  const reviewMeetingIds = useMemo(() => new Set(journalReview.map((e) => e.meeting_id)), [journalReview]);
+  const reviewBadge = journalReview.length > 0 && (
+    <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800" title="Parts of meetings need your input">
+      {journalReview.length}
+    </span>
+  );
   const {
     currentMeeting,
     setCurrentMeeting,
@@ -451,6 +469,7 @@ const Sidebar: React.FC = () => {
     const isMeetingPage = pathname?.includes('/meeting-details');
     const isSettingsPage = pathname === '/settings';
     const isDevSessionsPage = pathname?.startsWith('/dev-sessions');
+    const isJournalPage = pathname?.startsWith('/journal');
 
     return (
       <TooltipProvider>
@@ -522,6 +541,24 @@ const Sidebar: React.FC = () => {
             </TooltipTrigger>
             <TooltipContent side="right">
               <p>Meeting Notes</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => router.push('/journal')}
+                className={`p-2 rounded-lg transition-colors duration-150 ${isJournalPage ? 'bg-gray-100' : 'hover:bg-gray-100'
+                  }`}
+              >
+                <span className="relative block">
+                  <LibraryBig className="w-5 h-5 text-gray-600" />
+                  {journalReview.length > 0 && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-500" />}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Journals{journalReview.length > 0 ? ` · ${journalReview.length} need your input` : ''}</p>
             </TooltipContent>
           </Tooltip>
 
@@ -631,7 +668,10 @@ const Sidebar: React.FC = () => {
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <span className="flex-1 break-words">
+                  {item.title}
+                  {isMeetingItem && <MeetingJournalDots tags={journalTagsByMeeting.get(item.id)} needsInput={reviewMeetingIds.has(item.id)} />}
+                </span>
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <button
@@ -745,6 +785,16 @@ const Sidebar: React.FC = () => {
               >
                 <Home className="w-4 h-4 mr-2" />
                 <span>Home</span>
+              </div>
+            )}
+            {!isCollapsed && (
+              <div
+                onClick={() => router.push('/journal')}
+                className={`p-3 text-lg font-semibold items-center h-10 flex mx-3 mt-1 rounded-lg cursor-pointer ${pathname?.startsWith('/journal') ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+              >
+                <LibraryBig className="w-4 h-4 mr-2" />
+                <span>Journals</span>
+                {reviewBadge}
               </div>
             )}
             {!isCollapsed && (
@@ -905,3 +955,26 @@ const Sidebar: React.FC = () => {
 };
 
 export default Sidebar;
+
+/** Colored dots for the journals a meeting's topics were filed into. */
+function MeetingJournalDots({ tags, needsInput }: { tags?: MeetingJournalTag[]; needsInput: boolean }) {
+  if (!tags?.length && !needsInput) return null;
+  const shown = tags?.slice(0, 3) ?? [];
+  const extra = (tags?.length ?? 0) - shown.length;
+  return (
+    <span className="mt-0.5 flex items-center gap-1 text-[11px] font-normal text-gray-500">
+      {shown.map((tag) => (
+        <span key={tag.notebook_id} className="flex min-w-0 items-center gap-1" title={`Filed in ${tag.title}`}>
+          <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${coverColor(tag.color).dot}`} />
+          <span className="max-w-[6rem] truncate">{tag.title}</span>
+        </span>
+      ))}
+      {extra > 0 && <span>+{extra}</span>}
+      {needsInput && (
+        <span className="rounded bg-amber-100 px-1 text-amber-800" title="Some topics need your input">
+          ?
+        </span>
+      )}
+    </span>
+  );
+}

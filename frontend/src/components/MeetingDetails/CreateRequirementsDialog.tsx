@@ -13,16 +13,21 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { api } from '@/lib/dev-sessions/api';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { buildMeetingSource } from '@/lib/dev-sessions/meeting';
+import type { MeetingSourceInput } from '@/lib/dev-sessions/types';
 import { sessionHref, STAGE_LABEL, stageGroupFor } from '@/lib/dev-sessions/stage';
 import { useAgentServerHealth } from '@/components/DevSessions/AgentServerBanner';
 import { AppPicker } from '@/components/DevSessions/AppPicker';
 import Analytics from '@/lib/analytics';
 
 export interface MeetingRequirementsContext {
+  /** What the session starts from; a journal passes its own id as `meetingId`. */
+  kind?: 'meeting' | 'journal';
   meetingId: string;
   meetingTitle: string;
   meetingCreatedAt?: string | null;
   getSummaryMarkdown?: () => Promise<string | null>;
+  /** Builds the source document instead of fetching a meeting transcript. */
+  buildSource?: (summaryMarkdown: string | null) => Promise<MeetingSourceInput>;
 }
 
 export function useMeetingSessions(meetingId: string | undefined) {
@@ -53,6 +58,8 @@ export function CreateRequirementsDialog({
   const [sessionKey, setSessionKey] = useState('');
   const [includeSummary, setIncludeSummary] = useState(true);
   const [summaryAvailable, setSummaryAvailable] = useState(false);
+  const isJournal = context.kind === 'journal';
+  const noun = isJournal ? 'journal' : 'meeting';
 
   useEffect(() => {
     if (!open) return;
@@ -66,18 +73,20 @@ export function CreateRequirementsDialog({
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const summary = includeSummary && summaryAvailable ? await context.getSummaryMarkdown?.() : null;
-      const source = await buildMeetingSource({
-        meetingId: context.meetingId,
-        meetingTitle: context.meetingTitle,
-        meetingCreatedAt: context.meetingCreatedAt,
-        summaryMarkdown: summary,
-      });
-      if (!source.transcript.trim()) throw new Error('This meeting has no transcript yet.');
+      const summary = includeSummary && summaryAvailable ? ((await context.getSummaryMarkdown?.()) ?? null) : null;
+      const source = context.buildSource
+        ? await context.buildSource(summary)
+        : await buildMeetingSource({
+            meetingId: context.meetingId,
+            meetingTitle: context.meetingTitle,
+            meetingCreatedAt: context.meetingCreatedAt,
+            summaryMarkdown: summary,
+          });
+      if (!source.transcript.trim()) throw new Error(`This ${noun} has nothing to work from yet.`);
       return api.createSession({ title: title.trim(), sessionKey: sessionKey.trim() || undefined, appId, source });
     },
     onSuccess: (session) => {
-      Analytics.trackButtonClick('create_requirements_from_meeting', 'meeting_details');
+      Analytics.trackButtonClick(`create_requirements_from_${noun}`, isJournal ? 'journal' : 'meeting_details');
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       onOpenChange(false);
       router.push(sessionHref(session.id, 'requirements'));
@@ -90,12 +99,13 @@ export function CreateRequirementsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-purple-600" />
-            Create requirements from this meeting
+            Create requirements from this {noun}
           </DialogTitle>
           <DialogDescription>
-            {AGENT_PERSONAS.requirements.name}, the requirements agent, reads the full transcript, asks you about anything
-            unclear, and drafts a requirements document. After you approve it, the session continues to planning, coding
-            and QA.
+            {AGENT_PERSONAS.requirements.name}, the requirements agent, reads{' '}
+            {isJournal ? 'every note in the journal and the transcript behind it' : 'the full transcript'}, asks you about
+            anything unclear, and drafts a requirements document. After you approve it, the session continues to
+            planning, coding and QA.
           </DialogDescription>
         </DialogHeader>
 
@@ -126,15 +136,17 @@ export function CreateRequirementsDialog({
             {summaryAvailable && (
               <label className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2 cursor-pointer">
                 <span className="text-sm">
-                  <span className="font-medium text-gray-900">Include the AI summary</span>
-                  <span className="block text-xs text-gray-500">Sent alongside the transcript as extra context.</span>
+                  <span className="font-medium text-gray-900">{isJournal ? 'Include the journal overview' : 'Include the AI summary'}</span>
+                  <span className="block text-xs text-gray-500">
+                    Sent alongside the {isJournal ? 'notes' : 'transcript'} as extra context.
+                  </span>
                 </span>
                 <Switch checked={includeSummary} onCheckedChange={setIncludeSummary} />
               </label>
             )}
             {existing && existing.length > 0 && (
               <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
-                <div className="text-xs font-medium text-gray-500 mb-1">Already started from this meeting</div>
+                <div className="text-xs font-medium text-gray-500 mb-1">Already started from this {noun}</div>
                 <ul className="space-y-1">
                   {existing.map((s) => (
                     <li key={s.id}>

@@ -176,6 +176,9 @@ export interface ThemeAudit {
 export type ThemeApplyResult = SetupSteps & { theme: AppThemeSummary };
 
 export interface SessionMeetingSource {
+  /** "journal" when started from a Riff journal; absent = one meeting. */
+  kind?: 'meeting' | 'journal';
+  /** The meeting id, or the journal id when kind is "journal". */
   meetingId: string;
   meetingTitle: string;
   meetingDate: string | null;
@@ -184,6 +187,8 @@ export interface SessionMeetingSource {
 }
 
 export interface MeetingSourceInput {
+  /** "journal": `transcript` holds the journal's notes and excerpts, `summary` its overview. */
+  kind?: 'meeting' | 'journal';
   meetingId: string;
   meetingTitle: string;
   meetingDate?: string | null;

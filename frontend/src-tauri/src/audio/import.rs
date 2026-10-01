@@ -664,6 +664,9 @@ async fn run_import<R: Runtime>(
         warn!("Failed to write metadata.json: {}", e);
     }
 
+    // Recording → summary → journals: file the meeting once its summary is ready.
+    crate::journal::service::spawn_after_summary(app.clone(), meeting_id.clone());
+
     emit_progress(&app, "complete", 100, "Import complete");
 
     Ok(ImportResult {

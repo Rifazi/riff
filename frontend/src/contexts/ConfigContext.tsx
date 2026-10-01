@@ -161,9 +161,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('isAutoSummary');
-      return saved !== null ? saved === 'true' : false
+      // On by default: every recording is summarized, and the summary is filed into journals.
+      return saved !== null ? saved === 'true' : true
     }
-    return false;
+    return true;
   });
 
   // Beta features state (localStorage)

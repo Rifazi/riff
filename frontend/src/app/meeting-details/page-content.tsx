@@ -21,6 +21,7 @@ import { useConfig } from '@/contexts/ConfigContext';
 import { hasVisibleSummaryContent } from '@/lib/summary-content';
 import type { MeetingRequirementsContext } from '@/components/MeetingDetails/CreateRequirementsDialog';
 import { MeetingPipelineBar } from '@/components/MeetingDetails/MeetingPipelineBar';
+import { MeetingJournalStrip } from '@/components/MeetingDetails/MeetingJournalStrip';
 
 export default function PageContent({
   meeting,
@@ -211,6 +212,7 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen min-w-0 bg-gray-50"
     >
+      <MeetingJournalStrip meetingId={meeting.id} />
       <MeetingPipelineBar
         context={requirementsContext}
         hasTranscript={(totalCount ?? meetingData.transcripts.length) > 0}

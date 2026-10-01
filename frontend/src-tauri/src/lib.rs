@@ -49,6 +49,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod journal;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -761,6 +762,24 @@ pub fn run() {
             summary::commands::api_save_meeting_detected_summary_language,
             summary::commands::api_detect_transcript_summary_language,
             summary::commands::api_cancel_summary,
+            // Journal commands
+            journal::commands::journal_list_notebooks,
+            journal::commands::journal_get_notebook,
+            journal::commands::journal_create_notebook,
+            journal::commands::journal_update_notebook,
+            journal::commands::journal_delete_notebook,
+            journal::commands::journal_merge_notebooks,
+            journal::commands::journal_move_entry,
+            journal::commands::journal_delete_entry,
+            journal::commands::journal_organize_meeting,
+            journal::commands::journal_organize_pending,
+            journal::commands::journal_get_meeting_statuses,
+            journal::commands::journal_summarize_notebook,
+            journal::commands::journal_ask,
+            journal::commands::journal_list_review,
+            journal::commands::journal_get_meeting_entries,
+            journal::commands::journal_meeting_tags,
+            journal::commands::journal_requirements_brief,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,

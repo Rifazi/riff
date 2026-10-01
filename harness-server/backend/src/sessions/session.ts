@@ -43,6 +43,9 @@ export interface TranscriptEntry {
 // transcript rather than a typed prompt. The transcript itself lives under
 // state/ (gitignored — meeting content is private), not in artifacts/.
 export interface SessionMeetingSource {
+  /** "journal" when the source is a Riff journal (overview + notes from many meetings); absent = one meeting. */
+  kind?: 'meeting' | 'journal';
+  /** The meeting id, or the journal id when kind is "journal". */
   meetingId: string;
   meetingTitle: string;
   meetingDate: string | null;
