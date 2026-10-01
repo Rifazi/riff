@@ -6,6 +6,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
+import { compactDiff, compactOutput } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,7 @@ const TIMEOUTS_MS: Record<CheckCommand, number> = {
 // Diff-body cap for the no-path call. Anything past it is still reachable
 // per file via `path`, so this only trims what gets pushed unasked.
 const DIFF_CHAR_LIMIT = 25_000;
+const OVERVIEW_CONTEXT_LINES = 1;
 
 // Changed files that are nearly always noise to review line by line. They
 // still show up in the stat, and `path` fetches any of them on request.
@@ -46,17 +48,6 @@ const DIFF_NOISE_EXCLUDES = [
   ':(exclude,glob)**/*.min.js',
   ':(exclude,glob)**/*.map',
 ];
-
-const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]/g;
-
-/** Last ~2k chars of a failed command's output, colour codes stripped. */
-export function outputTail(stdout: string, stderr: string, maxChars = 2000): string {
-  const out = stdout.replace(ANSI_RE, '').trim();
-  const err = stderr.replace(ANSI_RE, '').trim();
-  const errPart = err.slice(-Math.floor(maxChars / 2));
-  const outPart = out.slice(-(maxChars - errPart.length));
-  return [outPart, errPart].filter(Boolean).join('\n');
-}
 
 function parseJunitSummary(xml: string): string {
   try {
@@ -107,7 +98,8 @@ export const getDiffSchema = z.object({
 export const getDiffDescription =
   'Get the stat summary and diff between the app\'s base branch and this session\'s branch — the actual change set to ' +
   'review, not the coding agent\'s self-report. Lockfiles, snapshots and build output are listed in the stat but left ' +
-  `out of the diff body, which is capped at ${DIFF_CHAR_LIMIT} chars; pass \`path\` to get one file's diff in full.`;
+  `out of the diff body, which shows one line of context and is capped at ${DIFF_CHAR_LIMIT} chars; pass \`path\` to get ` +
+  "one file's diff in full, with three lines of context.";
 
 /**
  * Closed enum, not a free-form command string — the actual safety mechanism.
@@ -150,20 +142,23 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
           // no junit.xml — fall through to raw output
         }
       }
-      text += `\n\nraw output (tail):\n${outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
+      text += `\n\noutput (errors and summary):\n${compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
       return text;
     }
   };
 
   const getDiffExecute = async ({ branchName, path: filePath }: z.infer<typeof getDiffSchema>): Promise<string> => {
     if (filePath) {
-      const diff = await diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [filePath]);
+      const diff = compactDiff(await diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [filePath]));
       return diff.trim() ? diff.slice(0, 60_000) : `No changes to ${filePath} on this branch.`;
     }
-    const [diff, stat] = await Promise.all([
-      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, DIFF_NOISE_EXCLUDES),
+    // One line of context instead of git's three in the overview; `path`
+    // returns a file's diff with full context.
+    const [rawDiff, stat] = await Promise.all([
+      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, DIFF_NOISE_EXCLUDES, OVERVIEW_CONTEXT_LINES),
       diffStatAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
     ]);
+    const diff = compactDiff(rawDiff);
     if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${diff}`;
     return (
       `${stat}\n\n${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +

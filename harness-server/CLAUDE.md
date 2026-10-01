@@ -479,6 +479,24 @@ below) — never inside the target repo.
    with its validator; coding and QA are under 3:1 on white, so the
    legend and the table view are always there.
 
+22. User was still running out of tokens and asked for something like rtk
+   (the CLI proxy that compresses shell output for coding agents). The
+   agents have no shell, so rtk itself can't sit in front of them; its
+   ideas are applied to the tool results in `tool-defs/output-compress.ts`.
+   Failed `run_checked_command` / `run_npm_install` / `run_prettier` output
+   goes through `compactOutput`: colour codes, progress redraws, npm
+   banners and passing-test lines are dropped, repeated lines collapse to
+   `(×N)`, and a log still over 3k chars keeps the lines around errors plus
+   the last 15 (the runner's summary) instead of a blind 2k tail, which
+   used to cut off the actual failure in a long jest run (36k → 0.9k in a
+   synthetic test, failure kept). `search_code` groups hits under each file
+   and cuts lines at 200 chars. `get_diff`'s overview uses one line of
+   context and one-line `### path` file headers (`path` still gives three
+   lines of context). `read_file` answers a repeat of an unchanged read in
+   the same turn with a one-line note; asking a second time returns the
+   text, so a read lost to compaction can still be fetched. Not measured on
+   a real session yet; check `state/usage-log.jsonl` before and after.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

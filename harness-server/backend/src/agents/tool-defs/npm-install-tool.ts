@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
-import { outputTail } from './qa-tools.js';
+import { compactOutput } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -82,7 +82,7 @@ export function createRunNpmInstallExecute(deps: { repoRoot: string }) {
       const timedOut = e.killed ? ' (TIMED OUT)' : '';
       return (
         `npm install failed${timedOut} for ${packages.join(', ')}.\n\n` +
-        outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')
+        compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')
       );
     }
   };

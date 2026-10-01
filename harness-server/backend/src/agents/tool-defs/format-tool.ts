@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { assertWritable, type FileToolDeps } from './file-tools.js';
-import { outputTail } from './qa-tools.js';
+import { compactOutput } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +42,7 @@ export function createRunPrettierExecute(deps: FileToolDeps) {
       // failed, almost always a syntax error in one of the files. That's
       // information for the model to react to, not a broken tool call.
       const e = err as { stdout?: string; stderr?: string; message?: string };
-      return `prettier failed on one or more files.\n\n${outputTail(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
+      return `prettier failed on one or more files.\n\n${compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
     }
   };
 }

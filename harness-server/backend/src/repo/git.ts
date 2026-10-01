@@ -79,10 +79,16 @@ export async function diffAgainstBase(
   repoRoot: string,
   branchName: string,
   baseBranch = DEFAULT_BASE_BRANCH,
-  pathspecs: string[] = []
+  pathspecs: string[] = [],
+  contextLines?: number
 ): Promise<string> {
   const git = client(repoRoot);
-  return git.raw(['diff', `${baseBranch}...${branchName}`, ...(pathspecs.length ? ['--', ...pathspecs] : [])]);
+  return git.raw([
+    'diff',
+    ...(contextLines !== undefined ? [`--unified=${contextLines}`] : []),
+    `${baseBranch}...${branchName}`,
+    ...(pathspecs.length ? ['--', ...pathspecs] : []),
+  ]);
 }
 
 export async function diffStatAgainstBase(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<string> {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tool } from 'ai';
@@ -96,7 +97,30 @@ export interface FileToolDeps {
 }
 
 export function createFileExecutors(deps: FileToolDeps) {
-  const readFileExecute = async ({ path: requestedPath, offset, limit }: z.infer<typeof readFileSchema>): Promise<string> => {
+  // A read the model repeats with nothing changed is answered with a short
+  // note instead of the same text again, since the first copy is still in
+  // its context. The same read asked for once more gets the text, so a read
+  // that compaction dropped from the context can always be fetched again.
+  const notedRepeats = new Map<string, string>();
+  const lastReads = new Map<string, string>();
+
+  const readFileExecute = async (args: z.infer<typeof readFileSchema>): Promise<string> => {
+    const result = await readFileText(args);
+    const key = `${args.path}:${args.offset ?? ''}:${args.limit ?? ''}`;
+    const hash = createHash('sha1').update(result).digest('hex');
+    if (lastReads.get(key) === hash && notedRepeats.get(key) !== hash) {
+      notedRepeats.set(key, hash);
+      return (
+        `[${args.path} is unchanged since you last read it in this conversation — use that copy. ` +
+        'If it is no longer in your context, make the same read_file call again to get the text.]'
+      );
+    }
+    notedRepeats.delete(key);
+    lastReads.set(key, hash);
+    return result;
+  };
+
+  const readFileText = async ({ path: requestedPath, offset, limit }: z.infer<typeof readFileSchema>): Promise<string> => {
     const absolute = assertPathAllowed(requestedPath, ['.'], deps.repoRoot);
     const content = await fs.readFile(absolute, 'utf8');
 

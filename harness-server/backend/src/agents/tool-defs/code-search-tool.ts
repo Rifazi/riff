@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
+import { groupGrepOutput } from './output-compress.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -11,7 +12,7 @@ export const searchCodeSchema = z.object({
 });
 export const searchCodeDescription =
   'Search src/ and infra/ for a keyword or pattern (git grep, case-insensitive, basic regex). ' +
-  'Returns matching file:line and the line text only — not full file contents. Use this to check ' +
+  'Returns matching lines grouped by file (line number and text only — not full file contents). Use this to check ' +
   'whether something similar already exists before proposing new code.';
 
 /**
@@ -28,8 +29,7 @@ export function createSearchCodeExecute(deps: { repoRoot: string }) {
         cwd: deps.repoRoot,
         maxBuffer: 2_000_000,
       });
-      const lines = stdout.trim().split('\n').slice(0, 100);
-      return lines.join('\n') || 'No matches.';
+      return groupGrepOutput(stdout) || 'No matches.';
     } catch (err: unknown) {
       const e = err as { code?: number; stderr?: string };
       if (e.code === 1) {
