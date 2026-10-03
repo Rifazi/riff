@@ -3,7 +3,9 @@
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2, RefreshCw, Sparkles, Trash2, Download } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { searchApi, useSearchStatus } from '@/lib/search/api';
 
@@ -35,16 +37,16 @@ export function SearchSettings() {
   });
 
   if (isLoading || !status) {
-    return <div className="py-10 text-center text-sm text-gray-500">Loading…</div>;
+    return <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>;
   }
   const { model } = status;
   const embeddedPct = status.chunks > 0 ? Math.round((status.embedded / status.chunks) * 100) : 0;
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900">Search</h3>
-        <p className="mt-1 text-sm text-gray-600">
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold text-foreground">Search</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
           Meeting and journal search runs entirely on this computer. It matches your words (including other forms of
           them, like “hire” and “hiring”) and, with the model below, what you mean, so “when did we push back the
           launch” finds a meeting where someone said “let’s move the release two weeks”. Dev Session agents search their
@@ -52,21 +54,21 @@ export function SearchSettings() {
         </p>
         <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-gray-500">Indexed</dt>
-            <dd className="font-medium text-gray-900">
+            <dt className="text-muted-foreground">Indexed</dt>
+            <dd className="font-medium text-foreground">
               {status.documents.toLocaleString()} {status.documents === 1 ? 'item' : 'items'}
             </dd>
           </div>
           <div>
-            <dt className="text-gray-500">Passages</dt>
-            <dd className="font-medium text-gray-900">{status.chunks.toLocaleString()}</dd>
+            <dt className="text-muted-foreground">Passages</dt>
+            <dd className="font-medium text-foreground">{status.chunks.toLocaleString()}</dd>
           </div>
           <div>
-            <dt className="text-gray-500">Searchable by meaning</dt>
-            <dd className="font-medium text-gray-900">
+            <dt className="text-muted-foreground">Searchable by meaning</dt>
+            <dd className="font-medium text-foreground">
               {model.loaded ? `${embeddedPct}%` : '—'}
               {model.loaded && embeddedPct < 100 && (
-                <span className="ml-1 text-xs font-normal text-gray-500">(catching up in the background)</span>
+                <span className="ml-1 text-xs font-normal text-muted-foreground">(catching up in the background)</span>
               )}
             </dd>
           </div>
@@ -74,13 +76,13 @@ export function SearchSettings() {
         <Button variant="outline" className="mt-5" onClick={() => rebuild.mutate()} disabled={rebuild.isPending}>
           {rebuild.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />} Rebuild index
         </Button>
-      </div>
+      </Card>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
-          <Sparkles className="h-4 w-4 text-violet-600" /> Search by meaning
+      <Card className="p-6">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+          <Sparkles className="h-4 w-4 text-primary" /> Search by meaning
         </h3>
-        <p className="mt-1 text-sm text-gray-600">
+        <p className="mt-1 text-sm text-muted-foreground">
           A small multilingual language model ({mb(model.sizeBytes)}) that runs locally. Without it, search matches
           words only. {model.loaded && 'Matches found by meaning are marked “related”.'}
         </p>
@@ -88,33 +90,35 @@ export function SearchSettings() {
         <div className="mt-4 text-sm">
           {model.downloading ? (
             <div className="max-w-md space-y-2">
-              <div className="text-gray-700">
+              <div className="text-foreground">
                 Downloading… {mb(model.downloadedBytes)} of {mb(model.sizeBytes)}
               </div>
               <Progress value={(model.downloadedBytes / Math.max(1, model.sizeBytes)) * 100} />
             </div>
           ) : model.loaded ? (
             <div className="flex items-center gap-3">
-              <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">On</span>
+              <Badge variant="success">On</Badge>
               <Button variant="ghost" size="sm" onClick={() => remove.mutate()} disabled={remove.isPending}>
                 <Trash2 /> Remove model
               </Button>
             </div>
           ) : (
             <div className="space-y-2">
-              {model.installed && !model.error && <div className="text-gray-600">Loading the model…</div>}
-              {model.error && <div className="text-red-600">{model.error}</div>}
+              {model.installed && !model.error && <div className="text-muted-foreground">Loading the model…</div>}
+              {model.error && <div className="text-destructive">{model.error}</div>}
               <Button onClick={() => download.mutate()} disabled={download.isPending}>
                 {download.isPending ? <Loader2 className="animate-spin" /> : <Download />}
                 {model.installed ? 'Load model' : `Download (${mb(model.sizeBytes)})`}
               </Button>
               {model.declined && !model.installed && (
-                <p className="text-xs text-gray-500">You removed it earlier, so Riff won’t download it by itself.</p>
+                <p className="text-xs text-muted-foreground">
+                  You removed it earlier, so Riff won’t download it by itself.
+                </p>
               )}
             </div>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

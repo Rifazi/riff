@@ -1,14 +1,52 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { LANGUAGE_OPTIONS } from "@/lib/summary-languages";
-import { useRecentLanguages } from "@/hooks/useRecentLanguages";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { LANGUAGE_OPTIONS } from '@/lib/summary-languages';
+import { useRecentLanguages } from '@/hooks/useRecentLanguages';
+
+/** One selectable row in the list — the same shape for recents, Auto and all languages. */
+function LanguageOptionRow({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-muted text-left ${
+        selected ? 'text-primary font-medium' : 'text-foreground'
+      }`}
+    >
+      {children}
+      {selected && (
+        <span className="text-primary" aria-hidden="true">
+          ✓
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** The small uppercase group heading above each block of options. */
+function LanguageGroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </div>
+  );
+}
 
 interface LanguagePickerPopoverProps {
   value: string | null;
   onChange: (code: string | null) => void;
   onClose: () => void;
-  mode?: "meeting" | "settings";
+  mode?: 'meeting' | 'settings';
   autoSubtitle?: string;
 }
 
@@ -16,11 +54,11 @@ export function LanguagePickerPopover({
   value,
   onChange,
   onClose,
-  mode = "meeting",
+  mode = 'meeting',
   autoSubtitle,
 }: LanguagePickerPopoverProps) {
   const { recents } = useRecentLanguages();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,13 +71,13 @@ export function LanguagePickerPopover({
       if (!containerRef.current?.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === 'Escape') onClose();
     };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
     };
   }, [onClose]);
 
@@ -48,15 +86,9 @@ export function LanguagePickerPopover({
   const recentCodes = useMemo(() => new Set(recents), [recents]);
 
   const filteredAll = useMemo(() => {
-    const options = mode === "meeting"
-      ? LANGUAGE_OPTIONS.filter((l) => !recentCodes.has(l.code))
-      : LANGUAGE_OPTIONS;
+    const options = mode === 'meeting' ? LANGUAGE_OPTIONS.filter((l) => !recentCodes.has(l.code)) : LANGUAGE_OPTIONS;
     if (!filter) return options;
-    return options.filter(
-      (l) =>
-        l.code.toLowerCase().includes(filter) ||
-        l.label.toLowerCase().includes(filter),
-    );
+    return options.filter((l) => l.code.toLowerCase().includes(filter) || l.label.toLowerCase().includes(filter));
   }, [filter, mode, recentCodes]);
 
   const recentsResolved = useMemo(
@@ -64,112 +96,74 @@ export function LanguagePickerPopover({
       recents
         .map((code) => LANGUAGE_OPTIONS.find((l) => l.code === code))
         .filter((l): l is (typeof LANGUAGE_OPTIONS)[number] => Boolean(l))
-        .filter(
-          (l) =>
-            !filter ||
-            l.code.toLowerCase().includes(filter) ||
-            l.label.toLowerCase().includes(filter),
-        ),
+        .filter((l) => !filter || l.code.toLowerCase().includes(filter) || l.label.toLowerCase().includes(filter)),
     [recents, filter],
   );
 
-  const showAuto = mode === "meeting" && (!filter || "auto".includes(filter));
-  const showRecents = mode === "meeting" && recentsResolved.length > 0;
-  const hasNoResults =
-    filteredAll.length === 0 && recentsResolved.length === 0 && !showAuto;
+  const showAuto = mode === 'meeting' && (!filter || 'auto'.includes(filter));
+  const showRecents = mode === 'meeting' && recentsResolved.length > 0;
+  const hasNoResults = filteredAll.length === 0 && recentsResolved.length === 0 && !showAuto;
 
   return (
     <div
       ref={containerRef}
-      className="w-72 rounded-lg bg-white border border-gray-200 shadow-lg overflow-hidden"
+      className="w-72 rounded-lg bg-popover text-popover-foreground border border-border shadow-lg overflow-hidden"
       role="dialog"
       aria-label="Pick summary language"
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100">
-        <span className="text-gray-400 text-sm">🔍</span>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+        <span className="text-muted-foreground text-sm">🔍</span>
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search language..."
-          className="flex-1 text-sm text-gray-900 bg-transparent border-none outline-none placeholder-gray-400"
+          className="flex-1 text-sm text-foreground bg-transparent border-none outline-none placeholder:text-muted-foreground"
         />
       </div>
 
       <div className="max-h-80 overflow-y-auto py-1">
         {showRecents && (
           <>
-            <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-              Recently Used
-            </div>
+            <LanguageGroupLabel>Recently Used</LanguageGroupLabel>
             {recentsResolved.map((opt) => (
-              <button
+              <LanguageOptionRow
                 key={`recent-${opt.code}`}
-                type="button"
-                aria-pressed={value === opt.code}
+                selected={value === opt.code}
                 onClick={() => onChange(opt.code)}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
-                  value === opt.code ? "text-blue-600 font-medium" : "text-gray-800"
-                }`}
               >
                 <span>
-                  {opt.label}{" "}
-                  <span className="text-xs text-gray-400">({opt.code})</span>
+                  {opt.label} <span className="text-xs text-muted-foreground">({opt.code})</span>
                 </span>
-                {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}
-              </button>
+              </LanguageOptionRow>
             ))}
-            <div className="my-1 h-px bg-gray-100" />
+            <div className="my-1 h-px bg-border" />
           </>
         )}
 
         {showAuto && (
-          <button
-            type="button"
-            aria-pressed={value === null}
-            onClick={() => onChange(null)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
-              value === null ? "text-blue-600 font-medium" : "text-gray-800"
-            }`}
-          >
+          <LanguageOptionRow selected={value === null} onClick={() => onChange(null)}>
             <span className="flex flex-col">
               <span>Auto</span>
-              {autoSubtitle && (
-                <span className="text-xs font-normal text-gray-400">{autoSubtitle}</span>
-              )}
+              {autoSubtitle && <span className="text-xs font-normal text-muted-foreground">{autoSubtitle}</span>}
             </span>
-            {value === null && <span className="text-blue-600" aria-hidden="true">✓</span>}
-          </button>
+          </LanguageOptionRow>
         )}
 
         {filteredAll.length > 0 && (
-          <div className="px-3 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-            {mode === "meeting" ? "Other Languages" : "All Languages"}
-          </div>
+          <LanguageGroupLabel>{mode === 'meeting' ? 'Other Languages' : 'All Languages'}</LanguageGroupLabel>
         )}
 
         {filteredAll.map((opt) => (
-          <button
-            key={`all-${opt.code}`}
-            type="button"
-            aria-pressed={value === opt.code}
-            onClick={() => onChange(opt.code)}
-            className={`flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50 text-left ${
-              value === opt.code ? "text-blue-600 font-medium" : "text-gray-800"
-            }`}
-          >
+          <LanguageOptionRow key={`all-${opt.code}`} selected={value === opt.code} onClick={() => onChange(opt.code)}>
             <span>
-              {opt.label}{" "}
-              <span className="text-xs text-gray-400">({opt.code})</span>
+              {opt.label} <span className="text-xs text-muted-foreground">({opt.code})</span>
             </span>
-            {value === opt.code && <span className="text-blue-600" aria-hidden="true">✓</span>}
-          </button>
+          </LanguageOptionRow>
         ))}
 
-        {hasNoResults && (
-          <div className="px-3 py-2 text-sm text-gray-400">No matches</div>
-        )}
+        {hasNoResults && <div className="px-3 py-2 text-sm text-muted-foreground">No matches</div>}
       </div>
     </div>
   );

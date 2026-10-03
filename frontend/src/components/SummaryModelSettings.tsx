@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
 import { SummaryLanguageSettings } from '@/components/SummaryLanguageSettings';
 import { Switch } from './ui/switch';
+import { Card } from './ui/card';
 import { useConfig } from '@/contexts/ConfigContext';
 
 interface SummaryModelSettingsProps {
@@ -18,7 +19,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     model: 'llama3.2:latest',
     whisperModel: 'large-v3',
     apiKey: null,
-    ollamaEndpoint: null
+    ollamaEndpoint: null,
   });
 
   const { isAutoSummary, toggleIsAutoSummary } = useConfig();
@@ -26,14 +27,14 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
   // Reusable fetch function
   const fetchModelConfig = useCallback(async () => {
     try {
-      const data = await invoke('api_get_model_config') as any;
+      const data = (await invoke('api_get_model_config')) as any;
       if (data && data.provider !== null) {
         // Fetch API key if not included and provider requires it
         if (data.provider !== 'ollama' && data.provider !== 'builtin-ai' && !data.apiKey) {
           try {
-            const apiKeyData = await invoke('api_get_api_key', {
-              provider: data.provider
-            }) as string;
+            const apiKeyData = (await invoke('api_get_api_key', {
+              provider: data.provider,
+            })) as string;
             data.apiKey = apiKeyData;
           } catch (err) {
             console.error('Failed to fetch API key:', err);
@@ -91,7 +92,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
     };
 
     let cleanup: (() => void) | undefined;
-    setupListener().then(fn => cleanup = fn);
+    setupListener().then((fn) => (cleanup = fn));
 
     return () => {
       cleanup?.();
@@ -123,22 +124,24 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
   };
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+    <div className="flex flex-col gap-4">
+      <Card className="p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Auto Summary</h3>
-            <p className="text-sm text-gray-600">Summarize every meeting when it finishes, then file its topics into your journals</p>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Auto Summary</h3>
+            <p className="text-sm text-muted-foreground">
+              Summarize every meeting when it finishes, then file its topics into your journals
+            </p>
           </div>
           <Switch checked={isAutoSummary} onCheckedChange={toggleIsAutoSummary} />
         </div>
-      </div>
+      </Card>
 
       <SummaryLanguageSettings />
 
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <Card className="p-6">
         <h3 className="text-lg font-semibold mb-4">Summary Model Configuration</h3>
-        <p className="text-sm text-gray-600 mb-6">
+        <p className="text-sm text-muted-foreground mb-6">
           Configure the AI model used for generating meeting summaries.
         </p>
 
@@ -148,7 +151,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
           onSave={handleSaveModelConfig}
           skipInitialFetch={true}
         />
-      </div>
+      </Card>
     </div>
   );
 }

@@ -1,21 +1,19 @@
-"use client"
+'use client';
 
-import { useEffect, useState, useRef } from "react"
-import { Switch } from "./ui/switch"
-import { FolderOpen } from "lucide-react"
-import { invoke } from "@tauri-apps/api/core"
-import Analytics from "@/lib/analytics"
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch"
-import { useConfig, NotificationSettings } from "@/contexts/ConfigContext"
+import { useEffect, useState, useRef } from 'react';
+import { Switch } from './ui/switch';
+import { Button } from './ui/button';
+import { Card } from './ui/card';
+import { Alert, AlertDescription } from './ui/alert';
+import { FolderOpen } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import Analytics from '@/lib/analytics';
+import AnalyticsConsentSwitch from './AnalyticsConsentSwitch';
+import { useConfig, NotificationSettings } from '@/contexts/ConfigContext';
 
 export function PreferenceSettings() {
-  const {
-    notificationSettings,
-    storageLocations,
-    isLoadingPreferences,
-    loadPreferences,
-    updateNotificationSettings
-  } = useConfig();
+  const { notificationSettings, storageLocations, isLoadingPreferences, loadPreferences, updateNotificationSettings } =
+    useConfig();
 
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -37,13 +35,15 @@ export function PreferenceSettings() {
       // Wait for notification settings to be available (either from cache or after loading)
       if (notificationSettings) {
         await Analytics.track('preferences_viewed', {
-          notifications_enabled: notificationSettings.notification_preferences.show_recording_started ? 'true' : 'false'
+          notifications_enabled: notificationSettings.notification_preferences.show_recording_started
+            ? 'true'
+            : 'false',
         });
         hasTrackedViewRef.current = true;
       } else if (!isLoadingPreferences) {
         // If not loading and no settings available, track with default value
         await Analytics.track('preferences_viewed', {
-          notifications_enabled: 'false'
+          notifications_enabled: 'false',
         });
         hasTrackedViewRef.current = true;
       }
@@ -72,7 +72,7 @@ export function PreferenceSettings() {
         setIsInitialLoad(false);
       }
     }
-  }, [notificationSettings, isLoadingPreferences, isInitialLoad])
+  }, [notificationSettings, isLoadingPreferences, isInitialLoad]);
 
   useEffect(() => {
     // Skip update on initial load or if value hasn't actually changed
@@ -80,7 +80,7 @@ export function PreferenceSettings() {
     if (!notificationSettings) return;
 
     const handleUpdateNotificationSettings = async () => {
-      console.log("Updating notification settings to:", notificationsEnabled);
+      console.log('Updating notification settings to:', notificationsEnabled);
 
       try {
         // Update the notification preferences
@@ -90,17 +90,17 @@ export function PreferenceSettings() {
             ...notificationSettings.notification_preferences,
             show_recording_started: notificationsEnabled,
             show_recording_stopped: notificationsEnabled,
-          }
+          },
         };
 
-        console.log("Calling updateNotificationSettings with:", updatedSettings);
+        console.log('Calling updateNotificationSettings with:', updatedSettings);
         await updateNotificationSettings(updatedSettings);
         setPreviousNotificationsEnabled(notificationsEnabled);
-        console.log("Successfully updated notification settings to:", notificationsEnabled);
+        console.log('Successfully updated notification settings to:', notificationsEnabled);
 
         // Track notification preference change - only fires when user manually toggles
         await Analytics.track('notification_settings_changed', {
-          notifications_enabled: notificationsEnabled.toString()
+          notifications_enabled: notificationsEnabled.toString(),
         });
       } catch (error) {
         console.error('Failed to update notification settings:', error);
@@ -108,7 +108,13 @@ export function PreferenceSettings() {
     };
 
     handleUpdateNotificationSettings();
-  }, [notificationsEnabled, notificationSettings, isInitialLoad, previousNotificationsEnabled, updateNotificationSettings])
+  }, [
+    notificationsEnabled,
+    notificationSettings,
+    isInitialLoad,
+    previousNotificationsEnabled,
+    updateNotificationSettings,
+  ]);
 
   const handleOpenFolder = async (folderType: 'database' | 'models' | 'recordings') => {
     try {
@@ -126,7 +132,7 @@ export function PreferenceSettings() {
 
       // Track storage folder access
       await Analytics.track('storage_folder_opened', {
-        folder_type: folderType
+        folder_type: folderType,
       });
     } catch (error) {
       console.error(`Failed to open ${folderType} folder:`, error);
@@ -135,12 +141,12 @@ export function PreferenceSettings() {
 
   // Show loading only if we're actually loading and don't have cached data
   if (isLoadingPreferences && !notificationSettings && !storageLocations) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>;
   }
 
   // Show loading if notificationsEnabled hasn't been determined yet
   if (notificationsEnabled === null && !isLoadingPreferences) {
-    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>
+    return <div className="max-w-2xl mx-auto p-6">Loading Preferences...</div>;
   }
 
   // Ensure we have a boolean value for the Switch component
@@ -149,81 +155,47 @@ export function PreferenceSettings() {
   return (
     <div className="space-y-6">
       {/* Notifications Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <Card className="p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Notifications</h3>
-            <p className="text-sm text-gray-600">Enable or disable notifications of start and end of meeting</p>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Notifications</h3>
+            <p className="text-sm text-muted-foreground">Enable or disable notifications of start and end of meeting</p>
           </div>
           <Switch checked={notificationsEnabledValue} onCheckedChange={setNotificationsEnabled} />
         </div>
-      </div>
+      </Card>
 
       {/* Data Storage Locations Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Data Storage Locations</h3>
-        <p className="text-sm text-gray-600 mb-6">
-          View and access where Riff stores your data
-        </p>
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold text-foreground mb-4">Data Storage Locations</h3>
+        <p className="text-sm text-muted-foreground mb-6">View and access where Riff stores your data</p>
 
         <div className="space-y-4">
-          {/* Database Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Database</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.database || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('database')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
-          {/* Models Location */}
-          {/* <div className="p-4 border rounded-lg bg-gray-50">
-            <div className="font-medium mb-2">Whisper Models</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
-              {storageLocations?.models || 'Loading...'}
-            </div>
-            <button
-              onClick={() => handleOpenFolder('models')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
-              <FolderOpen className="w-4 h-4" />
-              Open Folder
-            </button>
-          </div> */}
-
           {/* Recordings Location */}
-          <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border border-border rounded-lg bg-muted">
             <div className="font-medium mb-2">Meeting Recordings</div>
-            <div className="text-sm text-gray-600 mb-3 break-all font-mono text-xs">
+            <div className="text-xs text-muted-foreground mb-3 break-all font-mono">
               {storageLocations?.recordings || 'Loading...'}
             </div>
-            <button
-              onClick={() => handleOpenFolder('recordings')}
-              className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-100 transition-colors"
-            >
+            <Button variant="outline" size="sm" onClick={() => handleOpenFolder('recordings')}>
               <FolderOpen className="w-4 h-4" />
               Open Folder
-            </button>
+            </Button>
           </div>
         </div>
 
-        <div className="mt-4 p-3 bg-blue-50 rounded-md">
-          <p className="text-xs text-blue-800">
-            <strong>Note:</strong> Database and models are stored together in your application data directory for unified management.
-          </p>
-        </div>
-      </div>
+        <Alert variant="info" className="mt-4">
+          <AlertDescription className="text-xs">
+            <strong>Note:</strong> Database and models are stored together in your application data directory for
+            unified management.
+          </AlertDescription>
+        </Alert>
+      </Card>
 
       {/* Analytics Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+      <Card className="p-6">
         <AnalyticsConsentSwitch />
-      </div>
+      </Card>
     </div>
-  )
+  );
 }
