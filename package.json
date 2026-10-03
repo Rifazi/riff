@@ -6,7 +6,7 @@
     "dev:debug": "RUST_LOG=debug npm run dev",
     "build": "pnpm --dir frontend install && pnpm --dir frontend run tauri:build",
     "lint": "pnpm --dir frontend install && pnpm --dir frontend run lint",
-    "test": "echo 'No JS/TS unit test suite is configured for this repo yet (frontend is a Tauri/Next.js desktop app; its automated tests are Rust via `cargo test`, run from frontend/src-tauri). Nothing to run here.'",
+    "test": "cd frontend && npx --yes bun@1 test",
     "test:ci": "npm run test"
   }
 }

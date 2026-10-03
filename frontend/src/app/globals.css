@@ -77,15 +77,54 @@
 }
 
 /*
- * These variables alias onto Riff's generated UI theme tokens
- * (theme/tokens.css — see theme/theme.json and docs/theme.md once a theme
- * is applied via Riff's theme picker). They are not an independent color
- * source: every value here is a direct `var(--color-*)`/`var(--radius-*)`
- * reference, with no literal fallback color, so there is exactly one
- * source of truth for every color in this app — the applied theme. Until
- * a theme is applied (no theme/theme.json in this checkout yet), these
- * custom properties resolve to nothing and elements using them render
- * without an explicit color rather than a guessed one.
+ * PLACEHOLDER TOKENS — delete this whole block once a theme is applied.
+ *
+ * Every color in this app resolves to one of Riff's generated theme tokens
+ * (`--color-*`, `--radius-*` from theme/tokens.css, generated from
+ * theme/theme.json by Riff's theme picker). No theme has been applied to
+ * this repo yet, so those tokens don't exist and the UI would render with
+ * no color at all. This block gives each of them a deliberately plain
+ * placeholder value — named CSS colors, never hex, so it reads as scaffolding
+ * and not as a palette anyone should maintain or copy.
+ *
+ * It is a fallback, not a second source of truth: it lives in `@layer base`,
+ * and theme/tokens.css is imported unlayered, so an applied theme wins over
+ * every declaration here regardless of import order.
+ *
+ * To apply a theme: pick one on the app's Theme page in Riff (Dev Sessions →
+ * Apps → Theme). That writes theme/theme.json and generates theme/*.css.
+ * Then add `@import "../../../theme/index.css";` as the first line of this
+ * file (above the @tailwind directives) and delete this block.
+ */
+@layer base {
+  :root {
+    --color-bg: whitesmoke;
+    --color-surface: white;
+    --color-surface-muted: gainsboro;
+    --color-border: lightgray;
+    --color-text: black;
+    --color-text-muted: dimgray;
+    --color-primary: slateblue;
+    --color-on-primary: white;
+    --color-success: seagreen;
+    --color-warning: darkorange;
+    --color-danger: crimson;
+    --color-info: steelblue;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-full: 9999px;
+  }
+
+  /* No `.dark` placeholders: nothing in the app sets the `dark` class today,
+     and when a theme is applied its own dark-mode tokens cover it. */
+}
+
+/*
+ * These shadcn-style variables alias onto the theme tokens above. They are
+ * not an independent color source: every value is a direct
+ * `var(--color-*)`/`var(--radius-*)` reference, so there is exactly one
+ * source of truth for every color in this app — the applied theme.
  */
 @layer base {
   :root {
