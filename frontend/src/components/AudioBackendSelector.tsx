@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { Info } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Info } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 
 export interface BackendInfo {
   id: string;
@@ -20,7 +23,7 @@ export function AudioBackendSelector({
   disabled = false,
 }: AudioBackendSelectorProps) {
   const [backends, setBackends] = useState<BackendInfo[]>([]);
-  const [currentBackend, setCurrentBackend] = useState<string>('coreaudio');
+  const [currentBackend, setCurrentBackend] = useState<string>("coreaudio");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -33,19 +36,21 @@ export function AudioBackendSelector({
         setError(null);
 
         // Get backend info (includes name and description)
-        const backendInfo = await invoke<BackendInfo[]>('get_audio_backend_info');
+        const backendInfo = await invoke<BackendInfo[]>(
+          "get_audio_backend_info",
+        );
         setBackends(backendInfo);
 
         // Get current backend if not provided via props
         if (!propBackend) {
-          const current = await invoke<string>('get_current_audio_backend');
+          const current = await invoke<string>("get_current_audio_backend");
           setCurrentBackend(current);
         } else {
           setCurrentBackend(propBackend);
         }
       } catch (err) {
-        console.error('Failed to load audio backends:', err);
-        setError('Failed to load backend options');
+        console.error("Failed to load audio backends:", err);
+        setError("Failed to load backend options");
       } finally {
         setLoading(false);
       }
@@ -58,7 +63,7 @@ export function AudioBackendSelector({
   const handleBackendChange = async (backendId: string) => {
     try {
       setError(null);
-      await invoke('set_audio_backend', { backend: backendId });
+      await invoke("set_audio_backend", { backend: backendId });
       setCurrentBackend(backendId);
 
       // Notify parent component
@@ -68,17 +73,17 @@ export function AudioBackendSelector({
 
       console.log(`Audio backend changed to: ${backendId}`);
     } catch (err) {
-      console.error('Failed to set audio backend:', err);
-      setError('Failed to change backend. Please try again.');
+      console.error("Failed to set audio backend:", err);
+      setError("Failed to change backend. Please try again.");
     }
   };
 
   // Only show selector if there are multiple backends
   if (loading) {
     return (
-      <div className="animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-32 mb-2"></div>
-        <div className="h-10 bg-gray-200 rounded"></div>
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-10 w-full" />
       </div>
     );
   }
@@ -91,29 +96,32 @@ export function AudioBackendSelector({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <label className="text-sm font-medium text-gray-700">
+        <label className="text-sm font-medium text-foreground">
           System Audio Backend
         </label>
         <div className="relative">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
             onMouseEnter={() => setShowTooltip(true)}
             onMouseLeave={() => setShowTooltip(false)}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
           >
             <Info className="h-4 w-4" />
-          </button>
+          </Button>
           {showTooltip && (
-            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-gray-900 text-white rounded-lg shadow-lg">
+            <div className="absolute z-10 left-6 top-0 w-64 p-3 text-xs bg-popover text-popover-foreground border border-border rounded-lg shadow-lg">
               <p className="font-semibold mb-1">Audio Capture Methods:</p>
               <ul className="space-y-1">
                 {backends.map((backend) => (
                   <li key={backend.id}>
-                    <span className="font-medium">{backend.name}:</span> {backend.description}
+                    <span className="font-medium">{backend.name}:</span>{" "}
+                    {backend.description}
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-gray-300">
+              <p className="mt-2 text-muted-foreground">
                 Try different backends to find which works best for your system.
               </p>
             </div>
@@ -122,7 +130,7 @@ export function AudioBackendSelector({
       </div>
 
       {error && (
-        <div className="p-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md">
+        <div className="p-2 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-md">
           {error}
         </div>
       )}
@@ -130,7 +138,7 @@ export function AudioBackendSelector({
       <div className="space-y-2">
         {backends.map((backend) => {
           // Disable Core Audio option
-          const isCoreAudio = backend.id === 'screencapturekit';
+          const isCoreAudio = backend.id === "screencapturekit";
           const isDisabled = disabled || isCoreAudio;
 
           return (
@@ -138,9 +146,9 @@ export function AudioBackendSelector({
               key={backend.id}
               className={`flex items-start p-3 border rounded-lg transition-all ${
                 currentBackend === backend.id
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-300 hover:border-gray-400 bg-white'
-              } ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-muted-foreground bg-background"
+              } ${isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
             >
               <input
                 type="radio"
@@ -149,32 +157,28 @@ export function AudioBackendSelector({
                 checked={currentBackend === backend.id}
                 onChange={() => handleBackendChange(backend.id)}
                 disabled={isDisabled}
-                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                className="mt-1 h-4 w-4 text-primary focus:ring-ring border-border"
               />
               <div className="ml-3 flex-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-foreground">
                     {backend.name}
                   </span>
                   {currentBackend === backend.id && (
-                    <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
-                      Active
-                    </span>
+                    <Badge variant="info">Active</Badge>
                   )}
-                  {isCoreAudio && (
-                    <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-                      Disabled
-                    </span>
-                  )}
+                  {isCoreAudio && <Badge variant="secondary">Disabled</Badge>}
                 </div>
-                <p className="mt-1 text-xs text-gray-600">{backend.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {backend.description}
+                </p>
               </div>
             </label>
           );
         })}
       </div>
 
-      <div className="text-xs text-gray-500 space-y-1">
+      <div className="text-xs text-muted-foreground space-y-1">
         <p>• Backend selection only affects system audio capture</p>
         <p>• Microphone always uses the default method</p>
         <p>• Changes apply to new recording sessions</p>
