@@ -18,9 +18,10 @@ import {
   type RoleModelConfig,
 } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
+import { Badge } from '@/components/ui/badge';
 import { AgentServerBanner } from './AgentServerBanner';
 import { ExternalAnchor } from './ExternalAnchor';
-import { LoadingState, Pill } from './PageShell';
+import { LoadingState } from './PageShell';
 import { TokenUsagePanel } from './TokenUsagePanel';
 
 const PROVIDER_LABEL: Record<Provider, string> = {
@@ -114,7 +115,7 @@ function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boole
     <div className="py-4">
       <div className="flex items-center gap-2 mb-2">
         <span className="font-medium text-gray-900">{PROVIDER_LABEL[provider]}</span>
-        <Pill tone={hasKey ? 'green' : 'neutral'}>{hasKey ? 'Configured' : 'Not set'}</Pill>
+        <Badge variant={hasKey ? 'success' : 'secondary'}>{hasKey ? 'Configured' : 'Not set'}</Badge>
       </div>
       <div className="flex gap-2">
         <Input
@@ -275,7 +276,7 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
       {row('Account email', <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />)}
       {row(
         <span className="flex items-center gap-2">
-          API token <Pill tone={jira.hasToken ? 'green' : 'neutral'}>{jira.hasToken ? 'Configured' : 'Not set'}</Pill>
+          API token <Badge variant={jira.hasToken ? 'success' : 'secondary'}>{jira.hasToken ? 'Configured' : 'Not set'}</Badge>
         </span>,
         <div>
           <Input

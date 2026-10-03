@@ -15,7 +15,8 @@ import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { SplitLinks, SplitProposalCard } from '../SplitPanel';
 import { ThemeProposalPanel } from '../ThemeProposalPanel';
-import { ErrorText, Notice, Pill } from '../PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.requirements;
@@ -195,13 +196,15 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
           }
           badge={
             isSplit ? (
-              <Pill>Split</Pill>
+              <Badge variant="secondary">Split</Badge>
             ) : isApproved ? (
-              <Pill tone="green">Approved</Pill>
+              <Badge variant="success">Approved</Badge>
             ) : !reopenedHere && !canEdit && codingStarted ? (
-              <Pill title="Coding already started from this doc">Locked — coding started</Pill>
+              <Badge variant="secondary" title="Coding already started from this doc">
+                Locked — coding started
+              </Badge>
             ) : session.requirementsStatus === 'draft' ? (
-              <Pill tone="amber">Draft</Pill>
+              <Badge variant="warning">Draft</Badge>
             ) : null
           }
           notices={

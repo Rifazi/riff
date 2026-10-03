@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { Ban } from 'lucide-react';
 import type { ThemeDraft, ThemeMode, ThemeTokens } from '@/lib/dev-sessions/types';
-import { ErrorText, LoadingState, Pill } from '../PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, LoadingState } from '../PageShell';
 import { ModeToggle } from './ModeToggle';
 import { ThemeEditor } from './ThemeEditor';
 import { ThemeShowcase } from './ThemeShowcase';
@@ -52,7 +53,11 @@ export function ThemeStudio({
   const edited = Boolean(value) && !exact;
 
   const badgeFor = (key: string) =>
-    key === origin && edited ? <Pill tone="amber">Edited</Pill> : key === CURRENT ? <Pill tone="green">Current</Pill> : null;
+    key === origin && edited ? (
+      <Badge variant="warning">Edited</Badge>
+    ) : key === CURRENT ? (
+      <Badge variant="success">Current</Badge>
+    ) : null;
 
   return (
     <div className="space-y-4">

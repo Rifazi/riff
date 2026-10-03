@@ -11,16 +11,19 @@ import { api } from '@/lib/dev-sessions/api';
 import type { SessionRecord } from '@/lib/dev-sessions/types';
 import { sessionHref, STAGE_LABEL, stageGroupFor } from '@/lib/dev-sessions/stage';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
-import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell, Pill } from '@/components/DevSessions/PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState, ErrorText, LoadingState, Notice, PageShell } from '@/components/DevSessions/PageShell';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
 import { AppPicker } from '@/components/DevSessions/AppPicker';
 
 function stageTone(session: SessionRecord) {
-  if (session.stage === 'done') return 'green' as const;
-  if (session.stage === 'abandoned') return 'red' as const;
-  if (session.stage === 'split') return 'neutral' as const;
-  if (session.stage.endsWith('approved') || session.stage === 'coding-review' || session.stage === 'qa-reviewed') return 'amber' as const;
-  return 'blue' as const;
+  if (session.stage === 'done') return 'success' as const;
+  if (session.stage === 'abandoned') return 'destructive' as const;
+  if (session.stage === 'split') return 'secondary' as const;
+  if (session.stage.endsWith('approved') || session.stage === 'coding-review' || session.stage === 'qa-reviewed')
+    return 'warning' as const;
+  return 'info' as const;
 }
 
 export default function DevSessionsPage() {
@@ -80,42 +83,47 @@ export default function DevSessionsPage() {
           </Notice>
         )}
         {apps && (
-          <Card title="Start a new session">
-            <form
-              className="flex flex-wrap gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (title.trim() && appId) createMutation.mutate();
-              }}
-            >
-              <AppPicker value={appId} onChange={setAppId} triggerClassName="w-44" />
-              <Input
-                className="flex-1 min-w-[220px] bg-white"
-                placeholder="Feature title, e.g. Acme Distributors inventory report"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-              <Input
-                className="w-52 bg-white"
-                placeholder="Ticket ID (optional)"
-                value={sessionKey}
-                onChange={(e) => setSessionKey(e.target.value)}
-              />
-              <Button variant="blue" type="submit" disabled={!title.trim() || !appId || createMutation.isPending}>
-                {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-                New session
-              </Button>
-            </form>
-            <ErrorText>{createMutation.isError ? (createMutation.error as Error).message : null}</ErrorText>
-            <p className="text-xs text-gray-500 mt-3 flex items-center gap-1.5">
-              <NotebookPen className="w-3.5 h-3.5" />
-              Or open a meeting and click <span className="font-medium">Requirements</span> to start from its transcript.
-            </p>
+          <Card>
+            <CardHeader>
+              <CardTitle>Start a new session</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form
+                className="flex flex-wrap gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (title.trim() && appId) createMutation.mutate();
+                }}
+              >
+                <AppPicker value={appId} onChange={setAppId} triggerClassName="w-44" />
+                <Input
+                  className="flex-1 min-w-[220px]"
+                  placeholder="Feature title, e.g. Acme Distributors inventory report"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+                <Input
+                  className="w-52"
+                  placeholder="Ticket ID (optional)"
+                  value={sessionKey}
+                  onChange={(e) => setSessionKey(e.target.value)}
+                />
+                <Button variant="default" type="submit" disabled={!title.trim() || !appId || createMutation.isPending}>
+                  {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+                  New session
+                </Button>
+              </form>
+              <ErrorText>{createMutation.isError ? (createMutation.error as Error).message : null}</ErrorText>
+              <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
+                <NotebookPen className="w-3.5 h-3.5" />
+                Or open a meeting and click <span className="font-medium">Requirements</span> to start from its transcript.
+              </p>
+            </CardContent>
           </Card>
         )}
 
         <div>
-          <h2 className="text-sm font-semibold text-gray-900 mb-3">Sessions</h2>
+          <h2 className="text-sm font-semibold text-foreground mb-3">Sessions</h2>
           {isLoading && <LoadingState />}
           {!isLoading && sessions?.length === 0 && <EmptyState>No sessions yet — start one above or from a meeting.</EmptyState>}
           <div className="space-y-2">
@@ -126,32 +134,33 @@ export default function DevSessionsPage() {
                 <Link
                   key={session.id}
                   href={sessionHref(session.id, stageGroupFor(session))}
-                  className="group flex items-center gap-4 bg-white rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:shadow-sm transition-all"
+                  className="group flex items-center gap-4 bg-card rounded-lg border border-border px-4 py-3 hover:border-primary/50 hover:shadow-sm transition-all"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">{session.title}</div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    <div className="font-medium text-foreground truncate">{session.title}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-mono">{session.sessionKey}</span>
-                      <Pill>{session.appName}</Pill>
+                      <Badge variant="secondary">{session.appName}</Badge>
                       {session.splitFrom && (
-                        <Pill title={`Split from "${session.splitFrom.title}"`}>
+                        <Badge variant="secondary" className="gap-1" title={`Split from "${session.splitFrom.title}"`}>
                           <GitFork className="w-3 h-3" />
                           {session.splitFrom.sessionKey}
-                        </Pill>
+                        </Badge>
                       )}
                       {session.sourceMeeting && (
-                        <Pill
-                          tone="blue"
+                        <Badge
+                          variant="info"
+                          className="gap-1"
                           title={session.sourceMeeting.kind === 'journal' ? 'Started from a journal' : 'Started from a meeting transcript'}
                         >
                           <NotebookPen className="w-3 h-3" />
                           {session.sourceMeeting.meetingTitle || 'Meeting'}
-                        </Pill>
+                        </Badge>
                       )}
                       <span>Updated {new Date(session.updatedAt).toLocaleString()}</span>
                     </div>
                   </div>
-                  <Pill tone={stageTone(session)}>{STAGE_LABEL[session.stage] ?? session.stage}</Pill>
+                  <Badge variant={stageTone(session)}>{STAGE_LABEL[session.stage] ?? session.stage}</Badge>
                   <div className="flex items-center gap-1">
                     {session.stage === 'abandoned' && (
                       <Button
@@ -172,7 +181,7 @@ export default function DevSessionsPage() {
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -183,7 +192,7 @@ export default function DevSessionsPage() {
                     >
                       {busyDelete ? <Loader2 className="animate-spin" /> : <Trash2 />}
                     </Button>
-                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-500" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-muted-foreground" />
                   </div>
                 </Link>
               );

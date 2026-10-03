@@ -4,21 +4,21 @@ import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, FolderLock, GitMerge, Loader2, Maximize2, Play, RotateCcw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import type { CodingPlanStep, CodingTeamMember, PlanStepSummary, PlanWorkstream, TeamMemberStatus, TranscriptEntry } from '@/lib/dev-sessions/types';
 import { TEAM_LEAD_PERSONA, teamMemberPersona, type TeamPersona } from '@/lib/dev-sessions/agents';
 import { AgentAvatar, ChatPane } from './ChatPane';
 import { CodingPlanChecklist } from './CodingPlanChecklist';
-import { Pill } from './PageShell';
 
 // ---------------------------------------------------------------- shared
 
-const STATUS_META: Record<TeamMemberStatus, { label: string; tone: 'neutral' | 'blue' | 'green' | 'red' | 'amber' }> = {
-  waiting: { label: 'Waiting', tone: 'neutral' },
-  running: { label: 'Working', tone: 'blue' },
-  merging: { label: 'Merging', tone: 'blue' },
-  merged: { label: 'Merged', tone: 'green' },
-  failed: { label: 'Needs attention', tone: 'red' },
-  blocked: { label: 'Blocked', tone: 'amber' },
+const STATUS_META: Record<TeamMemberStatus, { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
+  waiting: { label: 'Waiting', variant: 'secondary' },
+  running: { label: 'Working', variant: 'info' },
+  merging: { label: 'Merging', variant: 'info' },
+  merged: { label: 'Merged', variant: 'success' },
+  failed: { label: 'Needs attention', variant: 'destructive' },
+  blocked: { label: 'Blocked', variant: 'warning' },
 };
 
 function StatusIcon({ status, className = 'w-3 h-3' }: { status: TeamMemberStatus; className?: string }) {
@@ -32,10 +32,10 @@ function StatusIcon({ status, className = 'w-3 h-3' }: { status: TeamMemberStatu
 function StatusPill({ status }: { status: TeamMemberStatus }) {
   const meta = STATUS_META[status];
   return (
-    <Pill tone={meta.tone}>
+    <Badge variant={meta.variant} className="gap-1">
       <StatusIcon status={status} />
       {meta.label}
-    </Pill>
+    </Badge>
   );
 }
 

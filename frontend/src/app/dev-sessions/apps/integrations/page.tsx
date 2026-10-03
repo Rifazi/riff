@@ -8,7 +8,8 @@ import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import type { IntegrationDoc } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
-import { Card, EmptyState, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import { MarkdownDocument } from '@/components/DevSessions/MarkdownDocument';
 
 function IntegrationsView() {
@@ -46,29 +47,39 @@ function IntegrationsView() {
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 items-start">
           <div className="space-y-3">
             {integrations.map((integration) => (
-              <Card key={integration.slug} title={integration.title}>
-                <p className="text-sm text-gray-600 mb-3">{integration.summary}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {[{ file: integration.readmePath, title: 'Overview' }, ...integration.docs].map((doc) => (
-                    <Button
-                      key={doc.file}
-                      size="sm"
-                      variant={selectedDoc?.file === doc.file ? 'blue' : 'outline'}
-                      onClick={() =>
-                        setSelectedDoc(doc.file === integration.readmePath ? { file: doc.file, title: `${integration.title} overview` } : doc)
-                      }
-                    >
-                      {doc.title}
-                    </Button>
-                  ))}
-                </div>
+              <Card key={integration.slug}>
+                <CardHeader>
+                  <CardTitle>{integration.title}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">{integration.summary}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[{ file: integration.readmePath, title: 'Overview' }, ...integration.docs].map((doc) => (
+                      <Button
+                        key={doc.file}
+                        size="sm"
+                        variant={selectedDoc?.file === doc.file ? 'default' : 'outline'}
+                        onClick={() =>
+                          setSelectedDoc(doc.file === integration.readmePath ? { file: doc.file, title: `${integration.title} overview` } : doc)
+                        }
+                      >
+                        {doc.title}
+                      </Button>
+                    ))}
+                  </div>
+                </CardContent>
               </Card>
             ))}
           </div>
-          <Card title={selectedDoc ? selectedDoc.title : 'Document'} className="lg:sticky lg:top-0">
-            {!selectedDoc && <div className="py-8 text-center text-sm text-gray-500">Pick a document on the left.</div>}
-            {selectedDoc && isLoadingDoc && <LoadingState />}
-            {selectedDoc && docContent && <MarkdownDocument markdown={docContent.markdown} />}
+          <Card className="lg:sticky lg:top-0">
+            <CardHeader>
+              <CardTitle>{selectedDoc ? selectedDoc.title : 'Document'}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!selectedDoc && <div className="py-8 text-center text-sm text-muted-foreground">Pick a document on the left.</div>}
+              {selectedDoc && isLoadingDoc && <LoadingState />}
+              {selectedDoc && docContent && <MarkdownDocument markdown={docContent.markdown} />}
+            </CardContent>
           </Card>
         </div>
       )}

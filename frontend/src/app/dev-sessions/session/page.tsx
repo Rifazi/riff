@@ -8,7 +8,8 @@ import { NotebookPen } from 'lucide-react';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
-import { ErrorText, LoadingState, PageShell, Pill } from '@/components/DevSessions/PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import { StageStepper } from '@/components/DevSessions/StageStepper';
 import { SessionReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
 import { RequirementsStage } from '@/components/DevSessions/stages/RequirementsStage';
@@ -54,10 +55,20 @@ function SessionView() {
       subtitle={
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono">{session.sessionKey}</span>
-          <Pill>{session.appName}</Pill>
-          <Pill tone={session.stage === 'abandoned' ? 'red' : session.stage === 'done' ? 'green' : session.stage === 'split' ? 'neutral' : 'blue'}>
+          <Badge variant="secondary">{session.appName}</Badge>
+          <Badge
+            variant={
+              session.stage === 'abandoned'
+                ? 'destructive'
+                : session.stage === 'done'
+                  ? 'success'
+                  : session.stage === 'split'
+                    ? 'secondary'
+                    : 'info'
+            }
+          >
             {STAGE_LABEL[session.stage] ?? session.stage}
-          </Pill>
+          </Badge>
           {session.sourceMeeting && (
             <Link
               href={
@@ -65,7 +76,7 @@ function SessionView() {
                   ? `/journal/notebook?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
                   : `/meeting-details?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
               }
-              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+              className="inline-flex items-center gap-1 text-primary hover:underline"
             >
               <NotebookPen className="w-3.5 h-3.5" />
               {session.sourceMeeting.kind === 'journal' ? 'From journal' : 'From meeting'}:{' '}
