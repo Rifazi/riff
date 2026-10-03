@@ -1,64 +1,99 @@
-'use client';
+"use client";
 
-import { Suspense, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Combine, MessageCircleQuestion, MoreHorizontal, Pencil, Sparkles, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { BackButton } from '@/components/BackButton';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Suspense, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Combine,
+  MessageCircleQuestion,
+  MoreHorizontal,
+  Pencil,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { BackButton } from "@/components/BackButton";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
-import { RequirementsButton, type RequirementsSource } from '@/components/DevSessions/RequirementsButton';
-import { journalApi, journalKeys, type NotebookEntry } from '@/lib/journal/api';
-import { coverColor, formatDate, NOTEBOOK_COLORS } from '@/lib/journal/format';
-import { JournalShell } from '@/components/Journal/JournalShell';
-import { EntryCard } from '@/components/Journal/EntryCard';
-import { NotebookSummaryPanel } from '@/components/Journal/NotebookSummaryPanel';
-import { AskPanel } from '@/components/Journal/AskPanel';
+} from "@/components/ui/dropdown-menu";
+import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/DevSessions/ConfirmDialog";
+import {
+  RequirementsButton,
+  type RequirementsSource,
+} from "@/components/DevSessions/RequirementsButton";
+import { journalApi, journalKeys, type NotebookEntry } from "@/lib/journal/api";
+import { coverColor, formatDate, NOTEBOOK_COLORS } from "@/lib/journal/format";
+import { JournalShell } from "@/components/Journal/JournalShell";
+import { EntryCard } from "@/components/Journal/EntryCard";
+import { NotebookSummaryPanel } from "@/components/Journal/NotebookSummaryPanel";
+import { AskPanel } from "@/components/Journal/AskPanel";
 
 function NotebookView() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const notebookId = useSearchParams().get('id') ?? '';
+  const notebookId = useSearchParams().get("id") ?? "";
 
   const { data, isLoading, error } = useQuery({
     queryKey: journalKeys.notebook(notebookId),
     queryFn: () => journalApi.getNotebook(notebookId),
     enabled: !!notebookId,
   });
-  const { data: allNotebooks = [] } = useQuery({ queryKey: journalKeys.notebooks, queryFn: journalApi.listNotebooks });
+  const { data: allNotebooks = [] } = useQuery({
+    queryKey: journalKeys.notebooks,
+    queryFn: journalApi.listNotebooks,
+  });
   const otherNotebooks = allNotebooks.filter((n) => n.id !== notebookId);
   const overview = allNotebooks.find((n) => n.id === notebookId);
 
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', color: '' });
+  const [form, setForm] = useState({ title: "", description: "", color: "" });
   const [merging, setMerging] = useState(false);
-  const [mergeTarget, setMergeTarget] = useState('');
+  const [mergeTarget, setMergeTarget] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movingEntry, setMovingEntry] = useState<NotebookEntry | null>(null);
-  const [moveTarget, setMoveTarget] = useState('');
-  const [removingEntry, setRemovingEntry] = useState<NotebookEntry | null>(null);
-  const journalTitle = data?.notebook.title ?? '';
+  const [moveTarget, setMoveTarget] = useState("");
+  const [removingEntry, setRemovingEntry] = useState<NotebookEntry | null>(
+    null,
+  );
+  const journalTitle = data?.notebook.title ?? "";
   const journalOverview = data?.notebook.summary_markdown ?? null;
   const requirementsSource = useMemo<RequirementsSource>(
-    () => ({ kind: 'journal', id: notebookId, title: journalTitle, getSummaryMarkdown: async () => journalOverview }),
+    () => ({
+      kind: "journal",
+      id: notebookId,
+      title: journalTitle,
+      getSummaryMarkdown: async () => journalOverview,
+    }),
     [notebookId, journalTitle, journalOverview],
   );
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: journalKeys.all });
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: journalKeys.all });
   const onError = (e: unknown) => toast.error(String(e));
 
   const updateMutation = useMutation({
@@ -82,16 +117,17 @@ function NotebookView() {
     mutationFn: () => journalApi.deleteNotebook(notebookId),
     onSuccess: () => {
       invalidate();
-      router.push('/journal');
+      router.push("/journal");
     },
     onError,
   });
   const moveMutation = useMutation({
-    mutationFn: () => journalApi.fileEntry(movingEntry!.id, { notebookId: moveTarget }),
+    mutationFn: () =>
+      journalApi.fileEntry(movingEntry!.id, { notebookId: moveTarget }),
     onSuccess: () => {
       invalidate();
       setMovingEntry(null);
-      toast.success('Note moved');
+      toast.success("Note moved");
     },
     onError,
   });
@@ -118,13 +154,17 @@ function NotebookView() {
     return [...byDay.entries()];
   }, [data?.entries]);
 
-  if (!notebookId) return <div className="p-8 text-sm text-gray-500">No notebook selected.</div>;
-  if (isLoading) return <div className="p-8 text-sm text-gray-500">Loading…</div>;
+  if (!notebookId)
+    return (
+      <div className="p-8 text-sm text-gray-500">No notebook selected.</div>
+    );
+  if (isLoading)
+    return <div className="p-8 text-sm text-gray-500">Loading…</div>;
   if (error || !data) {
     return (
-      <div className="p-8 text-sm text-red-600">
-        {String(error ?? 'Journal not found')}{' '}
-        <Link href="/journal" className="text-indigo-600 underline">
+      <div className="p-8 text-sm text-destructive">
+        {String(error ?? "Journal not found")}{" "}
+        <Link href="/journal" className="underline">
           Back to journals
         </Link>
       </div>
@@ -147,36 +187,54 @@ function NotebookView() {
       subtitle={
         <>
           {notebook.description && <span>{notebook.description} · </span>}
-          {entries.length} {entries.length === 1 ? 'note' : 'notes'} from {meetingCount} {meetingCount === 1 ? 'meeting' : 'meetings'}
+          {entries.length} {entries.length === 1 ? "note" : "notes"} from{" "}
+          {meetingCount} {meetingCount === 1 ? "meeting" : "meetings"}
         </>
       }
       actions={
         <>
-        <RequirementsButton source={requirementsSource} disabled={entries.length === 0} />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" aria-label="Journal actions">
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onClick={() => {
-                setForm({ title: notebook.title, description: notebook.description ?? '', color: notebook.color });
-                setEditing(true);
-              }}
-            >
-              <Pencil className="mr-2 h-4 w-4" /> Edit journal
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={otherNotebooks.length === 0} onClick={() => setMerging(true)}>
-              <Combine className="mr-2 h-4 w-4" /> Merge into another journal
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setConfirmDelete(true)} className="text-red-600 focus:text-red-600">
-              <Trash2 className="mr-2 h-4 w-4" /> Delete journal
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          <RequirementsButton
+            source={requirementsSource}
+            disabled={entries.length === 0}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Journal actions"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => {
+                  setForm({
+                    title: notebook.title,
+                    description: notebook.description ?? "",
+                    color: notebook.color,
+                  });
+                  setEditing(true);
+                }}
+              >
+                <Pencil className="mr-2 h-4 w-4" /> Edit journal
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={otherNotebooks.length === 0}
+                onClick={() => setMerging(true)}
+              >
+                <Combine className="mr-2 h-4 w-4" /> Merge into another journal
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setConfirmDelete(true)}
+                className="text-red-600 focus:text-red-600"
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete journal
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </>
       }
     >
@@ -184,9 +242,10 @@ function NotebookView() {
         {/* Notes timeline */}
         <div className="min-w-0 space-y-8">
           {entries.length === 0 && (
-            <div className="rounded-xl border border-dashed border-stone-300 bg-white py-12 text-center text-sm text-gray-500">
-              No notes yet. Parts of meetings that discuss this topic will be filed here.
-            </div>
+            <Card className="border-dashed py-12 text-center text-sm text-muted-foreground shadow-none">
+              No notes yet. Parts of meetings that discuss this topic will be
+              filed here.
+            </Card>
           )}
           {groups.map(([day, dayEntries]) => (
             <section key={day}>
@@ -200,7 +259,7 @@ function NotebookView() {
                     key={entry.id}
                     entry={entry}
                     onMove={() => {
-                      setMoveTarget('');
+                      setMoveTarget("");
                       setMovingEntry(entry);
                     }}
                     onRefile={() => {
@@ -217,22 +276,41 @@ function NotebookView() {
 
         {/* Summary + Ask */}
         <aside className="lg:sticky lg:top-0 lg:self-start">
-          <Tabs defaultValue="summary" className="flex h-[calc(100vh-11rem)] min-h-[28rem] flex-col rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="summary">
-                <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Overview
-              </TabsTrigger>
-              <TabsTrigger value="ask">
-                <MessageCircleQuestion className="mr-1.5 h-3.5 w-3.5" /> Ask
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="summary" className="mt-4 min-h-0 flex-1 overflow-y-auto custom-scrollbar data-[state=inactive]:hidden">
-              <NotebookSummaryPanel notebook={notebook} hasEntries={entries.length > 0} stale={!!overview?.summary_stale} />
-            </TabsContent>
-            <TabsContent value="ask" forceMount className="mt-4 min-h-0 flex-1 data-[state=inactive]:hidden">
-              <AskPanel notebookId={notebook.id} placeholder={`Ask about ${notebook.title}…`} />
-            </TabsContent>
-          </Tabs>
+          <Card className="flex h-[calc(100vh-11rem)] min-h-[28rem] flex-col p-4">
+            <Tabs
+              defaultValue="summary"
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="summary">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Overview
+                </TabsTrigger>
+                <TabsTrigger value="ask">
+                  <MessageCircleQuestion className="mr-1.5 h-3.5 w-3.5" /> Ask
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent
+                value="summary"
+                className="mt-4 min-h-0 flex-1 overflow-y-auto custom-scrollbar data-[state=inactive]:hidden"
+              >
+                <NotebookSummaryPanel
+                  notebook={notebook}
+                  hasEntries={entries.length > 0}
+                  stale={!!overview?.summary_stale}
+                />
+              </TabsContent>
+              <TabsContent
+                value="ask"
+                forceMount
+                className="mt-4 min-h-0 flex-1 data-[state=inactive]:hidden"
+              >
+                <AskPanel
+                  notebookId={notebook.id}
+                  placeholder={`Ask about ${notebook.title}…`}
+                />
+              </TabsContent>
+            </Tabs>
+          </Card>
         </aside>
       </div>
 
@@ -241,13 +319,21 @@ function NotebookView() {
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle>Edit journal</DialogTitle>
-            <DialogDescription>The description tells Riff which future discussions belong here.</DialogDescription>
+            <DialogDescription>
+              The description tells Riff which future discussions belong here.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Title" />
+            <Input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Title"
+            />
             <Textarea
               value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
               placeholder="What belongs in this journal?"
               rows={3}
             />
@@ -258,7 +344,7 @@ function NotebookView() {
                   type="button"
                   aria-label={name}
                   onClick={() => setForm({ ...form, color: name })}
-                  className={`h-7 w-7 rounded-full ${swatch.spine} ${form.color === name ? 'ring-2 ring-offset-2 ring-gray-900' : ''}`}
+                  className={`h-7 w-7 rounded-full ${swatch.spine} ${form.color === name ? "ring-2 ring-offset-2 ring-gray-900" : ""}`}
                 />
               ))}
             </div>
@@ -267,7 +353,11 @@ function NotebookView() {
             <Button variant="outline" onClick={() => setEditing(false)}>
               Cancel
             </Button>
-            <Button variant="blue" disabled={!form.title.trim() || updateMutation.isPending} onClick={() => updateMutation.mutate()}>
+            <Button
+              variant="default"
+              disabled={!form.title.trim() || updateMutation.isPending}
+              onClick={() => updateMutation.mutate()}
+            >
               Save
             </Button>
           </DialogFooter>
@@ -279,14 +369,25 @@ function NotebookView() {
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle>Merge “{notebook.title}”</DialogTitle>
-            <DialogDescription>Its notes move into the journal you pick, and this journal is removed.</DialogDescription>
+            <DialogDescription>
+              Its notes move into the journal you pick, and this journal is
+              removed.
+            </DialogDescription>
           </DialogHeader>
-          <NotebookSelect value={mergeTarget} onChange={setMergeTarget} notebooks={otherNotebooks} />
+          <NotebookSelect
+            value={mergeTarget}
+            onChange={setMergeTarget}
+            notebooks={otherNotebooks}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setMerging(false)}>
               Cancel
             </Button>
-            <Button variant="blue" disabled={!mergeTarget || mergeMutation.isPending} onClick={() => mergeMutation.mutate()}>
+            <Button
+              variant="default"
+              disabled={!mergeTarget || mergeMutation.isPending}
+              onClick={() => mergeMutation.mutate()}
+            >
               Merge
             </Button>
           </DialogFooter>
@@ -294,24 +395,36 @@ function NotebookView() {
       </Dialog>
 
       {/* Move note */}
-      <Dialog open={!!movingEntry} onOpenChange={(open) => !open && setMovingEntry(null)}>
+      <Dialog
+        open={!!movingEntry}
+        onOpenChange={(open) => !open && setMovingEntry(null)}
+      >
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
             <DialogTitle>Move “{movingEntry?.title}”</DialogTitle>
-            <DialogDescription>Pick the journal this note belongs in.</DialogDescription>
+            <DialogDescription>
+              Pick the journal this note belongs in.
+            </DialogDescription>
           </DialogHeader>
-          <NotebookSelect value={moveTarget} onChange={setMoveTarget} notebooks={otherNotebooks} />
+          <NotebookSelect
+            value={moveTarget}
+            onChange={setMoveTarget}
+            notebooks={otherNotebooks}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setMovingEntry(null)}>
               Cancel
             </Button>
-            <Button variant="blue" disabled={!moveTarget || moveMutation.isPending} onClick={() => moveMutation.mutate()}>
+            <Button
+              variant="default"
+              disabled={!moveTarget || moveMutation.isPending}
+              onClick={() => moveMutation.mutate()}
+            >
               Move
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
 
       <ConfirmDialog
         open={confirmDelete}
@@ -328,7 +441,9 @@ function NotebookView() {
         description="The meeting itself is kept. Re-filing the meeting can bring the note back."
         confirmLabel="Remove note"
         destructive
-        onConfirm={() => removingEntry && removeMutation.mutate(removingEntry.id)}
+        onConfirm={() =>
+          removingEntry && removeMutation.mutate(removingEntry.id)
+        }
         onCancel={() => setRemovingEntry(null)}
       />
     </JournalShell>
@@ -362,7 +477,9 @@ function NotebookSelect({
 
 export default function NotebookPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-sm text-gray-500">Loading…</div>}>
+    <Suspense
+      fallback={<div className="p-8 text-sm text-gray-500">Loading…</div>}
+    >
       <NotebookView />
     </Suspense>
   );
