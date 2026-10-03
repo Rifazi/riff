@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { journalApi, journalKeys, type MeetingJournalTag } from '@/lib/journal/api';
 import { coverColor } from '@/lib/journal/format';
+import { MEETING_KINDS, useSearch } from '@/lib/search/api';
+import { SearchHitLines } from '@/components/Search/SearchHitText';
 import Analytics from '@/lib/analytics';
 
 export default function MeetingsPage() {
@@ -24,9 +26,6 @@ export default function MeetingsPage() {
     setMeetings,
     currentMeeting,
     setCurrentMeeting,
-    searchTranscripts,
-    searchResults,
-    isSearching,
     handleRecordingToggle,
   } = useSidebar();
   const { isRecording } = useRecordingState();
@@ -46,18 +45,14 @@ export default function MeetingsPage() {
   const [editing, setEditing] = useState<CurrentMeeting | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
 
-  const handleSearchChange = async (value: string) => {
-    setQuery(value);
-    if (value.trim()) await searchTranscripts(value);
-  };
-
-  // Title matches plus meetings whose transcript matched the search.
-  const matchesById = useMemo(() => new Map(searchResults.map((r) => [r.id, r])), [searchResults]);
+  // Titles, transcripts and summaries, best match first, one result per meeting.
+  const { hits, isSearching } = useSearch(query, MEETING_KINDS);
+  const matchesById = useMemo(() => new Map(hits.map((h) => [h.group, h])), [hits]);
   const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return meetings;
-    return meetings.filter((m) => matchesById.has(m.id) || m.title.toLowerCase().includes(q));
-  }, [meetings, query, matchesById]);
+    if (!query.trim()) return meetings;
+    const byId = new Map(meetings.map((m) => [m.id, m]));
+    return hits.map((h) => byId.get(h.group)).filter((m): m is CurrentMeeting => Boolean(m));
+  }, [meetings, query, hits]);
 
   const openMeeting = (meeting: CurrentMeeting) => {
     setCurrentMeeting({ id: meeting.id, title: meeting.title });
@@ -136,13 +131,13 @@ export default function MeetingsPage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <Input
                 value={query}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                placeholder="Search meeting content…"
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search titles, transcripts and summaries…"
                 className="bg-white pl-9 pr-9"
               />
               {query && (
                 <button
-                  onClick={() => handleSearchChange('')}
+                  onClick={() => setQuery('')}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   aria-label="Clear search"
                 >
@@ -172,9 +167,7 @@ export default function MeetingsPage() {
                 <div
                   key={meeting.id}
                   onClick={() => openMeeting(meeting)}
-                  className={`group flex items-center gap-4 rounded-lg border px-4 py-3 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm ${
-                    match ? 'bg-yellow-50 border-yellow-200' : 'bg-white border-gray-200'
-                  }`}
+                  className="group flex items-center gap-4 rounded-lg border border-gray-200 bg-white px-4 py-3 cursor-pointer transition-all hover:border-blue-300 hover:shadow-sm"
                 >
                   <div className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-gray-100">
                     <File className="w-4 h-4 text-gray-600" />
@@ -185,11 +178,7 @@ export default function MeetingsPage() {
                       tags={journalTagsByMeeting.get(meeting.id)}
                       needsInput={reviewMeetingIds.has(meeting.id)}
                     />
-                    {match && (
-                      <div className="mt-1 text-xs text-gray-500 line-clamp-2">
-                        <span className="font-medium text-yellow-600">Match:</span> {match.matchContext}
-                      </div>
-                    )}
+                    {match && <SearchHitLines hit={match} />}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button

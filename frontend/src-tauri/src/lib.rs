@@ -52,6 +52,7 @@ pub mod groq;
 pub mod journal;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod search;
 pub mod state;
 pub mod summary;
 pub mod tray;
@@ -480,6 +481,7 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(search::SearchState::default())
         .setup(|_app| {
             #[cfg(target_os = "windows")]
             match _app.path().resolve(
@@ -615,6 +617,9 @@ pub fn run() {
             })
             .expect("Failed to initialize database");
 
+            // Search index over meetings and journals (keeps itself in sync)
+            search::start(_app.handle());
+
             // Initialize bundled templates directory for dynamic template discovery
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
@@ -747,7 +752,6 @@ pub fn run() {
             anthropic::anthropic::get_anthropic_models,
             groq::groq::get_groq_models,
             api::api_get_meetings,
-            api::api_search_transcripts,
             api::api_get_profile,
             api::api_save_profile,
             api::api_update_profile,
@@ -801,6 +805,11 @@ pub fn run() {
             journal::commands::journal_get_meeting_entries,
             journal::commands::journal_meeting_tags,
             journal::commands::journal_requirements_brief,
+            search::commands::search,
+            search::commands::search_status,
+            search::commands::search_download_model,
+            search::commands::search_remove_model,
+            search::commands::search_rebuild_index,
             // Template commands
             summary::template_commands::api_list_templates,
             summary::template_commands::api_get_template_details,

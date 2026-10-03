@@ -1,11 +1,10 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import type { IntegrationDoc } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
@@ -39,14 +38,7 @@ function IntegrationsView() {
           {AGENT_PERSONAS.coding.name} documents a new one there, it shows up here automatically.
         </>
       }
-      actions={
-        <Button variant="outline" asChild>
-          <Link href="/dev-sessions/apps">
-            <ArrowLeft />
-            Apps
-          </Link>
-        </Button>
-      }
+      back={<BackButton fallbackHref="/dev-sessions/apps" />}
     >
       {isLoading && <LoadingState />}
       {!isLoading && integrations?.length === 0 && <EmptyState>No documented integrations found under docs/transmission/.</EmptyState>}

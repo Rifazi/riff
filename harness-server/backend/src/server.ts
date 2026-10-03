@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { config } from './config.js';
 import { listApps } from './apps/apps-store.js';
 import { buildDocsIndex, stopAllWatching, watchDocsForChanges } from './repo/docs-index.js';
+import { stopSearchEngine } from './search/search-engine.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerRequirementsRoutes } from './routes/requirements.js';
 import { registerPlanRoutes } from './routes/plan.js';
@@ -80,6 +81,7 @@ async function main() {
     const force = setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS);
     force.unref();
     stopLocalModel();
+    stopSearchEngine();
     Promise.allSettled([app.close(), stopAllWatching()]).finally(() => process.exit(0));
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));

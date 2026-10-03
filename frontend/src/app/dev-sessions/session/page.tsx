@@ -4,8 +4,8 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, NotebookPen } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { NotebookPen } from 'lucide-react';
+import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
 import { ErrorText, LoadingState, PageShell, Pill } from '@/components/DevSessions/PageShell';
@@ -33,18 +33,11 @@ function SessionView() {
     enabled: Boolean(sessionId),
   });
 
-  const back = (
-    <Button variant="outline" asChild>
-      <Link href={SESSIONS_HREF}>
-        <ArrowLeft />
-        All sessions
-      </Link>
-    </Button>
-  );
+  const back = <BackButton fallbackHref={SESSIONS_HREF} />;
 
   if (!sessionId || error || !session) {
     return (
-      <PageShell title="Dev Session" actions={back}>
+      <PageShell title="Dev Session" back={back}>
         {!sessionId ? <ErrorText>No session selected.</ErrorText> : error ? <ErrorText>{(error as Error).message}</ErrorText> : <LoadingState />}
       </PageShell>
     );
@@ -81,12 +74,8 @@ function SessionView() {
           )}
         </span>
       }
-      actions={
-        <>
-          <SessionReferenceDocsButton session={session} />
-          {back}
-        </>
-      }
+      back={back}
+      actions={<SessionReferenceDocsButton session={session} />}
     >
       <div className="flex-shrink-0 mb-3">
         <StageStepper session={session} current={stage} />

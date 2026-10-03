@@ -2,11 +2,9 @@
 
 import { Suspense } from 'react';
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { BackButton } from '@/components/BackButton';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
 import { LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import 'swagger-ui-react/swagger-ui.css';
@@ -27,14 +25,7 @@ function ApiSpecView() {
           Read from the app's generated <code>openapi/api.json</code> — try requests against it directly below.
         </>
       }
-      actions={
-        <Button variant="outline" asChild>
-          <Link href="/dev-sessions/apps">
-            <ArrowLeft />
-            Apps
-          </Link>
-        </Button>
-      }
+      back={<BackButton fallbackHref="/dev-sessions/apps" />}
     >
       {appId && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">

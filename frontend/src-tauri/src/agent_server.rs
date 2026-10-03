@@ -191,7 +191,7 @@ fn ensure_dependencies(server_dir: &Path, node: &Path, log: &File) -> Result<(),
     }
 }
 
-fn spawn_server(server_dir: &Path, node: &Path, log: &File) -> Result<Child, String> {
+fn spawn_server(server_dir: &Path, node: &Path, log: &File, models_dir: Option<PathBuf>) -> Result<Child, String> {
     // `--import tsx` keeps it a single process (the tsx CLI would fork a
     // child), so killing this handle on exit stops the whole server.
     let mut cmd = Command::new(node);
@@ -205,6 +205,14 @@ fn spawn_server(server_dir: &Path, node: &Path, log: &File) -> Result<Child, Str
         .stderr(log.try_clone().map_err(|e| e.to_string())?);
     if let Some(path) = path_with_node(node) {
         cmd.env("PATH", path);
+    }
+    // search_docs runs this binary's search engine (`--search-stdio`), the
+    // same one behind the app's own search, with the same embedding model.
+    if let Ok(exe) = std::env::current_exe() {
+        cmd.env("RIFF_SEARCH_BIN", exe);
+    }
+    if let Some(dir) = models_dir {
+        cmd.env("RIFF_EMBEDDING_MODELS_DIR", dir);
     }
     // Own process group, so stop() can signal everything the server spawned.
     #[cfg(unix)]
@@ -273,7 +281,7 @@ fn start_blocking<R: Runtime>(app: &AppHandle<R>) {
     if SHUTTING_DOWN.load(Ordering::SeqCst) {
         return;
     }
-    let child = match spawn_server(&server_dir, &node, &log) {
+    let child = match spawn_server(&server_dir, &node, &log, crate::search::embedding_models_dir(app)) {
         Ok(child) => child,
         Err(message) => return set_status(app, with_paths(AgentServerStatus::new("failed", Some(message)))),
     };

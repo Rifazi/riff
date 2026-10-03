@@ -7,17 +7,20 @@ interface PageShellProps {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
+  /** Shown above the title, usually a <BackButton>. */
+  back?: React.ReactNode;
   children: React.ReactNode;
   /** Full-height content (e.g. chat + document split) instead of a scrolling column. */
   fill?: boolean;
 }
 
-export function PageShell({ title, subtitle, actions, children, fill }: PageShellProps) {
+export function PageShell({ title, subtitle, actions, back, children, fill }: PageShellProps) {
   return (
     <div className="h-screen bg-gray-50 flex flex-col min-w-0">
       <div className="flex-shrink-0 border-b border-gray-200 bg-gray-50">
         <div className="px-8 py-5 flex items-center justify-between gap-4">
           <div className="min-w-0">
+            {back && <div className="mb-1">{back}</div>}
             <h1 className="text-2xl font-bold text-gray-900 truncate">{title}</h1>
             {subtitle && <div className="mt-1 text-sm text-gray-500">{subtitle}</div>}
           </div>

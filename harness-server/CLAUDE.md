@@ -538,6 +538,30 @@ below) — never inside the target repo.
      and related-tests-only runs were deferred until it shows check output
      matters.
 
+24. User asked for search to be done the same way everywhere, with search by
+   meaning. `search_docs` no longer scores sections itself
+   (`scoreSections`/`searchDocs`/`searchReferenceDocs` are gone): it runs
+   Riff's search engine, the `riff-search` crate also behind the app's
+   meeting and journal search (root CLAUDE.md, "Search"), as a child
+   process: `search/search-engine.ts` spawns `$RIFF_SEARCH_BIN --search-stdio`
+   (Riff sets it to its own binary; otherwise `target/{release,debug}/riff-search`
+   or `riff` in this checkout) with `--index state/search.sqlite` and Riff's
+   embedding model dir, and talks JSON lines with request ids. Keyword
+   search is FTS5 with stemming; with Riff's embedding model downloaded,
+   it's fused with search by meaning, so a question finds the section
+   that answers it in other words. Docs and reference docs stay in memory
+   for `read_doc`; `toSearchDocuments` turns them into one search document
+   per file with a segment per section, so a hit's heading is exactly what
+   `read_doc` takes. Before each search, `syncScope` sends only documents
+   whose fingerprint changed (an unchanged scope costs nothing). Scopes:
+   `app:<id>:docs`, `reference:app:<id>`, `reference:session:<id>`; deleting
+   an app or session drops its scopes. The tool asks for 12 hits and shows
+   4, one per section. Without a built Riff the tool throws
+   `SearchUnavailableError`. Live-verified with a scratch app: meaning-only
+   questions ("how long does someone stay logged in" → Sessions), a session
+   reference doc, a keyword match, and nonsense returning nothing, at
+   4-13 ms per search.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -572,7 +596,8 @@ backend/src/
   repo/
     guardrails.ts             — assertPathAllowed(path, allowedRoots, repoRoot), shared path-allowlist used by every general-purpose file tool (not by the dedicated requirements/QA-report writers, which write directly via fs and bypass this)
     git.ts                     — simple-git wrapper, every export takes repoRoot: branch preconditions, commit, diff against master
-    docs-index.ts               — hand-rolled keyword search, per app (Map<appId, sections/indexedAt/watcher>) over <app.repoRoot>/docs/**/*.md (no flexsearch — its CJS/no-exports-map shape was an import-interop risk not worth taking; no embeddings — corpus is small)
+    docs-index.ts               — per app (Map<appId, sections/indexedAt/watcher>) sections of <app.repoRoot>/docs/**/*.md for read_doc, fed to Riff's search engine for search_docs (step 24)
+  search/search-engine.ts        — client for Riff's search engine (`riff --search-stdio`): syncScope by fingerprint, searchIndex
   routes/                       — one file per resource: sessions, requirements, plan, coding, qa, settings, apps (apps + their prompts/integrations/openapi/handbook), coordinator
 
 frontend/src/

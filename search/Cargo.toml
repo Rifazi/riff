@@ -1,0 +1,31 @@
+[package]
+name = "riff-search"
+version = "0.1.0"
+edition = "2021"
+description = "Riff's on-device search: SQLite FTS5 keyword search plus local embeddings, fused by reciprocal rank"
+
+[lib]
+name = "riff_search"
+path = "src/lib.rs"
+
+[[bin]]
+name = "riff-search"
+path = "src/bin/riff-search.rs"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.32.0", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+# Same version as the app's Parakeet engine, so the two share one ONNX Runtime.
+ort = { version = "2.0.0-rc.10" }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ort = { version = "2.0.0-rc.10", features = ["load-dynamic"] }
+
+[dev-dependencies]
+tempfile = "3.3.0"

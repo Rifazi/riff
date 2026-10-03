@@ -4,7 +4,6 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
-import type { MeetingRequirementsContext } from './CreateRequirementsDialog';
 import { useMemo } from 'react';
 
 interface TranscriptPanelProps {
@@ -30,8 +29,6 @@ interface TranscriptPanelProps {
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
 
-  // Turning the transcript into Dev Sessions requirements
-  requirementsContext?: MeetingRequirementsContext;
 }
 
 export function TranscriptPanel({
@@ -52,7 +49,6 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
-  requirementsContext,
 }: TranscriptPanelProps) {
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -80,7 +76,6 @@ export function TranscriptPanel({
           meetingId={meetingId}
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
-          requirementsContext={requirementsContext}
         />
       </div>
 

@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { docsDirFor, type AppConfig } from '../apps/apps.js';
+import { fingerprint, forgetScope, syncScope, type SearchDocument } from '../search/search-engine.js';
 
 export interface DocSection {
   file: string; // repo-relative path, e.g. docs/ingestion/invoices.md
@@ -9,24 +10,14 @@ export interface DocSection {
   content: string;
 }
 
-export interface ScoredSection extends DocSection {
-  score: number;
-}
-
 // Per app, not global — each app's docs index is built and searched
 // independently so search_docs never mixes sections from two different
-// target repos.
+// target repos. The sections serve read_doc; searching them is Riff's
+// search engine's job (search/search-engine.ts), fed from searchDocsByApp.
 const sectionsByApp = new Map<string, DocSection[]>();
+const searchDocsByApp = new Map<string, SearchDocument[]>();
 const indexedAtByApp = new Map<string, number>();
 const watchersByApp = new Map<string, FSWatcher>();
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter((t) => t.length > 1);
-}
 
 export function splitIntoSections(relPath: string, markdown: string): DocSection[] {
   const lines = markdown.split('\n');
@@ -85,6 +76,7 @@ export async function buildDocsIndex(app: AppConfig): Promise<void> {
     nextSections.push(...splitIntoSections(relPath, content));
   }
   sectionsByApp.set(app.id, nextSections);
+  searchDocsByApp.set(app.id, toSearchDocuments(nextSections, 'doc'));
   indexedAtByApp.set(app.id, Date.now());
   // eslint-disable-next-line no-console
   console.log(`[docs-index] (${app.id}) indexed ${nextSections.length} sections from ${files.length} files`);
@@ -134,50 +126,37 @@ export async function stopAllWatching(): Promise<void> {
 export function removeIndex(appId: string): void {
   stopWatching(appId);
   sectionsByApp.delete(appId);
+  searchDocsByApp.delete(appId);
   indexedAtByApp.delete(appId);
+  forgetScope(docsSearchScope(appId));
 }
 
 export function getIndexedAt(appId: string): number {
   return indexedAtByApp.get(appId) ?? 0;
 }
 
-export function searchDocs(appId: string, query: string, k = 5): ScoredSection[] {
-  return scoreSections(sectionsByApp.get(appId) ?? [], query, k);
+export function docsSearchScope(appId: string): string {
+  return `app:${appId}:docs`;
 }
 
-// Shared with sessions/reference-docs.ts, which searches the human's
-// attached reference documents the same way.
-export function scoreSections(sections: DocSection[], query: string, k: number): ScoredSection[] {
-  const queryTerms = tokenize(query);
-  if (queryTerms.length === 0) return [];
+/** Brings the search engine's copy of this app's docs up to date (cheap when nothing changed). */
+export function syncDocsSearch(appId: string): Promise<void> {
+  return syncScope(docsSearchScope(appId), searchDocsByApp.get(appId) ?? []);
+}
 
-  const scored: ScoredSection[] = sections.map((section) => {
-    const haystack = tokenize(`${section.heading} ${section.content}`);
-    const haystackSet = new Map<string, number>();
-    for (const term of haystack) {
-      haystackSet.set(term, (haystackSet.get(term) ?? 0) + 1);
-    }
-    // Length-normalize term-frequency so a single huge, unheaded section
-    // (e.g. a legacy dump with no ## headings) can't outscore a small,
-    // well-organized section just by sheer word volume.
-    const lengthNorm = Math.log2(haystack.length + 2);
-
-    let score = 0;
-    for (const term of queryTerms) {
-      for (const [word, count] of haystackSet) {
-        if (word === term) score += (count * 3) / lengthNorm;
-        else if (word.includes(term) || term.includes(word)) score += count / lengthNorm;
-      }
-      if (section.heading.toLowerCase().includes(term)) score += 5;
-    }
-
-    return { ...section, score };
-  });
-
-  return scored
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k);
+// One search document per file; each section is a segment, so a hit's
+// heading is exactly what read_doc takes. Shared with
+// sessions/reference-docs.ts.
+export function toSearchDocuments(sections: DocSection[], kind: string): SearchDocument[] {
+  const byFile = new Map<string, DocSection[]>();
+  for (const section of sections) byFile.set(section.file, [...(byFile.get(section.file) ?? []), section]);
+  return [...byFile].map(([file, fileSections]) => ({
+    key: file,
+    kind,
+    title: file,
+    fingerprint: fingerprint(JSON.stringify(fileSections)),
+    segments: fileSections.map((s) => ({ text: s.content, heading: s.heading })),
+  }));
 }
 
 /**

@@ -6,18 +6,18 @@ interface JournalShellProps {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
-  /** Shown above the title, e.g. a back link. */
-  eyebrow?: React.ReactNode;
+  /** Shown above the title, usually a <BackButton>. */
+  back?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export function JournalShell({ title, subtitle, actions, eyebrow, children }: JournalShellProps) {
+export function JournalShell({ title, subtitle, actions, back, children }: JournalShellProps) {
   return (
     <div className="h-screen bg-stone-50 flex flex-col min-w-0">
       <div className="flex-shrink-0 border-b border-stone-200 bg-stone-50">
         <div className="px-8 py-5 flex items-center justify-between gap-4">
           <div className="min-w-0">
-            {eyebrow && <div className="mb-1 text-sm text-gray-500">{eyebrow}</div>}
+            {back && <div className="mb-1">{back}</div>}
             <h1 className="text-2xl font-bold text-gray-900 truncate">{title}</h1>
             {subtitle && <div className="mt-1 text-sm text-gray-500">{subtitle}</div>}
           </div>

@@ -9,7 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { journalApi, journalKeys, notebookHref } from '@/lib/journal/api';
+import { journalApi, journalKeys, notebookHref, type NotebookOverview } from '@/lib/journal/api';
+import { JOURNAL_KINDS, useSearch, type SearchHit } from '@/lib/search/api';
+import { SearchHitLines } from '@/components/Search/SearchHitText';
 import { JournalShell } from '@/components/Journal/JournalShell';
 import { NotebookCover } from '@/components/Journal/NotebookCover';
 import { FilingStatus } from '@/components/Journal/FilingStatus';
@@ -41,13 +43,16 @@ export default function JournalPage() {
     },
   });
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return notebooks;
-    return notebooks.filter((n) =>
-      [n.title, n.description ?? '', ...n.recent_entry_titles].some((text) => text.toLowerCase().includes(q)),
-    );
-  }, [notebooks, query]);
+  // Journals and their notes, best match first.
+  const { hits, isSearching } = useSearch(query, JOURNAL_KINDS);
+  const visible = useMemo((): { notebook: NotebookOverview; hit?: SearchHit }[] => {
+    if (!query.trim()) return notebooks.map((notebook) => ({ notebook }));
+    const byId = new Map(notebooks.map((n) => [n.id, n]));
+    return hits.flatMap((hit) => {
+      const notebook = byId.get(hit.group);
+      return notebook ? [{ notebook, hit }] : [];
+    });
+  }, [notebooks, query, hits]);
 
   const totalNotes = notebooks.reduce((sum, n) => sum + n.entry_count, 0);
 
@@ -79,7 +84,7 @@ export default function JournalPage() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find a journal…"
+            placeholder="Search journals and notes…"
             className="bg-white pl-9"
           />
         </div>
@@ -104,12 +109,15 @@ export default function JournalPage() {
 
       {visible.length > 0 && (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {visible.map((notebook) => (
-            <NotebookCover key={notebook.id} notebook={notebook} />
+          {visible.map(({ notebook, hit }) => (
+            <div key={notebook.id}>
+              <NotebookCover notebook={notebook} />
+              {hit && <SearchHitLines hit={hit} />}
+            </div>
           ))}
         </div>
       )}
-      {notebooks.length > 0 && visible.length === 0 && (
+      {notebooks.length > 0 && visible.length === 0 && !isSearching && (
         <div className="py-10 text-center text-sm text-gray-500">No journals match “{query}”.</div>
       )}
 

@@ -1,13 +1,15 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { readDocSection, searchDocs } from '../../repo/docs-index.js';
-import { readReferenceDoc, searchReferenceDocs } from '../../sessions/reference-docs.js';
+import { docsSearchScope, readDocSection, syncDocsSearch } from '../../repo/docs-index.js';
+import { readReferenceDoc, syncReferenceDocsSearch } from '../../sessions/reference-docs.js';
+import { searchIndex } from '../../search/search-engine.js';
 
 export const searchDocsSchema = z.object({
-  query: z.string().describe('Keywords to search for, e.g. "square d cash sale format"'),
+  query: z.string().describe('Keywords or a question, e.g. "square d cash sale format" or "how are invoices retried?"'),
 });
 export const searchDocsDescription =
-  'Full-text search over this repo\'s docs/ markdown files (architecture, ingestion, transmission, ops, API). ' +
+  'Search this repo\'s docs/ markdown files (architecture, ingestion, transmission, ops, API) by keyword and by ' +
+  'meaning, so a question finds the section that answers it even in other words. ' +
   'Also searches the reference documents the human attached (paths under reference/). ' +
   'Returns the top matching sections (truncated previews) with their file path and heading — use read_doc ' +
   'for a section\'s full text. Use this before proposing anything — this repo documents its own conventions ' +
@@ -28,14 +30,23 @@ export const readDocDescription =
 // sessionId adds that session's own reference documents to the app's.
 export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string }) {
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
-    const results = [
-      ...searchDocs(deps.appId, query, 4),
-      ...(await searchReferenceDocs(deps.appId, deps.sessionId, query, 4)),
-    ]
-      .sort((a, b) => b.score - a.score)
+    const [referenceScopes] = await Promise.all([
+      syncReferenceDocsSearch(deps.appId, deps.sessionId),
+      syncDocsSearch(deps.appId),
+    ]);
+    const hits = await searchIndex({ text: query, scopes: [docsSearchScope(deps.appId), ...referenceScopes], limit: 12 });
+    // Several chunks of one long section can match; show each section once.
+    const seen = new Set<string>();
+    const results = hits
+      .filter((h) => {
+        const id = `${h.key}\u0000${h.heading ?? ''}`;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
       .slice(0, 4);
     if (results.length === 0) return `No docs sections matched "${query}".`;
-    return results.map((r) => `### ${r.file} — ${r.heading}\n${r.content.slice(0, 700)}`).join('\n\n---\n\n');
+    return results.map((r) => `### ${r.key} — ${r.heading ?? r.title}\n${r.text.slice(0, 700)}`).join('\n\n---\n\n');
   };
 
   const readDocExecute = async ({ path: requestedPath, heading }: z.infer<typeof readDocSchema>): Promise<string> => {

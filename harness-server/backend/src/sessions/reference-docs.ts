@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import type { ParsedAttachment } from '../agents/attachments.js';
-import { scoreSections, selectSections, splitIntoSections, type DocSection, type ScoredSection } from '../repo/docs-index.js';
+import { selectSections, splitIntoSections, toSearchDocuments, type DocSection } from '../repo/docs-index.js';
+import { forgetScope, syncScope, type SearchDocument } from '../search/search-engine.js';
 import { mutateSession } from './session-store.js';
 import type { ReferenceDocsStage, SessionRecord } from './session.js';
 
@@ -112,7 +113,7 @@ export async function addReferenceDocs(scope: ReferenceScope, files: ParsedAttac
       added.push(doc);
     }
     await writeIndex(scope, docs);
-    sectionCache.delete(scopeKey(scope));
+    invalidate(scope);
     return added.map((d) => toReferenceDoc(scope, d));
   });
 }
@@ -124,14 +125,15 @@ export async function removeReferenceDoc(scope: ReferenceScope, id: string): Pro
     if (remaining.length === docs.length) return false;
     await fs.rm(path.join(scopeDir(scope), `${id}.md`), { force: true });
     await writeIndex(scope, remaining);
-    sectionCache.delete(scopeKey(scope));
+    invalidate(scope);
     return true;
   });
 }
 
 export async function removeAllReferenceDocs(scope: ReferenceScope): Promise<void> {
   await withLock(scope, () => fs.rm(scopeDir(scope), { recursive: true, force: true }));
-  sectionCache.delete(scopeKey(scope));
+  invalidate(scope);
+  forgetScope(searchScope(scope));
 }
 
 async function readDocText(scope: ReferenceScope, id: string): Promise<string> {
@@ -158,6 +160,16 @@ export async function shareWithApp(sessionId: string, appId: string, id: string)
 // ---- Search/read for search_docs and read_doc ----
 
 const sectionCache = new Map<string, DocSection[]>();
+const searchDocCache = new Map<string, SearchDocument[]>();
+
+function invalidate(scope: ReferenceScope): void {
+  sectionCache.delete(scopeKey(scope));
+  searchDocCache.delete(scopeKey(scope));
+}
+
+function searchScope(scope: ReferenceScope): string {
+  return `reference:${scopeKey(scope)}`;
+}
 
 function chunk(section: DocSection): DocSection[] {
   if (section.content.length <= MAX_SECTION_CHARS) return [section];
@@ -199,9 +211,24 @@ function scopesFor(appId: string, sessionId?: string): ReferenceScope[] {
   return [{ kind: 'app', appId }, ...(sessionId ? [{ kind: 'session' as const, sessionId }] : [])];
 }
 
-export async function searchReferenceDocs(appId: string, sessionId: string | undefined, query: string, k: number): Promise<ScoredSection[]> {
-  const sections = (await Promise.all(scopesFor(appId, sessionId).map(scopeSections))).flat();
-  return scoreSections(sections, query, k);
+/**
+ * Brings the search engine's copy of the reference docs this session can see
+ * up to date, and returns the search scopes holding them.
+ */
+export async function syncReferenceDocsSearch(appId: string, sessionId: string | undefined): Promise<string[]> {
+  const scopes = scopesFor(appId, sessionId);
+  await Promise.all(
+    scopes.map(async (scope) => {
+      const key = scopeKey(scope);
+      let docs = searchDocCache.get(key);
+      if (!docs) {
+        docs = toSearchDocuments(await scopeSections(scope), 'reference');
+        searchDocCache.set(key, docs);
+      }
+      await syncScope(searchScope(scope), docs);
+    })
+  );
+  return scopes.map(searchScope);
 }
 
 export async function readReferenceDoc(

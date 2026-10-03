@@ -4,9 +4,10 @@ import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, ClipboardList, Combine, MessageCircleQuestion, MoreHorizontal, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { Combine, MessageCircleQuestion, MoreHorizontal, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { BackButton } from '@/components/BackButton';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,12 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
-import {
-  CreateRequirementsDialog,
-  useMeetingSessions,
-  type MeetingRequirementsContext,
-} from '@/components/MeetingDetails/CreateRequirementsDialog';
-import { sessionHref, STAGE_LABEL, stageGroupFor } from '@/lib/dev-sessions/stage';
+import { RequirementsButton, type RequirementsSource } from '@/components/DevSessions/RequirementsButton';
 import { journalApi, journalKeys, type NotebookEntry } from '@/lib/journal/api';
 import { coverColor, formatDate, NOTEBOOK_COLORS } from '@/lib/journal/format';
 import { JournalShell } from '@/components/Journal/JournalShell';
@@ -55,31 +51,10 @@ function NotebookView() {
   const [movingEntry, setMovingEntry] = useState<NotebookEntry | null>(null);
   const [moveTarget, setMoveTarget] = useState('');
   const [removingEntry, setRemovingEntry] = useState<NotebookEntry | null>(null);
-  const [requirementsOpen, setRequirementsOpen] = useState(false);
-
-  // A journal about an app can go straight to Dev Sessions: requirements → plan → code → QA.
-  const { data: devSessions } = useMeetingSessions(notebookId || undefined);
-  const latestSession = devSessions?.[0] ?? null;
   const journalTitle = data?.notebook.title ?? '';
   const journalOverview = data?.notebook.summary_markdown ?? null;
-  const requirementsContext = useMemo<MeetingRequirementsContext>(
-    () => ({
-      kind: 'journal',
-      meetingId: notebookId,
-      meetingTitle: journalTitle,
-      getSummaryMarkdown: async () => journalOverview,
-      buildSource: async (summaryMarkdown) => {
-        const brief = await journalApi.requirementsBrief(notebookId);
-        return {
-          kind: 'journal',
-          meetingId: notebookId,
-          meetingTitle: journalTitle,
-          meetingDate: brief.covers,
-          transcript: brief.notes_markdown,
-          summary: summaryMarkdown,
-        };
-      },
-    }),
+  const requirementsSource = useMemo<RequirementsSource>(
+    () => ({ kind: 'journal', id: notebookId, title: journalTitle, getSummaryMarkdown: async () => journalOverview }),
     [notebookId, journalTitle, journalOverview],
   );
 
@@ -162,11 +137,7 @@ function NotebookView() {
 
   return (
     <JournalShell
-      eyebrow={
-        <Link href="/journal" className="inline-flex items-center gap-1 hover:text-gray-800">
-          <ArrowLeft className="h-3.5 w-3.5" /> Journals
-        </Link>
-      }
+      back={<BackButton fallbackHref="/journal" />}
       title={
         <span className="flex items-center gap-3">
           <span className={`inline-block h-7 w-2 rounded-sm ${color.spine}`} />
@@ -181,24 +152,7 @@ function NotebookView() {
       }
       actions={
         <>
-        {notebook.is_software && latestSession && (
-          <Button size="sm" className="bg-purple-600 text-white hover:bg-purple-700" asChild>
-            <Link href={sessionHref(latestSession.id, stageGroupFor(latestSession))}>
-              Dev session: {STAGE_LABEL[latestSession.stage] ?? latestSession.stage} <ArrowRight />
-            </Link>
-          </Button>
-        )}
-        {notebook.is_software && !latestSession && (
-          <Button
-            size="sm"
-            className="bg-purple-600 text-white hover:bg-purple-700"
-            disabled={entries.length === 0}
-            onClick={() => setRequirementsOpen(true)}
-            title="Turn this journal into requirements, then plan, code and QA it"
-          >
-            <ClipboardList /> Create requirements
-          </Button>
-        )}
+        <RequirementsButton source={requirementsSource} disabled={entries.length === 0} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="icon" aria-label="Journal actions">
@@ -213,9 +167,6 @@ function NotebookView() {
               }}
             >
               <Pencil className="mr-2 h-4 w-4" /> Edit journal
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={entries.length === 0} onClick={() => setRequirementsOpen(true)}>
-              <ClipboardList className="mr-2 h-4 w-4" /> {latestSession ? 'Start another dev session…' : 'Create requirements…'}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={otherNotebooks.length === 0} onClick={() => setMerging(true)}>
               <Combine className="mr-2 h-4 w-4" /> Merge into another journal
@@ -361,7 +312,6 @@ function NotebookView() {
         </DialogContent>
       </Dialog>
 
-      <CreateRequirementsDialog open={requirementsOpen} onOpenChange={setRequirementsOpen} context={requirementsContext} />
 
       <ConfirmDialog
         open={confirmDelete}

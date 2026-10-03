@@ -1,11 +1,11 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Paintbrush, RefreshCw, RotateCcw } from 'lucide-react';
+import { Paintbrush, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import type { ThemeApplyResult, ThemeDraft } from '@/lib/dev-sessions/types';
@@ -65,14 +65,7 @@ function ThemeView() {
           {AGENT_PERSONAS.requirements.name} in a Dev Session to change the theme.
         </>
       }
-      actions={
-        <Button variant="outline" asChild>
-          <Link href="/dev-sessions/apps">
-            <ArrowLeft />
-            Apps
-          </Link>
-        </Button>
-      }
+      back={<BackButton fallbackHref="/dev-sessions/apps" />}
     >
       {isLoading && <LoadingState />}
       {!isLoading && !app && <EmptyState>App not found.</EmptyState>}

@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, CheckCircle2, ChevronDown, FileCode2, Loader2, Palette, Plug, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, CheckCircle2, ChevronDown, FileCode2, Loader2, Palette, Plug, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BackButton } from '@/components/BackButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
@@ -307,14 +308,7 @@ export default function AppsPage() {
     <PageShell
       title="Apps"
       subtitle="The repositories Dev Sessions can take through requirements → plan → coding → QA. Each session targets one app."
-      actions={
-        <Button variant="outline" asChild>
-          <Link href={SESSIONS_HREF}>
-            <ArrowLeft />
-            Dev Sessions
-          </Link>
-        </Button>
-      }
+      back={<BackButton fallbackHref={SESSIONS_HREF} />}
     >
       <div className="space-y-4">
         {isLoading && <LoadingState />}

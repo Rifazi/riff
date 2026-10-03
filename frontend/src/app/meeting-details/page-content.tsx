@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { useSearchParams } from 'next/navigation';
+import { BackButton } from '@/components/BackButton';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
@@ -19,8 +21,7 @@ import { useCopyOperations } from '@/hooks/meeting-details/useCopyOperations';
 import { useMeetingOperations } from '@/hooks/meeting-details/useMeetingOperations';
 import { useConfig } from '@/contexts/ConfigContext';
 import { hasVisibleSummaryContent } from '@/lib/summary-content';
-import type { MeetingRequirementsContext } from '@/components/MeetingDetails/CreateRequirementsDialog';
-import { MeetingPipelineBar } from '@/components/MeetingDetails/MeetingPipelineBar';
+import { RequirementsButton, type RequirementsSource } from '@/components/DevSessions/RequirementsButton';
 import { MeetingJournalStrip } from '@/components/MeetingDetails/MeetingJournalStrip';
 
 export default function PageContent({
@@ -73,6 +74,10 @@ export default function PageContent({
 
   // Sidebar context
   const { serverAddress } = useSidebar();
+
+  // A just-recorded or imported meeting goes back to the meetings list, not the recorder.
+  const source = useSearchParams().get('source');
+  const fromRecordingFlow = source === 'recording' || source === 'import';
 
   // Get model config from ConfigContext
   const { modelConfig, setModelConfig, isModelConfigLoading } = useConfig();
@@ -148,9 +153,10 @@ export default function PageContent({
   // Read lazily at click time so the latest edited summary is what gets sent.
   const aiSummaryRef = useRef(meetingData.aiSummary);
   aiSummaryRef.current = meetingData.aiSummary;
-  const requirementsContext = useMemo<MeetingRequirementsContext>(() => ({
-    meetingId: meeting.id,
-    meetingTitle: meetingData.meetingTitle || meeting.title,
+  const requirementsSource = useMemo<RequirementsSource>(() => ({
+    kind: 'meeting',
+    id: meeting.id,
+    title: meetingData.meetingTitle || meeting.title,
     meetingCreatedAt: meeting.created_at,
     getSummaryMarkdown: async () => {
       const summary = aiSummaryRef.current;
@@ -212,11 +218,17 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen min-w-0 bg-gray-50"
     >
+      <div className="flex-shrink-0 flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-2">
+        <BackButton fallbackHref="/meetings" preferFallback={fromRecordingFlow} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
+          {meetingData.meetingTitle || meeting.title}
+        </span>
+        <RequirementsButton
+          source={requirementsSource}
+          disabled={(totalCount ?? meetingData.transcripts.length) === 0}
+        />
+      </div>
       <MeetingJournalStrip meetingId={meeting.id} />
-      <MeetingPipelineBar
-        context={requirementsContext}
-        hasTranscript={(totalCount ?? meetingData.transcripts.length) > 0}
-      />
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <MeetingDetailsSplitView
           activeTab={activeTab}
@@ -243,7 +255,6 @@ export default function PageContent({
               meetingId={meeting.id}
               meetingFolderPath={meeting.folder_path}
               onRefetchTranscripts={onRefetchTranscripts}
-              requirementsContext={requirementsContext}
             />
           }
           summary={

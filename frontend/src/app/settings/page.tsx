@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ArrowLeft, Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Bot } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Bot, Search } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { motion } from 'framer-motion';
 import { TranscriptSettings } from '@/components/TranscriptSettings';
@@ -10,8 +9,10 @@ import { RecordingSettings } from '@/components/RecordingSettings';
 import { PreferenceSettings } from '@/components/PreferenceSettings';
 import { SummaryModelSettings } from '@/components/SummaryModelSettings';
 import { BetaSettings } from '@/components/BetaSettings';
+import { SearchSettings } from '@/components/SearchSettings';
 import { DevAgentSettings } from '@/components/DevSessions/DevAgentSettings';
 import { useConfig } from '@/contexts/ConfigContext';
+import { BackButton } from '@/components/BackButton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 // Tabs configuration (constant)
@@ -20,12 +21,12 @@ const TABS = [
   { value: 'recording', label: 'Recordings', icon: Mic },
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
+  { value: 'search', label: 'Search', icon: Search },
   { value: 'devAgents', label: 'Dev Agents', icon: Bot },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 
 export default function SettingsPage() {
-  const router = useRouter();
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
   // Animation state for tabs
@@ -75,16 +76,8 @@ export default function SettingsPage() {
       {/* Fixed Header */}
       <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-8 py-6">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span>Back</span>
-            </button>
-            <h1 className="text-3xl font-bold">Settings</h1>
-          </div>
+          <BackButton fallbackHref="/" className="mb-1" />
+          <h1 className="text-3xl font-bold">Settings</h1>
         </div>
       </div>
 
@@ -131,6 +124,9 @@ export default function SettingsPage() {
             </TabsContent>
             <TabsContent value="summaryModels">
               <SummaryModelSettings />
+            </TabsContent>
+            <TabsContent value="search">
+              <SearchSettings />
             </TabsContent>
             <TabsContent value="devAgents">
               <DevAgentSettings />

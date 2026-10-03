@@ -1,9 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { config } from '../config.js';
+import { riffDataDir, riffEnv as env, riffRoot } from '../riff-paths.js';
 
 // Riff's own built-in summary model (Qwen 3.5 via the llama-helper sidecar),
 // reused here for the plain prompt→text calls that don't need a frontier
@@ -22,17 +21,6 @@ const MODEL_FILES = [
 const IDLE_TIMEOUT_SECS = 300;
 const REQUEST_TIMEOUT_MS = 120_000;
 
-function env(name: string): string | undefined {
-  return process.env[`RIFF_${name}`] || process.env[`MEETILY_${name}`] || undefined;
-}
-
-function riffDataDir(): string {
-  const home = os.homedir();
-  if (process.platform === 'darwin') return path.join(home, 'Library/Application Support/com.rifaz.riff');
-  if (process.platform === 'win32') return path.join(process.env.APPDATA ?? path.join(home, 'AppData/Roaming'), 'com.rifaz.riff');
-  return path.join(process.env.XDG_DATA_HOME ?? path.join(home, '.local/share'), 'com.rifaz.riff');
-}
-
 function targetTriple(): string {
   const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
   if (process.platform === 'darwin') return `${arch}-apple-darwin`;
@@ -42,11 +30,10 @@ function targetTriple(): string {
 
 function resolveHelper(): string | null {
   const exe = process.platform === 'win32' ? '.exe' : '';
-  const riffRoot = path.resolve(config.harnessRoot, '..');
   const candidates = [
     env('LLAMA_HELPER'),
-    path.join(riffRoot, 'target/release', `llama-helper${exe}`),
-    path.join(riffRoot, 'frontend/src-tauri/binaries', `llama-helper-${targetTriple()}${exe}`),
+    path.join(riffRoot(), 'target/release', `llama-helper${exe}`),
+    path.join(riffRoot(), 'frontend/src-tauri/binaries', `llama-helper-${targetTriple()}${exe}`),
     process.platform === 'darwin' ? '/Applications/Riff.app/Contents/MacOS/llama-helper' : undefined,
   ];
   return candidates.find((p): p is string => Boolean(p && existsSync(p))) ?? null;

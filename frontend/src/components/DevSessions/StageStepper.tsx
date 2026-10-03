@@ -84,6 +84,7 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
           <Link
             key={group}
             href={sessionHref(session.id, group)}
+            replace
             className={`${base} ${
               isCurrent ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
             }`}
