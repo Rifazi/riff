@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Loader2, FolderOpen, Database, CheckCircle2, XCircle } from 'lucide-react';
 import { HomebrewDatabaseDetector } from './HomebrewDatabaseDetector';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 
 interface LegacyDatabaseImportProps {
   isOpen: boolean;
@@ -42,7 +44,9 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
         setDetectedPath(dbPath);
         setImportState('idle');
       } else {
-        setErrorMessage('No database found at selected location. Please select the Meetily folder, backend folder, or the database file directly.');
+        setErrorMessage(
+          'No database found at selected location. Please select the Meetily folder, backend folder, or the database file directly.',
+        );
         setDetectedPath(null);
         setImportState('error');
         setTimeout(() => setImportState('idle'), 3000);
@@ -127,22 +131,15 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
 
         <div className="space-y-6 py-4">
           {/* Homebrew Database Auto-Detection */}
-          <HomebrewDatabaseDetector 
-            onImportSuccess={handleHomebrewImportSuccess}
-            onDecline={handleHomebrewDecline}
-          />
+          <HomebrewDatabaseDetector onImportSuccess={handleHomebrewImportSuccess} onDecline={handleHomebrewDecline} />
 
           {/* Browse Section */}
           <div className="space-y-3">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Select your previous Meetily folder, backend directory, or database file:
             </p>
 
-            <button
-              onClick={handleBrowse}
-              disabled={isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
+            <Button onClick={handleBrowse} disabled={isLoading} size="lg" className="w-full gap-2 py-3">
               {importState === 'selecting' || importState === 'detecting' ? (
                 <>
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -154,40 +151,34 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
                   <span>Browse for Database</span>
                 </>
               )}
-            </button>
+            </Button>
           </div>
 
           {/* Detection Result */}
           {detectedPath && (
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-green-800">Database found!</p>
-                  <p className="text-xs text-green-700 mt-1 break-all">{detectedPath}</p>
-                </div>
-              </div>
-            </div>
+            <Alert variant="success">
+              <CheckCircle2 className="h-5 w-5" />
+              <AlertTitle>Database found!</AlertTitle>
+              <AlertDescription className="break-all">{detectedPath}</AlertDescription>
+            </Alert>
           )}
 
           {/* Error Message */}
           {importState === 'error' && errorMessage && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm text-red-800">{errorMessage}</p>
-                </div>
-              </div>
-            </div>
+            <Alert variant="destructive">
+              <XCircle className="h-5 w-5" />
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
           )}
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 pt-2">
-            <button
+            <Button
               onClick={handleImport}
               disabled={!canImport || isLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              variant="success"
+              size="lg"
+              className="w-full gap-2 py-3"
             >
               {importState === 'importing' ? (
                 <>
@@ -205,24 +196,26 @@ export function LegacyDatabaseImport({ isOpen, onComplete }: LegacyDatabaseImpor
                   <span>Import Database</span>
                 </>
               )}
-            </button>
+            </Button>
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
+                <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">or</span>
+                <span className="px-2 bg-background text-muted-foreground">or</span>
               </div>
             </div>
 
-            <button
+            <Button
               onClick={handleStartFresh}
               disabled={isLoading}
-              className="w-full px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
+              variant="outline"
+              size="lg"
+              className="w-full border-2 py-3"
             >
               Start Fresh (No Import)
-            </button>
+            </Button>
           </div>
         </div>
       </DialogContent>
