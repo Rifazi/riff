@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -35,11 +36,7 @@ interface BuiltInModelManagerProps {
   layout?: 'inline' | 'dialog';
 }
 
-export function BuiltInModelManager({
-  selectedModel,
-  onModelSelect,
-  layout = 'inline',
-}: BuiltInModelManagerProps) {
+export function BuiltInModelManager({ selectedModel, onModelSelect, layout = 'inline' }: BuiltInModelManagerProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
@@ -179,8 +176,8 @@ export function BuiltInModelManager({
                       progress: 0,
                     } as any,
                   }
-                : m
-            )
+                : m,
+            ),
           );
 
           // Don't show error toast here - DownloadProgressToast already handles it
@@ -268,9 +265,7 @@ export function BuiltInModelManager({
   if (hasFetched && models.length === 0) {
     return (
       <Alert>
-        <AlertDescription>
-          No models found. Download a model to get started with Built-in AI.
-        </AlertDescription>
+        <AlertDescription>No models found. Download a model to get started with Built-in AI.</AlertDescription>
       </Alert>
     );
   }
@@ -281,12 +276,7 @@ export function BuiltInModelManager({
         <h4 className="text-sm font-bold">Built-in AI Models</h4>
       </div>
 
-      <div
-        className={cn(
-          'grid gap-4',
-          layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2 pb-2'
-        )}
-      >
+      <div className={cn('grid gap-4', layout === 'dialog' && 'max-h-[50vh] overflow-y-auto pr-2 pb-2')}>
         {models.map((model) => {
           const progress = downloadProgress[model.name];
           const progressInfo = downloadProgressInfo[model.name];
@@ -300,14 +290,11 @@ export function BuiltInModelManager({
             <div
               key={model.name}
               className={cn(
-                'p-4 rounded-lg border transition-colors',
-                modelIsDownloading
-                  ? 'bg-white border-gray-200'
-                  : 'bg-card',
+                'p-4 rounded-lg border bg-card transition-colors',
                 selectedModel === model.name
-                  ? 'ring-2 ring-gray-800 border-gray-800'
-                  : 'border-gray-200 hover:border-gray-300',
-                isAvailable && !modelIsDownloading && 'cursor-pointer'
+                  ? 'ring-2 ring-primary border-primary'
+                  : 'border-border hover:border-primary/40',
+                isAvailable && !modelIsDownloading && 'cursor-pointer',
               )}
               onClick={() => {
                 if (isAvailable && !modelIsDownloading) {
@@ -315,88 +302,71 @@ export function BuiltInModelManager({
                 }
               }}
             >
-            <div className="space-y-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="min-w-0 break-words text-base font-bold leading-snug text-gray-900">{model.display_name || model.name}</span>
-                    {isAvailable && (
-                      <>
-                        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
-                          <span className="h-2 w-2 rounded-full bg-green-600"></span>
-                          Ready
-                        </span>
-                        {selectedModel === model.name && (
-                          <span className="shrink-0 rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                            Selected
+              <div className="space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="min-w-0 break-words text-base font-bold leading-snug text-foreground">
+                        {model.display_name || model.name}
+                      </span>
+                      {isAvailable && (
+                        <>
+                          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success">
+                            <span className="h-2 w-2 rounded-full bg-success"></span>
+                            Ready
                           </span>
-                        )}
-                      </>
-                    )}
-                    {isCorrupted && (
-                      <span className="flex shrink-0 items-center gap-1 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                        <BadgeAlert className="h-3 w-3" />
-                        Corrupted
-                      </span>
-                    )}
-                    {isError && (
-                      <span className="shrink-0 rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                        Error
-                      </span>
-                    )}
+                          {selectedModel === model.name && <Badge className="shrink-0">Selected</Badge>}
+                        </>
+                      )}
+                      {isCorrupted && (
+                        <Badge variant="destructive" className="shrink-0 gap-1">
+                          <BadgeAlert className="h-3 w-3" />
+                          Corrupted
+                        </Badge>
+                      )}
+                      {isError && (
+                        <Badge variant="destructive" className="shrink-0">
+                          Error
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:ml-4 sm:w-auto sm:justify-end">
-                  {/* Not Downloaded - Show Download button */}
-                  {isNotDownloaded && !modelIsDownloading && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="min-w-[100px]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        downloadModel(model.name);
-                      }}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download
-                    </Button>
-                  )}
-                  {/* Downloading - Show Cancel button */}
-                  {modelIsDownloading && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="min-w-[100px]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cancelDownload(model.name);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  {/* Error - Show Retry button */}
-                  {isError && !modelIsDownloading && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="min-w-[100px]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        downloadModel(model.name);
-                      }}
-                    >
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Retry
-                    </Button>
-                  )}
-                  {/* Corrupted - Show both Retry and Delete buttons */}
-                  {isCorrupted && !modelIsDownloading && (
-                    <>
+                  <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:ml-4 sm:w-auto sm:justify-end">
+                    {/* Not Downloaded - Show Download button */}
+                    {isNotDownloaded && !modelIsDownloading && (
                       <Button
                         variant="outline"
                         size="sm"
+                        className="min-w-[100px]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadModel(model.name);
+                        }}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Download
+                      </Button>
+                    )}
+                    {/* Downloading - Show Cancel button */}
+                    {modelIsDownloading && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="min-w-[100px]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cancelDownload(model.name);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    {/* Error - Show Retry button */}
+                    {isError && !modelIsDownloading && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="min-w-[100px]"
                         onClick={(e) => {
                           e.stopPropagation();
                           downloadModel(model.name);
@@ -405,82 +375,88 @@ export function BuiltInModelManager({
                         <RefreshCw className="mr-2 h-4 w-4" />
                         Retry
                       </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
+                    )}
+                    {/* Corrupted - Show both Retry and Delete buttons */}
+                    {isCorrupted && !modelIsDownloading && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadModel(model.name);
+                          }}
+                        >
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Retry
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteModel(model.name);
+                          }}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </Button>
+                      </>
+                    )}
+                    {/* Available - Show small trash icon (only if not currently selected) */}
+                    {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
+                      <button
+                        className="p-2 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-destructive"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteModel(model.name);
                         }}
+                        title="Delete model"
                       >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
-                      </Button>
-                    </>
-                  )}
-                  {/* Available - Show small trash icon (only if not currently selected) */}
-                  {isAvailable && !modelIsDownloading && selectedModel !== model.name && (
-                    <button
-                      className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-500 hover:text-red-600"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteModel(model.name);
-                      }}
-                      title="Delete model"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="text-sm text-gray-600">
-                {model.description && (
-                  <p className="mb-1">{model.description}</p>
-                )}
-                {(isError || isCorrupted) && (
-                  <p className="mb-1 text-xs text-red-600">
-                    {isError && typeof model.status === 'object' && 'Error' in model.status
-                      ? (model.status as any).Error
-                      : isCorrupted
-                      ? 'File is corrupted. Retry download or delete.'
-                      : 'An error occurred'}
-                  </p>
-                )}
-                <div className="text-xs text-gray-500">
-                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
-                </div>
+                <div className="text-sm text-muted-foreground">
+                  {model.description && <p className="mb-1">{model.description}</p>}
+                  {(isError || isCorrupted) && (
+                    <p className="mb-1 text-xs text-destructive">
+                      {isError && typeof model.status === 'object' && 'Error' in model.status
+                        ? (model.status as any).Error
+                        : isCorrupted
+                          ? 'File is corrupted. Retry download or delete.'
+                          : 'An error occurred'}
+                    </p>
+                  )}
+                  <div className="text-xs text-muted-foreground">
+                    <span>
+                      {formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Download progress bar */}
               {modelIsDownloading && progress !== undefined && (
-                <div className="mt-3 pt-3 border-t border-gray-200">
+                <div className="mt-3 pt-3 border-t border-border">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-900">Downloading...</span>
-                    <span className="text-sm font-semibold text-gray-900">
-                      {Math.round(progress)}%
-                    </span>
+                    <span className="text-sm font-medium text-foreground">Downloading...</span>
+                    <span className="text-sm font-semibold text-foreground">{Math.round(progress)}%</span>
                   </div>
-                  <div className="text-sm text-gray-600 mb-2">
+                  <div className="text-sm text-muted-foreground mb-2">
                     {progressInfo?.totalMb > 0 ? (
                       <>
                         {progressInfo.downloadedMb.toFixed(1)} MiB / {progressInfo.totalMb.toFixed(1)} MiB
                         {progressInfo.speedMbps > 0 && (
-                          <span className="ml-2 text-gray-500">
-                            ({progressInfo.speedMbps.toFixed(1)} MiB/s)
-                          </span>
+                          <span className="ml-2">({progressInfo.speedMbps.toFixed(1)} MiB/s)</span>
                         )}
                       </>
                     ) : (
                       <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)}</span>
                     )}
                   </div>
-                  <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-gray-800 to-gray-900 rounded-full transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
+                  <Progress value={progress} aria-label={`Downloading ${model.display_name}`} />
                 </div>
               )}
             </div>

@@ -8,6 +8,8 @@ const spinnerVariants = cva(
   {
     variants: {
       size: {
+        // A hairline ring, for spinners that sit inline with small text.
+        xs: "h-3 w-3 border",
         sm: "h-4 w-4",
         default: "h-6 w-6",
         lg: "h-10 w-10",

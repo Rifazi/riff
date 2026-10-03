@@ -1,7 +1,9 @@
 import React, { useContext, useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Info, Loader2, Copy, Check } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Spinner } from '@/components/ui/spinner';
+import { Info, Copy, Check } from 'lucide-react';
 import { AnalyticsContext } from './AnalyticsProvider';
 import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
@@ -53,7 +55,7 @@ export default function AnalyticsConsentSwitch() {
 
       // Track that user copied their ID
       await Analytics.track('user_id_copied', {
-        user_id: userId
+        user_id: userId,
       });
     } catch (error) {
       console.error('Failed to copy user ID:', error);
@@ -86,8 +88,8 @@ export default function AnalyticsConsentSwitch() {
       const store = await load('analytics.json', {
         autoSave: false,
         defaults: {
-          analyticsOptedIn: false
-        }
+          analyticsOptedIn: false,
+        },
       });
       await store.set('analyticsOptedIn', enabled);
       await store.set(ANALYTICS_DEFAULT_OFF_MIGRATION_KEY, true);
@@ -167,42 +169,37 @@ export default function AnalyticsConsentSwitch() {
     <>
       <div className="space-y-4">
         <div>
-          <h3 className="text-base font-semibold text-gray-800 mb-2">Usage Analytics</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no personal content is collected.
+          <h3 className="text-base font-semibold text-foreground mb-2">Usage Analytics</h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            Usage analytics is off by default. You can turn it on to share anonymous product and performance data; no
+            personal content is collected.
           </p>
         </div>
 
-        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="flex items-center justify-between p-3 bg-muted rounded-lg border border-border">
           <div>
-            <h4 className="font-semibold text-gray-800">Enable Analytics</h4>
-            <p className="text-sm text-gray-600">
+            <h4 className="font-semibold text-foreground">Enable Analytics</h4>
+            <p className="text-sm text-muted-foreground">
               {isProcessing ? 'Updating...' : 'Off unless you choose to enable it'}
             </p>
           </div>
           <div className="flex items-center gap-2 ml-4">
-            {isProcessing && (
-              <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-            )}
-            <Switch
-              checked={isAnalyticsOptedIn}
-              onCheckedChange={handleToggle}
-              disabled={isProcessing}
-            />
+            {isProcessing && <Spinner size="sm" />}
+            <Switch checked={isAnalyticsOptedIn} onCheckedChange={handleToggle} disabled={isProcessing} />
           </div>
         </div>
 
         {/* User ID Display */}
         {isAnalyticsOptedIn && userId && (
-          <div className="p-4 border rounded-lg bg-gray-50">
+          <div className="p-4 border border-border rounded-lg bg-muted">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-gray-800 mb-1">Your User ID</div>
-                <p className="text-xs text-gray-600 mb-2">
+                <div className="font-medium text-foreground mb-1">Your User ID</div>
+                <p className="text-xs text-muted-foreground mb-2">
                   Share this ID when reporting issues to help us investigate your issue logs
                 </p>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs text-gray-700 bg-white px-2 py-1 rounded border border-gray-300 font-mono flex-1 truncate">
+                  <code className="text-xs text-foreground bg-card px-2 py-1 rounded border border-border font-mono flex-1 truncate">
                     {userId}
                   </code>
                   <Button
@@ -214,8 +211,8 @@ export default function AnalyticsConsentSwitch() {
                   >
                     {isCopied ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-green-600" />
-                        <span className="text-green-600">Copied!</span>
+                        <Check className="w-3.5 h-3.5 text-success" />
+                        <span className="text-success">Copied!</span>
                       </>
                     ) : (
                       <>
@@ -230,28 +227,19 @@ export default function AnalyticsConsentSwitch() {
           </div>
         )}
 
-        <div className="flex items-start gap-2 p-2 bg-blue-50 rounded border border-blue-200">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-blue-700">
-            <p className="mb-1">
-              Your meetings, transcripts, and recordings remain completely private and local.
-            </p>
-            <button
-              onClick={handlePrivacyPolicyClick}
-              className="text-blue-600 hover:text-blue-800 underline hover:no-underline"
-            >
+        <Alert variant="info">
+          <Info className="w-4 h-4" />
+          <AlertDescription className="text-xs">
+            <p className="mb-1">Your meetings, transcripts, and recordings remain completely private and local.</p>
+            <Button variant="link" size="sm" onClick={handlePrivacyPolicyClick} className="h-auto p-0 text-xs">
               View Privacy Policy
-            </button>
-          </div>
-        </div>
+            </Button>
+          </AlertDescription>
+        </Alert>
       </div>
 
       {/* 2-Step Opt-Out Modal */}
-      <AnalyticsDataModal
-        isOpen={showModal}
-        onClose={handleCancelDisable}
-        onConfirmDisable={handleConfirmDisable}
-      />
+      <AnalyticsDataModal isOpen={showModal} onClose={handleCancelDisable} onConfirmDisable={handleConfirmDisable} />
     </>
   );
 }
