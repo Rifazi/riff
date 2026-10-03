@@ -15,8 +15,8 @@ module.exports = {
       colors: {
         // These read the shadcn-style CSS variables defined in
         // globals.css, which themselves alias onto Riff's generated
-        // theme tokens (--color-*). The theme's tokens are plain hex
-        // colors, not HSL triplets, so no `hsl(...)` wrapping here.
+        // theme tokens (--color-*). The theme's tokens are plain color
+        // values, not HSL triplets, so there's no HSL-function wrapping here.
         background: "var(--background)",
         foreground: "var(--foreground)",
         border: "var(--border)",
@@ -51,16 +51,16 @@ module.exports = {
           foreground: "var(--destructive-foreground)",
         },
         success: {
-          DEFAULT: "var(--color-success, #16a34a)",
-          foreground: "#fff",
+          DEFAULT: "var(--color-success)",
+          foreground: "white",
         },
         warning: {
-          DEFAULT: "var(--color-warning, #f59e0b)",
-          foreground: "#fff",
+          DEFAULT: "var(--color-warning)",
+          foreground: "white",
         },
         info: {
-          DEFAULT: "var(--color-info, #0ea5e9)",
-          foreground: "#fff",
+          DEFAULT: "var(--color-info)",
+          foreground: "white",
         },
         chart: {
           1: "var(--chart-1)",

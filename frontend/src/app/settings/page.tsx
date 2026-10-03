@@ -1,41 +1,50 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Settings2, Mic, Database as DatabaseIcon, SparkleIcon, FlaskConical, Bot, Search } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
-import { motion } from 'framer-motion';
-import { TranscriptSettings } from '@/components/TranscriptSettings';
-import { RecordingSettings } from '@/components/RecordingSettings';
-import { PreferenceSettings } from '@/components/PreferenceSettings';
-import { SummaryModelSettings } from '@/components/SummaryModelSettings';
-import { BetaSettings } from '@/components/BetaSettings';
-import { SearchSettings } from '@/components/SearchSettings';
-import { DevAgentSettings } from '@/components/DevSessions/DevAgentSettings';
-import { useConfig } from '@/contexts/ConfigContext';
-import { BackButton } from '@/components/BackButton';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  Settings2,
+  Mic,
+  Database as DatabaseIcon,
+  SparkleIcon,
+  FlaskConical,
+  Bot,
+  Search,
+} from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { motion } from "framer-motion";
+import { TranscriptSettings } from "@/components/TranscriptSettings";
+import { RecordingSettings } from "@/components/RecordingSettings";
+import { PreferenceSettings } from "@/components/PreferenceSettings";
+import { SummaryModelSettings } from "@/components/SummaryModelSettings";
+import { BetaSettings } from "@/components/BetaSettings";
+import { SearchSettings } from "@/components/SearchSettings";
+import { DevAgentSettings } from "@/components/DevSessions/DevAgentSettings";
+import { useConfig } from "@/contexts/ConfigContext";
+import { BackButton } from "@/components/BackButton";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // Tabs configuration (constant)
 const TABS = [
-  { value: 'general', label: 'General', icon: Settings2 },
-  { value: 'recording', label: 'Recordings', icon: Mic },
-  { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
-  { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
-  { value: 'search', label: 'Search', icon: Search },
-  { value: 'devAgents', label: 'Dev Agents', icon: Bot },
-  { value: 'beta', label: 'Beta', icon: FlaskConical }
+  { value: "general", label: "General", icon: Settings2 },
+  { value: "recording", label: "Recordings", icon: Mic },
+  { value: "Transcriptionmodels", label: "Transcription", icon: DatabaseIcon },
+  { value: "summaryModels", label: "Summary", icon: SparkleIcon },
+  { value: "search", label: "Search", icon: Search },
+  { value: "devAgents", label: "Dev Agents", icon: Bot },
+  { value: "beta", label: "Beta", icon: FlaskConical },
 ] as const;
 
 export default function SettingsPage() {
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
 
   // Animation state for tabs
-  const [activeTab, setActiveTab] = useState('general');
+  const [activeTab, setActiveTab] = useState("general");
 
   // Deep link from elsewhere in the app, e.g. /settings?tab=devAgents
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab');
-    if (requested && TABS.some((tab) => tab.value === requested)) setActiveTab(requested);
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested && TABS.some((tab) => tab.value === requested))
+      setActiveTab(requested);
   }, []);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [underlineStyle, setUnderlineStyle] = useState({ left: 0, width: 0 });
@@ -44,17 +53,17 @@ export default function SettingsPage() {
   useEffect(() => {
     const loadTranscriptConfig = async () => {
       try {
-        const config = await invoke('api_get_transcript_config') as any;
+        const config = (await invoke("api_get_transcript_config")) as any;
         if (config) {
-          console.log('Loaded saved transcript config:', config);
+          console.log("Loaded saved transcript config:", config);
           setTranscriptModelConfig({
-            provider: config.provider || 'localWhisper',
-            model: config.model || 'large-v3',
-            apiKey: config.apiKey || null
+            provider: config.provider || "localWhisper",
+            model: config.model || "large-v3",
+            apiKey: config.apiKey || null,
           });
         }
       } catch (error) {
-        console.error('Failed to load transcript config:', error);
+        console.error("Failed to load transcript config:", error);
       }
     };
     loadTranscriptConfig();
@@ -62,7 +71,7 @@ export default function SettingsPage() {
 
   // Update underline position when active tab changes
   useLayoutEffect(() => {
-    const activeIndex = TABS.findIndex(tab => tab.value === activeTab);
+    const activeIndex = TABS.findIndex((tab) => tab.value === activeTab);
     const activeTabElement = tabRefs.current[activeIndex];
 
     if (activeTabElement) {
@@ -72,9 +81,9 @@ export default function SettingsPage() {
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-gray-50 flex flex-col">
+    <div className="h-screen bg-background flex flex-col">
       {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
+      <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="max-w-6xl mx-auto px-8 py-6">
           <BackButton fallbackHref="/" className="mb-1" />
           <h1 className="text-3xl font-bold">Settings</h1>
@@ -86,15 +95,17 @@ export default function SettingsPage() {
         <div className="max-w-6xl mx-auto p-8 pt-6">
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
+            <TabsList className="bg-transparent relative rounded-none border-b border-border p-0 h-auto">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
                   <TabsTrigger
                     key={tab.value}
                     value={tab.value}
-                    ref={el => { tabRefs.current[index] = el }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-blue-600 data-[state=active]:shadow-none text-gray-600 hover:text-gray-900 relative z-10"
+                    ref={(el) => {
+                      tabRefs.current[index] = el;
+                    }}
+                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10"
                   >
                     <Icon className="w-4 h-4" />
                     {tab.label}
@@ -103,10 +114,13 @@ export default function SettingsPage() {
               })}
 
               <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-blue-600"
+                className="absolute bottom-0 z-20 h-0.5 bg-primary"
                 layoutId="underline"
-                style={{ left: underlineStyle.left, width: underlineStyle.width }}
-                transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+                style={{
+                  left: underlineStyle.left,
+                  width: underlineStyle.width,
+                }}
+                transition={{ type: "spring", stiffness: 400, damping: 40 }}
               />
             </TabsList>
 
@@ -139,4 +153,4 @@ export default function SettingsPage() {
       </div>
     </div>
   );
-};
+}
