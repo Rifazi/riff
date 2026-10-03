@@ -12,7 +12,9 @@ import { api, apiUrl } from '@/lib/dev-sessions/api';
 import type { AppConfig, AppWriteResult, CheckCommands, Role, ThemeDraft } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 import { SESSIONS_HREF } from '@/lib/dev-sessions/stage';
-import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell, Pill } from '@/components/DevSessions/PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { EmptyState, ErrorText, LoadingState, Notice, PageShell } from '@/components/DevSessions/PageShell';
 import { SetupNotices, toSetupReport, type SetupReport } from '@/components/DevSessions/SetupNotices';
 import { ThemeStudio } from '@/components/DevSessions/themes/ThemeStudio';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
@@ -47,7 +49,7 @@ function setupReport(result: AppWriteResult): SetupReport | null {
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[140px_1fr] items-center gap-3">
-      <Label className="text-gray-600">{label}</Label>
+      <Label className="text-muted-foreground">{label}</Label>
       {children}
     </div>
   );
@@ -55,7 +57,7 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 
 function Disclosure({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
   return (
-    <Button variant="ghost" size="sm" onClick={onToggle} className="text-gray-600">
+    <Button variant="ghost" size="sm" onClick={onToggle} className="text-muted-foreground">
       <ChevronDown className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       {label}
     </Button>
@@ -83,18 +85,18 @@ function PromptRow({ appId, role, label }: { appId: string; role: Role; label: s
   if (!prompts) return null;
 
   return (
-    <div className="space-y-2 py-3 border-b border-gray-100 last:border-0">
+    <div className="space-y-2 py-3 border-b border-border last:border-0">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-gray-900">{label}</div>
-        <Pill tone={prompt?.override ? 'blue' : 'neutral'}>{prompt?.override ? 'Customized' : 'Using default'}</Pill>
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        <Badge variant={prompt?.override ? 'info' : 'secondary'}>{prompt?.override ? 'Customized' : 'Using default'}</Badge>
       </div>
       {prompt?.base && (
         <div>
-          <button onClick={() => setShowBase((v) => !v)} className="text-xs text-blue-600 hover:underline">
+          <button onClick={() => setShowBase((v) => !v)} className="text-xs text-primary hover:underline">
             {showBase ? 'Hide default prompt' : 'View default prompt'}
           </button>
           {showBase && (
-            <pre className="mt-2 max-h-60 overflow-auto custom-scrollbar text-xs bg-gray-50 border border-gray-200 rounded-md p-3 whitespace-pre-wrap">
+            <pre className="mt-2 max-h-60 overflow-auto custom-scrollbar text-xs bg-muted border border-border rounded-md p-3 whitespace-pre-wrap">
               {prompt.base}
             </pre>
           )}
@@ -105,10 +107,10 @@ function PromptRow({ appId, role, label }: { appId: string; role: Role; label: s
         onChange={(e) => setDraft(e.target.value)}
         placeholder="Leave blank to use the default prompt for this app. An override replaces the default entirely."
         rows={5}
-        className="w-full px-3 py-2 border border-gray-200 rounded-md font-mono text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="w-full px-3 py-2 border border-border rounded-md font-mono text-xs bg-background focus:outline-none focus:ring-1 focus:ring-ring"
       />
       <div className="flex gap-2">
-        <Button size="sm" variant="blue" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate(value)}>
+        <Button size="sm" variant="default" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate(value)}>
           {saveMutation.isPending ? 'Saving…' : 'Save override'}
         </Button>
         {prompt?.override && (
@@ -152,10 +154,10 @@ function AppCard({ app }: { app: AppConfig }) {
   });
 
   return (
-    <Card
-      title={app.name}
-      actions={
-        <>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+        <CardTitle>{app.name}</CardTitle>
+        <div className="flex items-center gap-2 flex-shrink-0">
           <Button size="sm" variant="outline" asChild>
             <Link href={`/dev-sessions/apps/theme?appId=${encodeURIComponent(app.id)}`}>
               <Palette />
@@ -181,17 +183,16 @@ function AppCard({ app }: { app: AppConfig }) {
             </ExternalAnchor>
           </Button>
           <AppReferenceDocsButton appId={app.id} appName={app.name} />
-        </>
-      }
-    >
-      <div className="space-y-3">
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
         <FieldRow label="Name">
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </FieldRow>
         <FieldRow label="Repository path">
           <Input value={repoRoot} onChange={(e) => setRepoRoot(e.target.value)} className="font-mono text-xs" />
         </FieldRow>
-        <div className="text-xs text-gray-500 pl-[152px]">
+        <div className="text-xs text-muted-foreground pl-[152px]">
           docs: <code>{app.docsDir}</code>
           {' · '}base branch: <code>{app.baseBranch}</code>
           {' · '}theme:{' '}
@@ -199,7 +200,7 @@ function AppCard({ app }: { app: AppConfig }) {
             <>
               <code>{app.theme.name}</code>
               {app.theme.customized && ' (customized)'}
-              {!app.theme.inSync && <span className="text-amber-700"> · generated CSS out of date, regenerate on the Theme page</span>}
+              {!app.theme.inSync && <span className="text-warning"> · generated CSS out of date, regenerate on the Theme page</span>}
             </>
           ) : (
             'none'
@@ -211,7 +212,7 @@ function AppCard({ app }: { app: AppConfig }) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button size="sm" variant="blue" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+          <Button size="sm" variant="default" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
             {saveMutation.isPending ? 'Saving…' : 'Save'}
           </Button>
           <Disclosure label="Agent prompts" open={showPrompts} onToggle={() => setShowPrompts((v) => !v)} />
@@ -219,7 +220,7 @@ function AppCard({ app }: { app: AppConfig }) {
           <Button
             size="sm"
             variant="ghost"
-            className="ml-auto text-gray-500 hover:text-red-600 hover:bg-red-50"
+            className="ml-auto text-muted-foreground hover:text-destructive hover:bg-destructive/10"
             disabled={deleteMutation.isPending}
             onClick={() => setConfirmingRemove(true)}
           >
@@ -231,8 +232,8 @@ function AppCard({ app }: { app: AppConfig }) {
         <SetupNotices report={saveReport} />
 
         {showCheckCommands && (
-          <div className="pt-3 border-t border-gray-100 space-y-3">
-            <p className="text-xs text-gray-500">
+          <div className="pt-3 border-t border-border space-y-3">
+            <p className="text-xs text-muted-foreground">
               The npm script QA runs at the repo root for each check. Leave blank to use the default script name.
             </p>
             {(Object.keys(DEFAULT_CHECK_COMMANDS) as (keyof CheckCommands)[]).map((key) => (
@@ -248,13 +249,13 @@ function AppCard({ app }: { app: AppConfig }) {
           </div>
         )}
         {showPrompts && (
-          <div className="pt-1 border-t border-gray-100">
+          <div className="pt-1 border-t border-border">
             {ROLES.map((role) => (
               <PromptRow key={role.key} appId={app.id} role={role.key} label={role.label} />
             ))}
           </div>
         )}
-      </div>
+      </CardContent>
 
       <ConfirmDialog
         open={confirmingRemove}
@@ -315,8 +316,11 @@ export default function AppsPage() {
         {!isLoading && apps?.length === 0 && <EmptyState>No apps yet — add one below.</EmptyState>}
         {apps?.map((app) => <AppCard key={app.id} app={app} />)}
 
-        <Card title="Add an app">
-          <div className="space-y-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Add an app</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
             <FieldRow label="Name">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Billing" />
             </FieldRow>
@@ -331,7 +335,7 @@ export default function AppsPage() {
                 className="font-mono text-xs"
               />
             </FieldRow>
-            <p className="text-xs text-gray-500 pl-[152px]">
+            <p className="text-xs text-muted-foreground pl-[152px]">
               An existing checkout, an empty folder, or a new folder to create. A folder that isn&apos;t a git repo yet gets{' '}
               <code>git init</code>, a starter <code>.gitignore</code> and an initial commit; a missing <code>docs/</code> is created.
             </p>
@@ -356,7 +360,7 @@ export default function AppsPage() {
               </Button>
               <Button
                 size="sm"
-                variant="blue"
+                variant="default"
                 disabled={!name.trim() || !repoRoot.trim() || createMutation.isPending}
                 onClick={() => createMutation.mutate()}
               >
@@ -371,7 +375,7 @@ export default function AppsPage() {
             )}
             <ErrorText>{createError}</ErrorText>
             <SetupNotices report={createReport} />
-          </div>
+          </CardContent>
         </Card>
       </div>
     </PageShell>

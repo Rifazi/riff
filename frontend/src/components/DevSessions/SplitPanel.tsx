@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, GitFork, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/dev-sessions/api';
 import type { SessionRecord, SplitProposal } from '@/lib/dev-sessions/types';
 import { sessionHref, STAGE_LABEL, stageGroupFor } from '@/lib/dev-sessions/stage';
-import { Notice, Pill } from './PageShell';
+import { Notice } from './PageShell';
 
 /** The requirements agent's pending propose_split, for the human to accept or turn down. */
 export function SplitProposalCard({
@@ -107,7 +108,7 @@ export function SplitLinks({ session }: { session: SessionRecord }) {
               <li key={id}>
                 {child ? (
                   <>
-                    <SessionLink session={child} /> <Pill>{STAGE_LABEL[child.stage] ?? child.stage}</Pill>
+                    <SessionLink session={child} /> <Badge variant="secondary">{STAGE_LABEL[child.stage] ?? child.stage}</Badge>
                   </>
                 ) : (
                   <span className="text-gray-500">(deleted session)</span>
@@ -132,7 +133,7 @@ export function SplitLinks({ session }: { session: SessionRecord }) {
           {deps.map((dep, i) => (
             <span key={dep.id}>
               {i > 0 && ', '}
-              <SessionLink session={dep} /> <Pill>{STAGE_LABEL[dep.stage] ?? dep.stage}</Pill>
+              <SessionLink session={dep} /> <Badge variant="secondary">{STAGE_LABEL[dep.stage] ?? dep.stage}</Badge>
             </span>
           ))}
         </>

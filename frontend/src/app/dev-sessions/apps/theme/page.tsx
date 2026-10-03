@@ -9,7 +9,8 @@ import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import type { ThemeApplyResult, ThemeDraft } from '@/lib/dev-sessions/types';
-import { Card, EmptyState, ErrorText, LoadingState, Notice, PageShell } from '@/components/DevSessions/PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState, ErrorText, LoadingState, Notice, PageShell } from '@/components/DevSessions/PageShell';
 import { SetupNotices, toSetupReport, type SetupReport } from '@/components/DevSessions/SetupNotices';
 import { ThemeStudio } from '@/components/DevSessions/themes/ThemeStudio';
 import { ThemeAdoptionCard } from '@/components/DevSessions/themes/ThemeAdoptionCard';
@@ -72,24 +73,23 @@ function ThemeView() {
       {app && (
         <div className="space-y-4">
         {current && <ThemeAdoptionCard appId={app.id} appName={app.name} themeName={current.theme.name} />}
-        <Card
-          title={current ? `Current theme: ${current.theme.name}` : 'No theme yet'}
-          actions={
-            <>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+            <CardTitle>{current ? `Current theme: ${current.theme.name}` : 'No theme yet'}</CardTitle>
+            <div className="flex items-center gap-2 flex-shrink-0">
               {edit && (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setEdit(null)}>
                   <RotateCcw />
                   Reset
                 </Button>
               )}
-              <Button size="sm" variant="blue" disabled={!draft || unchanged || busy} onClick={() => saveMutation.mutate()}>
+              <Button size="sm" variant="default" disabled={!draft || unchanged || busy} onClick={() => saveMutation.mutate()}>
                 <Paintbrush />
                 {saveMutation.isPending ? 'Saving…' : unchanged ? 'Saved' : current ? 'Save theme' : 'Apply theme'}
               </Button>
-            </>
-          }
-        >
-          <div className="space-y-3">
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
             {themeState?.error && (
               <Notice tone="red">
                 <code>theme/theme.json</code> can&apos;t be used: {themeState.error} Fix the file, or save a theme here to replace it.
@@ -112,7 +112,7 @@ function ThemeView() {
             <SetupNotices report={report} />
             <ErrorText>{error}</ErrorText>
             <ThemeStudio value={draft} onChange={(next) => setEdit(next)} current={current} appName={app.name} />
-          </div>
+          </CardContent>
         </Card>
         </div>
       )}

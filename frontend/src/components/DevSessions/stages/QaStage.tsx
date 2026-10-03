@@ -15,7 +15,8 @@ import { DeliveryPanel } from '../DeliveryPanel';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
-import { ErrorText, Notice, Pill } from '../PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.qa;
@@ -33,9 +34,11 @@ function parseFrontmatterField(markdown: string, field: string): string | null {
 
 function ResultPill({ label, value }: { label: string; value: string | null }) {
   return (
-    <Pill tone={value === 'pass' ? 'green' : value === 'fail' ? 'red' : value === 'pass-with-notes' ? 'amber' : 'neutral'}>
+    <Badge
+      variant={value === 'pass' ? 'success' : value === 'fail' ? 'destructive' : value === 'pass-with-notes' ? 'warning' : 'secondary'}
+    >
       {label}: {value ?? '—'}
-    </Pill>
+    </Badge>
   );
 }
 
@@ -155,7 +158,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
           subtitle={markdown ? session.qaReportPath : null}
           markdown={markdown}
           emptyText="Not written yet — QA is running…"
-          badge={reviewed ? <Pill tone="green">Reviewed</Pill> : null}
+          badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
           notices={
             markdown && (
               <>

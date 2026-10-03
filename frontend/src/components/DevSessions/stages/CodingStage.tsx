@@ -19,7 +19,8 @@ import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
 import { CodingTeamPanel } from '../CodingTeam';
 import { DiffViewer } from '../DiffViewer';
-import { ErrorText, Notice, Pill } from '../PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.coding;
@@ -346,10 +347,10 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         <>
           <CoordinatorControl session={session} streaming={streaming} />
           {session.branch && (
-            <Pill tone="blue">
+            <Badge variant="info" className="gap-1">
               <GitBranch className="w-3 h-3" />
               {session.branch}
-            </Pill>
+            </Badge>
           )}
         </>
       }

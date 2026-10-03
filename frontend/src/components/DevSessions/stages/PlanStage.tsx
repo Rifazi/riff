@@ -16,7 +16,8 @@ import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { TeamPlanPanel } from '../CodingTeam';
-import { ErrorText, Notice, Pill } from '../PageShell';
+import { Badge } from '@/components/ui/badge';
+import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.plan;
@@ -216,11 +217,13 @@ export function PlanStage({ session }: { session: SessionRecord }) {
           }
           badge={
             isApproved ? (
-              <Pill tone="green">Approved</Pill>
+              <Badge variant="success">Approved</Badge>
             ) : !reopenedHere && !canEdit && codingStarted ? (
-              <Pill title="Coding already started from this plan">Locked — coding started</Pill>
+              <Badge variant="secondary" title="Coding already started from this plan">
+                Locked — coding started
+              </Badge>
             ) : session.planStatus === 'draft' ? (
-              <Pill tone="amber">Draft</Pill>
+              <Badge variant="warning">Draft</Badge>
             ) : null
           }
           notices={

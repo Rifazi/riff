@@ -7,15 +7,16 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { THEME_MIGRATION_KICKOFF } from '@/lib/dev-sessions/meeting';
-import { Card, ErrorText, LoadingState } from '../PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ErrorText, LoadingState } from '../PageShell';
 
 function Check({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <li className="flex items-start gap-2 text-sm text-gray-700">
+    <li className="flex items-start gap-2 text-sm text-foreground">
       {ok ? (
-        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-600" />
+        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-success" />
       ) : (
-        <CircleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+        <CircleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
       )}
       <span className="min-w-0">{children}</span>
     </li>
@@ -51,17 +52,17 @@ export function ThemeAdoptionCard({ appId, appName, themeName }: { appId: string
   const done = wired && audit.hardCoded.total === 0 && audit.legacyTokens.length === 0 && audit.tailwind.every((t) => t.usesThemeTokens);
 
   return (
-    <Card
-      title="Adoption in the app's code"
-      actions={
-        !done && (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+        <CardTitle>Adoption in the app&apos;s code</CardTitle>
+        {!done && (
           <Button size="sm" variant="outline" disabled={startMutation.isPending} onClick={() => startMutation.mutate()}>
             <Wand2 />
             {startMutation.isPending ? 'Starting…' : 'Start migration session'}
           </Button>
-        )
-      }
-    >
+        )}
+      </CardHeader>
+      <CardContent>
       <ul className="space-y-1.5">
         <Check ok={wired}>
           {audit.importedFrom.length === 0 ? (
@@ -114,12 +115,13 @@ export function ThemeAdoptionCard({ appId, appName, themeName }: { appId: string
           <Check ok>Uses {audit.componentLibraries.join(', ')}. The migration points their theme config at the tokens.</Check>
         )}
       </ul>
-      <p className="mt-3 text-xs text-gray-500">
+      <p className="mt-3 text-xs text-muted-foreground">
         {done
           ? 'The app is fully on its theme. Changing the theme above restyles everything.'
           : 'A migration session takes this through requirements, plan, coding and QA. The coding agents follow the migration steps in docs/theme.md and re-run this audit to confirm.'}
       </p>
       <ErrorText>{(startMutation.error as Error | null)?.message ?? null}</ErrorText>
+      </CardContent>
     </Card>
   );
 }
