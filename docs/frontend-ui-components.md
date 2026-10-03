@@ -104,7 +104,7 @@ The `button.tsx` variant set still includes the deprecated `green`, `blue`, `red
 
 ### Chart Colors
 
-The Dev Sessions `TokenUsagePanel` uses a hard-coded categorical color palette for its stage breakdown chart (requirements, plan, coding, QA). This palette was specifically chosen for colorblind accessibility (CVD-safe separation between adjacent stages). When a theme is applied, these should ideally map to the theme's semantic color ramp (primary, success, info, warning) for consistency, but this represents a deliberate trade-off: arbitrary themes may not preserve the original CVD separation, so any future updates should pair a theme change with manual verification of the chart's visual distinction.
+The Dev Sessions `TokenUsagePanel` stage breakdown chart (requirements, plan, coding, QA) used to use a hard-coded categorical color palette, hand-picked for colorblind accessibility (CVD-safe separation between adjacent stages). It now reads `var(--chart-1)` through `var(--chart-4)` — the same theme-driven chart tokens `globals.css` aliases onto `--color-primary`/`--color-success`/`--color-info`/`--color-warning` — for consistency with the rest of the app. This is a deliberate trade-off: an arbitrary theme's primary/success/info/warning hues aren't guaranteed to preserve the original CVD separation, so the chart always ships with a legend and a table view (`DailyTable`) as a non-color-dependent fallback, and any future theme change is worth a manual check of the chart's visual distinction.
 
 ## Architecture and Patterns
 
