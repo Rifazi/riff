@@ -73,19 +73,12 @@ export const Section: React.FC<SectionProps> = ({
           onDelete={onSectionDelete ? () => onSectionDelete(sectionKey) : undefined}
         />
         {onSectionDelete && (
-          <button
-            onClick={() => onSectionDelete(sectionKey)}
-            className="text-gray-400 hover:text-gray-600"
-          >
+          <button onClick={() => onSectionDelete(sectionKey)} className="text-muted-foreground hover:text-foreground">
             Delete
           </button>
         )}
       </div>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-      >
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5, delay: 0.2 }}>
         {(section.blocks || []).map((block, index) => (
           <motion.div
             key={block.id}
@@ -111,9 +104,11 @@ export const Section: React.FC<SectionProps> = ({
                 onBlockDelete(block.id, mergeContent);
               }}
               onContextMenu={onContextMenu}
-              onNavigate={onBlockNavigate ? 
-                (direction, cursorPosition) => onBlockNavigate(block.id, direction, cursorPosition)
-                : undefined}
+              onNavigate={
+                onBlockNavigate
+                  ? (direction, cursorPosition) => onBlockNavigate(block.id, direction, cursorPosition)
+                  : undefined
+              }
               onCreateNewBlock={onCreateNewBlock}
             />
           </motion.div>
