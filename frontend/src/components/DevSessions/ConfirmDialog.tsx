@@ -1,7 +1,14 @@
-'use client';
+"use client";
 
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -13,7 +20,15 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel, destructive, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel,
+  destructive,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <DialogContent className="sm:max-w-[440px]">
@@ -25,7 +40,10 @@ export function ConfirmDialog({ open, title, description, confirmLabel, destruct
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant={destructive ? 'red' : 'blue'} onClick={onConfirm}>
+          <Button
+            variant={destructive ? "destructive" : "default"}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </Button>
         </DialogFooter>
