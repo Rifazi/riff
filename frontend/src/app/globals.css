@@ -147,6 +147,13 @@
        theme-css.ts's own `.ui-btn--danger` convention (named CSS color,
        not a hex literal, so this isn't a second color source to maintain). */
     --destructive-foreground: white;
+    /* Same story for the other semantic tones: the theme schema only has
+       an "on-primary" token, so text sitting on a solid success/warning/
+       info fill follows the same `.ui-btn--danger` convention. Inherited
+       by `.dark`, which does not override them. */
+    --color-on-success: white;
+    --color-on-warning: white;
+    --color-on-info: white;
     --border: var(--color-border);
     --input: var(--color-border);
     --ring: var(--color-primary);
