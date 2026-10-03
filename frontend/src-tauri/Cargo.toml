@@ -157,6 +157,9 @@ tauri-plugin-updater = "2.3.0"
 tauri-plugin-process = "2.3.0"
 
 # Desktop-only single instance guard
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"  # agent_server: signal the server's process group on exit
+
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "=2.3.7"
 

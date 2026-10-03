@@ -122,6 +122,13 @@ export function watchDocsForChanges(app: AppConfig): void {
   watchersByApp.set(app.id, watcher);
 }
 
+/** Closes every docs watcher (server shutdown). */
+export async function stopAllWatching(): Promise<void> {
+  const watchers = [...watchersByApp.values()];
+  watchersByApp.clear();
+  await Promise.allSettled(watchers.map((w) => w.close()));
+}
+
 // Full teardown for an app that's actually being removed — unlike
 // stopWatching() above, this also drops its cached sections/indexedAt.
 export function removeIndex(appId: string): void {

@@ -515,6 +515,27 @@ pub fn run() {
             // Local agent server behind Dev Sessions (requirements → QA)
             agent_server::start(_app.handle());
 
+            // Ctrl+C in the dev terminal / SIGTERM: exit through RunEvent::Exit
+            // so the cleanup there runs. A second signal exits immediately.
+            #[cfg(unix)]
+            {
+                let app_for_signals = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let (Ok(mut sigint), Ok(mut sigterm)) =
+                        (signal(SignalKind::interrupt()), signal(SignalKind::terminate()))
+                    else {
+                        log::warn!("Could not install signal handlers");
+                        return;
+                    };
+                    tokio::select! { _ = sigint.recv() => {}, _ = sigterm.recv() => {} }
+                    log::info!("Received termination signal, exiting");
+                    app_for_signals.exit(0);
+                    tokio::select! { _ = sigint.recv() => {}, _ = sigterm.recv() => {} }
+                    std::process::exit(130);
+                });
+            }
+
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
                 log::error!("Failed to create system tray: {}", e);
@@ -872,27 +893,37 @@ pub fn run() {
                 }
                 tauri::RunEvent::Exit => {
                     log::info!("Application exiting, cleaning up resources...");
+                    // Runs alongside the rest; bounded by its own grace period.
+                    let agent_server_stop = std::thread::spawn(agent_server::shutdown);
+
+                    // Every step is time-limited: a cleanup that hangs would keep
+                    // this process alive without a window, holding the
+                    // single-instance lock, so the next launch shows nothing.
                     tauri::async_runtime::block_on(async {
+                        use std::time::Duration;
+                        use tokio::time::timeout;
+
                         // Clean up database connection and checkpoint WAL
                         if let Some(app_state) = _app_handle.try_state::<state::AppState>() {
                             log::info!("Starting database cleanup...");
-                            if let Err(e) = app_state.db_manager.cleanup().await {
-                                log::error!("Failed to cleanup database: {}", e);
-                            } else {
-                                log::info!("Database cleanup completed successfully");
+                            match timeout(Duration::from_secs(5), app_state.db_manager.cleanup()).await {
+                                Ok(Ok(())) => log::info!("Database cleanup completed successfully"),
+                                Ok(Err(e)) => log::error!("Failed to cleanup database: {}", e),
+                                Err(_) => log::error!("Database cleanup timed out; exiting anyway"),
                             }
                         } else {
                             log::warn!("AppState not available for database cleanup (likely first launch)");
                         }
 
-                        agent_server::stop();
-
                         // Clean up sidecar
                         log::info!("Cleaning up sidecar...");
-                        if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {
-                            log::error!("Failed to force shutdown sidecar: {}", e);
+                        match timeout(Duration::from_secs(5), summary::summary_engine::force_shutdown_sidecar()).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => log::error!("Failed to force shutdown sidecar: {}", e),
+                            Err(_) => log::error!("Sidecar shutdown timed out; exiting anyway"),
                         }
                     });
+                    let _ = agent_server_stop.join();
                     log::info!("Application cleanup complete");
                 }
                 _ => {}

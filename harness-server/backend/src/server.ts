@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config } from './config.js';
 import { listApps } from './apps/apps-store.js';
-import { buildDocsIndex, watchDocsForChanges } from './repo/docs-index.js';
+import { buildDocsIndex, stopAllWatching, watchDocsForChanges } from './repo/docs-index.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerRequirementsRoutes } from './routes/requirements.js';
 import { registerPlanRoutes } from './routes/plan.js';
@@ -15,6 +15,11 @@ import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { recoverInterruptedTeams } from './agents/team/coding-team.js';
+import { stopLocalModel } from './agents/local-llm.js';
+
+// How long in-flight requests (e.g. a streaming agent turn) get to finish on
+// shutdown before the process exits anyway. Riff kills it at 5s.
+const SHUTDOWN_GRACE_MS = 3000;
 
 async function main() {
   // Default is 1MB — raised so a chat message can carry a base64-encoded
@@ -63,6 +68,28 @@ async function main() {
   await registerUsageRoutes(app);
 
   app.get('/api/health', async () => ({ ok: true }));
+
+  // Riff stops this server with SIGTERM, and passes a pipe as stdin that
+  // closes when Riff exits for any reason, so a crashed app can't leave the
+  // server (and the port) behind. Ctrl+C covers `npm run dev`.
+  let shuttingDown = false;
+  const shutdown = (reason: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info({ reason }, 'shutting down');
+    const force = setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS);
+    force.unref();
+    stopLocalModel();
+    Promise.allSettled([app.close(), stopAllWatching()]).finally(() => process.exit(0));
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGHUP', () => shutdown('SIGHUP'));
+  if (process.env.HARNESS_EXIT_ON_STDIN_CLOSE === '1') {
+    process.stdin.on('end', () => shutdown('parent closed stdin'));
+    process.stdin.on('error', () => shutdown('parent stdin error'));
+    process.stdin.resume();
+  }
 
   await app.listen({ port: config.port, host: '127.0.0.1' });
 }

@@ -4,12 +4,19 @@
 //! Started in the background at app setup, stopped on app exit. If something
 //! is already listening on the port (e.g. `npm run dev` in harness-server for
 //! backend work), that instance is used instead of spawning a second one.
+//!
+//! Shutdown is graceful: the server gets SIGTERM (its whole process group, so
+//! llama-helper, agent CLIs and QA dev servers go too) and `STOP_GRACE` to
+//! close, then is killed. Its stdin is a pipe from this process, and the
+//! server exits when that pipe closes, so it also goes away if the app
+//! crashes or is killed without running its exit handler.
 
 use serde::Serialize;
 use std::fs::{self, File};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -17,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 const DEFAULT_PORT: u16 = 4319;
 const MIN_NODE_MAJOR: u32 = 22;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+const STOP_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +51,8 @@ impl AgentServerStatus {
 
 static STATUS: Mutex<Option<AgentServerStatus>> = Mutex::new(None);
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+/// Set on app exit so a startup still in progress doesn't leave a server behind.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 fn port() -> u16 {
     std::env::var("HARNESS_PORT")
@@ -188,11 +198,19 @@ fn spawn_server(server_dir: &Path, node: &Path, log: &File) -> Result<Child, Str
     cmd.args(["--import", "tsx", "src/server.ts"])
         .current_dir(server_dir.join("backend"))
         .env("HARNESS_PORT", port().to_string())
-        .stdin(Stdio::null())
+        // The server shuts down when this pipe closes (see server.ts).
+        .env("HARNESS_EXIT_ON_STDIN_CLOSE", "1")
+        .stdin(Stdio::piped())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log.try_clone().map_err(|e| e.to_string())?);
     if let Some(path) = path_with_node(node) {
         cmd.env("PATH", path);
+    }
+    // Own process group, so stop() can signal everything the server spawned.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
     }
     #[cfg(windows)]
     {
@@ -252,17 +270,39 @@ fn start_blocking<R: Runtime>(app: &AppHandle<R>) {
         return set_status(app, with_paths(AgentServerStatus::new("failed", Some(message))));
     }
 
-    let mut child = match spawn_server(&server_dir, &node, &log) {
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return;
+    }
+    let child = match spawn_server(&server_dir, &node, &log) {
         Ok(child) => child,
         Err(message) => return set_status(app, with_paths(AgentServerStatus::new("failed", Some(message)))),
     };
+    let pid = child.id();
+    // Registered before it is listening, so an exit during startup stops it.
+    if let Ok(mut guard) = CHILD.lock() {
+        *guard = Some(child);
+    }
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return stop();
+    }
 
     let started = Instant::now();
     loop {
         if is_listening() {
             break;
         }
-        if let Ok(Some(exit)) = child.try_wait() {
+        let exited = match CHILD.lock() {
+            Ok(mut guard) => match guard.as_mut() {
+                Some(child) if child.id() == pid => child.try_wait().ok().flatten(),
+                // stop() took it (app exit or restart) — nothing more to do here.
+                _ => return,
+            },
+            Err(_) => None,
+        };
+        if let Some(exit) = exited {
+            if let Ok(mut guard) = CHILD.lock() {
+                guard.take();
+            }
             return set_status(
                 app,
                 with_paths(AgentServerStatus::new(
@@ -272,7 +312,7 @@ fn start_blocking<R: Runtime>(app: &AppHandle<R>) {
             );
         }
         if started.elapsed() > STARTUP_TIMEOUT {
-            let _ = child.kill();
+            stop();
             return set_status(
                 app,
                 with_paths(AgentServerStatus::new(
@@ -284,9 +324,6 @@ fn start_blocking<R: Runtime>(app: &AppHandle<R>) {
         std::thread::sleep(Duration::from_millis(250));
     }
 
-    if let Ok(mut guard) = CHILD.lock() {
-        *guard = Some(child);
-    }
     set_status(
         app,
         with_paths(AgentServerStatus::new("running", Some(format!("Using Node {}", node.display())))),
@@ -298,13 +335,60 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
     std::thread::spawn(move || start_blocking(&app));
 }
 
+/// Stops the server this app started (an external one is left alone).
 pub fn stop() {
-    if let Ok(mut guard) = CHILD.lock() {
-        if let Some(mut child) = guard.take() {
-            log::info!("agent_server: stopping (pid {})", child.id());
-            let _ = child.kill();
-            let _ = child.wait();
+    let child = CHILD.lock().ok().and_then(|mut guard| guard.take());
+    if let Some(mut child) = child {
+        terminate(&mut child);
+    }
+}
+
+/// Stops the server for good at app exit, including one still starting up.
+pub fn shutdown() {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    stop();
+}
+
+fn terminate(child: &mut Child) {
+    let pid = child.id();
+    log::info!("agent_server: stopping (pid {pid})");
+    // Closing stdin asks the server to shut down; SIGTERM does the same and
+    // also reaches whatever it spawned.
+    drop(child.stdin.take());
+    #[cfg(unix)]
+    signal_group(pid, libc::SIGTERM);
+
+    let deadline = Instant::now() + STOP_GRACE;
+    let mut exited = false;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                log::info!("agent_server: stopped ({status})");
+                exited = true;
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => break,
         }
+    }
+    if !exited {
+        log::warn!("agent_server: did not stop within {STOP_GRACE:?}, killing it");
+    }
+    // Also clears out anything it spawned that is still running.
+    #[cfg(unix)]
+    signal_group(pid, libc::SIGKILL);
+    if !exited {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+#[cfg(unix)]
+fn signal_group(pid: u32, signal: libc::c_int) {
+    // The server leads its own process group (see spawn_server), so the
+    // group id is its pid.
+    unsafe {
+        libc::kill(-(pid as libc::pid_t), signal);
     }
 }
 

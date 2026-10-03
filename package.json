@@ -1,0 +1,9 @@
+{
+  "name": "riff",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --dir frontend install && pnpm --dir frontend run tauri:dev",
+    "dev:debug": "RUST_LOG=debug npm run dev",
+    "build": "pnpm --dir frontend install && pnpm --dir frontend run tauri:build"
+  }
+}
