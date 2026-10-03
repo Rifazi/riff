@@ -196,7 +196,9 @@ function QuestionBubble({
   const answered = Boolean(answerText(current));
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2.5 ${answered ? 'border-green-200 bg-green-50/50' : 'border-blue-200 bg-blue-50/60'}`}>
+    <div
+      className={`rounded-lg border p-3 space-y-2.5 ${answered ? 'border-green-200 bg-green-50/50' : 'border-blue-200 bg-blue-50/60'}`}
+    >
       <div className="flex items-start gap-2">
         <span
           className={`flex-shrink-0 w-5 h-5 rounded-full text-[11px] font-semibold flex items-center justify-center ${
@@ -215,7 +217,12 @@ function QuestionBubble({
               <button
                 key={option}
                 type="button"
-                onClick={() => onChange?.({ ...current, option: selected ? undefined : option })}
+                onClick={() =>
+                  onChange?.({
+                    ...current,
+                    option: selected ? undefined : option,
+                  })
+                }
                 disabled={disabled}
                 className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border text-sm text-left transition-colors disabled:opacity-50 ${
                   selected
@@ -235,7 +242,9 @@ function QuestionBubble({
           value={current.text}
           onChange={(e) => onChange?.({ ...current, text: e.target.value })}
           disabled={disabled}
-          placeholder={options.length > 0 ? 'Optional: add detail, or type your own answer instead…' : 'Type your answer…'}
+          placeholder={
+            options.length > 0 ? 'Optional: add detail, or type your own answer instead…' : 'Type your answer…'
+          }
           rows={2}
           className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y disabled:opacity-50"
         />
@@ -307,7 +316,8 @@ export function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingKey]);
 
-  const canSend = !readOnly && !disabled && (draft.trim().length > 0 || pendingFiles.length > 0 || (batchOpen && answeredCount > 0));
+  const canSend =
+    !readOnly && !disabled && (draft.trim().length > 0 || pendingFiles.length > 0 || (batchOpen && answeredCount > 0));
 
   const send = () => {
     if (!canSend) return;
@@ -339,7 +349,9 @@ export function ChatPane({
   };
 
   return (
-    <div className={`flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm ${className ?? ''}`}>
+    <div
+      className={`flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm ${className ?? ''}`}
+    >
       <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
         <AgentAvatar agent={agent} />
         <div className="min-w-0 flex-1">
@@ -426,99 +438,104 @@ export function ChatPane({
       </div>
 
       {readOnly ? (
-        readOnlyNote && <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-500">{readOnlyNote}</div>
+        readOnlyNote && (
+          <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-500">{readOnlyNote}</div>
+        )
       ) : (
-      <div className="flex-shrink-0 border-t border-gray-100 p-3 space-y-2">
-        {batchOpen && (
-          <div className="flex items-center gap-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-gray-900">
-                {answeredCount} of {pendingQuestions.length} question{pendingQuestions.length === 1 ? '' : 's'} answered
+        <div className="flex-shrink-0 border-t border-gray-100 p-3 space-y-2">
+          {batchOpen && (
+            <div className="flex items-center gap-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-900">
+                  {answeredCount} of {pendingQuestions.length} question
+                  {pendingQuestions.length === 1 ? '' : 's'} answered
+                </div>
+                <div className="text-xs text-gray-500">
+                  {answeredCount < pendingQuestions.length
+                    ? `Answer what you can — anything left blank is sent as "use your best judgment".`
+                    : 'All answered — add a note below if you like, then send.'}
+                </div>
               </div>
-              <div className="text-xs text-gray-500">
-                {answeredCount < pendingQuestions.length
-                  ? `Answer what you can — anything left blank is sent as "use your best judgment".`
-                  : 'All answered — add a note below if you like, then send.'}
+              <div className="h-1.5 w-24 rounded-full bg-blue-100 overflow-hidden flex-shrink-0">
+                <div
+                  className="h-full bg-blue-600 transition-all"
+                  style={{
+                    width: `${(answeredCount / pendingQuestions.length) * 100}%`,
+                  }}
+                />
               </div>
             </div>
-            <div className="h-1.5 w-24 rounded-full bg-blue-100 overflow-hidden flex-shrink-0">
-              <div
-                className="h-full bg-blue-600 transition-all"
-                style={{ width: `${(answeredCount / pendingQuestions.length) * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-        {attachError && <div className="text-xs text-red-600">{attachError}</div>}
-        {pendingFiles.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {pendingFiles.map((f) => (
-              <span
-                key={f.name}
-                className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 pl-2 pr-1 py-0.5 text-xs text-gray-700"
-              >
-                <Paperclip className="w-3 h-3" />
-                {f.name}
-                <button
-                  type="button"
-                  onClick={() => setPendingFiles((prev) => prev.filter((p) => p.name !== f.name))}
-                  disabled={disabled}
-                  aria-label={`Remove ${f.name}`}
-                  className="p-0.5 rounded-full hover:bg-gray-200"
+          )}
+          {attachError && <div className="text-xs text-red-600">{attachError}</div>}
+          {pendingFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {pendingFiles.map((f) => (
+                <span
+                  key={f.name}
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 pl-2 pr-1 py-0.5 text-xs text-gray-700"
                 >
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="flex gap-2 items-end">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_ATTACHMENT_TYPES}
-            hidden
-            onChange={(e) => {
-              void handleFilesSelected(e.target.files);
-              e.target.value = '';
-            }}
-          />
-          <Button
-            type="button"
-            size="icon"
-            variant="outline"
-            title="Attach a PDF or text file — it stays available to every agent in this session"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-          >
-            <Paperclip />
-          </Button>
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // While answering questions, Enter is just a newline — answers only go out via the button.
-              if (e.key === 'Enter' && !e.shiftKey && !batchOpen) {
-                e.preventDefault();
-                send();
+                  <Paperclip className="w-3 h-3" />
+                  {f.name}
+                  <button
+                    type="button"
+                    onClick={() => setPendingFiles((prev) => prev.filter((p) => p.name !== f.name))}
+                    disabled={disabled}
+                    aria-label={`Remove ${f.name}`}
+                    className="p-0.5 rounded-full hover:bg-gray-200"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2 items-end">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_ATTACHMENT_TYPES}
+              hidden
+              onChange={(e) => {
+                void handleFilesSelected(e.target.files);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              title="Attach a PDF or text file — it stays available to every agent in this session"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled}
+            >
+              <Paperclip />
+            </Button>
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // While answering questions, Enter is just a newline — answers only go out via the button.
+                if (e.key === 'Enter' && !e.shiftKey && !batchOpen) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder={
+                batchOpen && !disabled
+                  ? 'Optional: add a note to send with your answers…'
+                  : (placeholder ?? 'Type a message…')
               }
-            }}
-            placeholder={
-              batchOpen && !disabled
-                ? 'Optional: add a note to send with your answers…'
-                : placeholder ?? 'Type a message…'
-            }
-            disabled={disabled}
-            rows={2}
-            className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
-          />
-          <Button variant="blue" onClick={send} disabled={!canSend}>
-            <Send />
-            {batchOpen && answeredCount > 0 ? `Send answer${answeredCount === 1 ? '' : 's'}` : 'Send'}
-          </Button>
+              disabled={disabled}
+              rows={2}
+              className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+            />
+            <Button onClick={send} disabled={!canSend}>
+              <Send />
+              {batchOpen && answeredCount > 0 ? `Send answer${answeredCount === 1 ? '' : 's'}` : 'Send'}
+            </Button>
+          </div>
         </div>
-      </div>
       )}
     </div>
   );

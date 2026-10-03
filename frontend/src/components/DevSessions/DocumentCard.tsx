@@ -29,7 +29,16 @@ interface DocumentCardProps {
   };
 }
 
-export function DocumentCard({ title, subtitle, markdown, emptyText, badge, notices, footer, editing }: DocumentCardProps) {
+export function DocumentCard({
+  title,
+  subtitle,
+  markdown,
+  emptyText,
+  badge,
+  notices,
+  footer,
+  editing,
+}: DocumentCardProps) {
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
@@ -68,7 +77,7 @@ export function DocumentCard({ title, subtitle, markdown, emptyText, badge, noti
           <div className="pt-3 border-t border-gray-100">
             <ErrorText>{editing.error}</ErrorText>
             <div className="flex gap-2 mt-2">
-              <Button variant="blue" onClick={editing.onSave} disabled={!editing.draft.trim() || editing.saving}>
+              <Button onClick={editing.onSave} disabled={!editing.draft.trim() || editing.saving}>
                 {editing.saving ? <Loader2 className="animate-spin" /> : <Save />}
                 {editing.saving ? 'Saving…' : 'Save'}
               </Button>

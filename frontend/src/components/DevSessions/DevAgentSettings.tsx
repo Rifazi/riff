@@ -32,14 +32,42 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 };
 
 const ROLES: { key: Role; label: string; hint: string }[] = [
-  { key: 'requirements', label: `${AGENT_PERSONAS.requirements.name} — ${AGENT_PERSONAS.requirements.title}`, hint: 'Requirements' },
-  { key: 'plan', label: `${AGENT_PERSONAS.plan.name} — ${AGENT_PERSONAS.plan.title}`, hint: 'Plan' },
-  { key: 'coding', label: `${AGENT_PERSONAS.coding.name} — ${AGENT_PERSONAS.coding.title}`, hint: 'Coding' },
-  { key: 'qa', label: `${AGENT_PERSONAS.qa.name} — ${AGENT_PERSONAS.qa.title}`, hint: 'QA' },
-  { key: 'coordinator', label: `${COORDINATOR_PERSONA.name} — ${COORDINATOR_PERSONA.title}`, hint: 'Opt-in per session' },
+  {
+    key: 'requirements',
+    label: `${AGENT_PERSONAS.requirements.name} — ${AGENT_PERSONAS.requirements.title}`,
+    hint: 'Requirements',
+  },
+  {
+    key: 'plan',
+    label: `${AGENT_PERSONAS.plan.name} — ${AGENT_PERSONAS.plan.title}`,
+    hint: 'Plan',
+  },
+  {
+    key: 'coding',
+    label: `${AGENT_PERSONAS.coding.name} — ${AGENT_PERSONAS.coding.title}`,
+    hint: 'Coding',
+  },
+  {
+    key: 'qa',
+    label: `${AGENT_PERSONAS.qa.name} — ${AGENT_PERSONAS.qa.title}`,
+    hint: 'QA',
+  },
+  {
+    key: 'coordinator',
+    label: `${COORDINATOR_PERSONA.name} — ${COORDINATOR_PERSONA.title}`,
+    hint: 'Opt-in per session',
+  },
 ];
 
-function Section({ title, description, children }: { title: string; description: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
       <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
@@ -60,7 +88,10 @@ function TestResult({ result, okText }: { result: { ok: boolean; error?: string 
 }
 
 function ClaudeLoginRow() {
-  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    error?: string;
+  } | null>(null);
   const testMutation = useMutation({
     mutationFn: () => api.testCredential({ provider: 'claude' }),
     onSuccess: setTestResult,
@@ -72,8 +103,8 @@ function ClaudeLoginRow() {
         <div>
           <div className="font-medium text-gray-900">{PROVIDER_LABEL.claude}</div>
           <p className="text-sm text-gray-500 mt-1 max-w-xl">
-            Uses whatever <code>claude login</code> set up on this machine — billed against your Claude subscription, not
-            an API key. If it isn't logged in, run <code>claude login</code> in a terminal, then test again.
+            Uses whatever <code>claude login</code> set up on this machine — billed against your Claude subscription,
+            not an API key. If it isn't logged in, run <code>claude login</code> in a terminal, then test again.
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => testMutation.mutate()} disabled={testMutation.isPending}>
@@ -89,7 +120,10 @@ function ClaudeLoginRow() {
 function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boolean }) {
   const queryClient = useQueryClient();
   const [value, setValue] = useState('');
-  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    error?: string;
+  } | null>(null);
 
   const invalidate = () => {
     setTestResult(null);
@@ -125,7 +159,12 @@ function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boole
           onChange={(e) => setValue(e.target.value)}
           autoComplete="off"
         />
-        <Button size="sm" variant="blue" className="h-9" onClick={() => saveMutation.mutate()} disabled={!value.trim() || saveMutation.isPending}>
+        <Button
+          size="sm"
+          className="h-9"
+          onClick={() => saveMutation.mutate()}
+          disabled={!value.trim() || saveMutation.isPending}
+        >
           {saveMutation.isPending ? 'Saving…' : 'Save'}
         </Button>
         <Button
@@ -138,7 +177,13 @@ function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boole
           {testMutation.isPending ? 'Testing…' : 'Test'}
         </Button>
         {hasKey && (
-          <Button size="sm" variant="ghost" className="h-9" onClick={() => clearMutation.mutate()} disabled={clearMutation.isPending}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-9"
+            onClick={() => clearMutation.mutate()}
+            disabled={clearMutation.isPending}
+          >
             Clear
           </Button>
         )}
@@ -199,7 +244,13 @@ function RoleModelRow({
             ))}
           </SelectContent>
         </Select>
-        <Input list={listId} value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model ID" className="flex-1 font-mono text-xs" />
+        <Input
+          list={listId}
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="Model ID"
+          className="flex-1 font-mono text-xs"
+        />
         <datalist id={listId}>
           {(knownModels[provider] ?? []).map((m) => (
             <option key={m} value={m} />
@@ -207,7 +258,6 @@ function RoleModelRow({
         </datalist>
         <Button
           size="sm"
-          variant="blue"
           className="h-9"
           disabled={!dirty || !model.trim() || saving}
           onClick={() =>
@@ -215,7 +265,9 @@ function RoleModelRow({
             onSave({
               provider,
               model: model.trim(),
-              ...(provider === value.provider && value.lightModel !== undefined ? { lightModel: value.lightModel } : {}),
+              ...(provider === value.provider && value.lightModel !== undefined
+                ? { lightModel: value.lightModel }
+                : {}),
               ...(value.useLocalModel !== undefined ? { useLocalModel: value.useLocalModel } : {}),
             })
           }
@@ -234,7 +286,10 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
   const [issueType, setIssueType] = useState(jira.issueType);
   const [epicLinkFieldId, setEpicLinkFieldId] = useState(jira.epicLinkFieldId);
   const [apiToken, setApiToken] = useState('');
-  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     setBaseUrl(jira.baseUrl);
@@ -243,12 +298,24 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
     setEpicLinkFieldId(jira.epicLinkFieldId);
   }, [jira.baseUrl, jira.email, jira.issueType, jira.epicLinkFieldId]);
 
-  const fields = { baseUrl, email, issueType: issueType || 'Task', epicLinkFieldId };
+  const fields = {
+    baseUrl,
+    email,
+    issueType: issueType || 'Task',
+    epicLinkFieldId,
+  };
   const dirty =
-    baseUrl !== jira.baseUrl || email !== jira.email || issueType !== jira.issueType || epicLinkFieldId !== jira.epicLinkFieldId || Boolean(apiToken);
+    baseUrl !== jira.baseUrl ||
+    email !== jira.email ||
+    issueType !== jira.issueType ||
+    epicLinkFieldId !== jira.epicLinkFieldId ||
+    Boolean(apiToken);
 
   const saveMutation = useMutation({
-    mutationFn: () => api.updateSettings({ jira: { ...fields, apiToken: apiToken || undefined } }),
+    mutationFn: () =>
+      api.updateSettings({
+        jira: { ...fields, apiToken: apiToken || undefined },
+      }),
     onSuccess: () => {
       setApiToken('');
       setTestResult(null);
@@ -272,11 +339,22 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
       title="Jira"
       description="Optional — enables “Create tickets” on the Plan stage: one Jira issue per plan step, linked to the epic your session's ticket belongs to. Jira Cloud only."
     >
-      {row('Base URL', <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://yourcompany.atlassian.net" />)}
-      {row('Account email', <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />)}
+      {row(
+        'Base URL',
+        <Input
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          placeholder="https://yourcompany.atlassian.net"
+        />,
+      )}
+      {row(
+        'Account email',
+        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" />,
+      )}
       {row(
         <span className="flex items-center gap-2">
-          API token <Badge variant={jira.hasToken ? 'success' : 'secondary'}>{jira.hasToken ? 'Configured' : 'Not set'}</Badge>
+          API token{' '}
+          <Badge variant={jira.hasToken ? 'success' : 'secondary'}>{jira.hasToken ? 'Configured' : 'Not set'}</Badge>
         </span>,
         <div>
           <Input
@@ -288,12 +366,15 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
           />
           <p className="text-xs text-gray-500 mt-1.5">
             Create one at{' '}
-            <ExternalAnchor href="https://id.atlassian.com/manage-profile/security/api-tokens" className="text-blue-600 hover:underline">
+            <ExternalAnchor
+              href="https://id.atlassian.com/manage-profile/security/api-tokens"
+              className="text-blue-600 hover:underline"
+            >
               id.atlassian.com/manage-profile/security/api-tokens
             </ExternalAnchor>{' '}
             while signed in as the email above. It's only shown once.
           </p>
-        </div>
+        </div>,
       )}
       {row('Issue type', <Input value={issueType} onChange={(e) => setIssueType(e.target.value)} placeholder="Task" />)}
       {row(
@@ -302,11 +383,11 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
           value={epicLinkFieldId}
           onChange={(e) => setEpicLinkFieldId(e.target.value)}
           placeholder="Only for classic (company-managed) projects, e.g. customfield_10014"
-        />
+        />,
       )}
       <div className="pt-4">
         <div className="flex gap-2">
-          <Button variant="blue" onClick={() => saveMutation.mutate()} disabled={!dirty || saveMutation.isPending}>
+          <Button onClick={() => saveMutation.mutate()} disabled={!dirty || saveMutation.isPending}>
             {saveMutation.isPending ? 'Saving…' : 'Save'}
           </Button>
           <Button variant="outline" onClick={() => testMutation.mutate()} disabled={testMutation.isPending}>
@@ -377,7 +458,6 @@ function LightStepsRow({
         </datalist>
         <Button
           size="sm"
-          variant="blue"
           className="h-9"
           disabled={!enabled || !dirty || !model.trim() || saving}
           onClick={() => onSave({ ...value, lightModel: model.trim() })}
@@ -430,10 +510,14 @@ function LocalCoordinatorRow({
 
 export function DevAgentSettings() {
   const queryClient = useQueryClient();
-  const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  });
 
   const saveModelMutation = useMutation({
-    mutationFn: (input: { role: Role; config: RoleModelConfig }) => api.updateSettings({ models: { [input.role]: input.config } }),
+    mutationFn: (input: { role: Role; config: RoleModelConfig }) =>
+      api.updateSettings({ models: { [input.role]: input.config } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
   });
 
@@ -454,7 +538,7 @@ export function DevAgentSettings() {
                   <CredentialRow key={p} provider={p} hasKey={settings.credentials[p].hasKey} />
                 ) : (
                   <ClaudeLoginRow key={p} />
-                )
+                ),
               )}
             </Section>
 

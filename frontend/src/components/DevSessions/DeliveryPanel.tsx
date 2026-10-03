@@ -10,7 +10,11 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ExternalAnchor } from './ExternalAnchor';
 import { ErrorText, Notice } from './PageShell';
 
-function actionFor(plan: DeliveryPlan): { label: string; icon: typeof GitMerge; confirm: string } {
+function actionFor(plan: DeliveryPlan): {
+  label: string;
+  icon: typeof GitMerge;
+  confirm: string;
+} {
   if (plan.kind === 'merge') {
     return {
       label: `Merge into ${plan.baseBranch}`,
@@ -45,7 +49,11 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
   const delivered = session.delivery;
   const canShip = !delivered || delivered.kind === 'pushed';
 
-  const { data: plan, error: planError, isLoading } = useQuery({
+  const {
+    data: plan,
+    error: planError,
+    isLoading,
+  } = useQuery({
     queryKey: ['delivery-plan', session.id, session.branch],
     queryFn: () => api.getDeliveryPlan(session.id),
     enabled: canShip,
@@ -73,7 +81,10 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
             <div className="space-y-1">
               <div>{delivered.detail}</div>
               {delivered.url && (
-                <ExternalAnchor href={delivered.url} className="inline-flex items-center gap-1 font-medium underline break-all">
+                <ExternalAnchor
+                  href={delivered.url}
+                  className="inline-flex items-center gap-1 font-medium underline break-all"
+                >
                   {delivered.url}
                   <ExternalLink className="w-3 h-3 flex-shrink-0" />
                 </ExternalAnchor>
@@ -93,11 +104,15 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
           )}
           {plan && <p className="text-sm text-gray-600">{plan.reason}</p>}
           {plan && qaResult && qaResult !== 'pass' && (
-            <Notice tone="amber">QA&apos;s result was &quot;{qaResult}&quot; — make sure you&apos;re happy with that before shipping.</Notice>
+            <Notice tone="amber">
+              QA&apos;s result was &quot;{qaResult}&quot; — make sure you&apos;re happy with that before shipping.
+            </Notice>
           )}
-          <ErrorText>{(planError as Error | null)?.message ?? (deliverMutation.error as Error | null)?.message ?? null}</ErrorText>
+          <ErrorText>
+            {(planError as Error | null)?.message ?? (deliverMutation.error as Error | null)?.message ?? null}
+          </ErrorText>
           {plan && action && (
-            <Button size="sm" variant="blue" onClick={() => setConfirming(true)} disabled={deliverMutation.isPending}>
+            <Button size="sm" onClick={() => setConfirming(true)} disabled={deliverMutation.isPending}>
               {deliverMutation.isPending ? <Loader2 className="animate-spin" /> : <Icon />}
               {deliverMutation.isPending ? 'Working…' : action.label}
             </Button>

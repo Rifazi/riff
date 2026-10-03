@@ -14,9 +14,19 @@ export function SearchSettings() {
   const { data: status, isLoading, refetch } = useSearchStatus();
 
   const onError = (title: string) => (error: unknown) =>
-    toast.error(title, { description: error instanceof Error ? error.message : String(error) });
-  const download = useMutation({ mutationFn: searchApi.downloadModel, onSettled: () => refetch(), onError: onError('Could not download the model') });
-  const remove = useMutation({ mutationFn: searchApi.removeModel, onSettled: () => refetch(), onError: onError('Could not remove the model') });
+    toast.error(title, {
+      description: error instanceof Error ? error.message : String(error),
+    });
+  const download = useMutation({
+    mutationFn: searchApi.downloadModel,
+    onSettled: () => refetch(),
+    onError: onError('Could not download the model'),
+  });
+  const remove = useMutation({
+    mutationFn: searchApi.removeModel,
+    onSettled: () => refetch(),
+    onError: onError('Could not remove the model'),
+  });
   const rebuild = useMutation({
     mutationFn: searchApi.rebuildIndex,
     onSuccess: () => toast.success('Search index rebuilt'),
@@ -36,9 +46,9 @@ export function SearchSettings() {
         <h3 className="text-lg font-semibold text-gray-900">Search</h3>
         <p className="mt-1 text-sm text-gray-600">
           Meeting and journal search runs entirely on this computer. It matches your words (including other forms of
-          them, like “hire” and “hiring”) and, with the model below, what you mean, so “when did we push back the launch”
-          finds a meeting where someone said “let’s move the release two weeks”. Dev Session agents search their docs
-          the same way.
+          them, like “hire” and “hiring”) and, with the model below, what you mean, so “when did we push back the
+          launch” finds a meeting where someone said “let’s move the release two weeks”. Dev Session agents search their
+          docs the same way.
         </p>
         <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
           <div>
@@ -94,7 +104,7 @@ export function SearchSettings() {
             <div className="space-y-2">
               {model.installed && !model.error && <div className="text-gray-600">Loading the model…</div>}
               {model.error && <div className="text-red-600">{model.error}</div>}
-              <Button variant="blue" onClick={() => download.mutate()} disabled={download.isPending}>
+              <Button onClick={() => download.mutate()} disabled={download.isPending}>
                 {download.isPending ? <Loader2 className="animate-spin" /> : <Download />}
                 {model.installed ? 'Load model' : `Download (${mb(model.sizeBytes)})`}
               </Button>

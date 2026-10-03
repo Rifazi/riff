@@ -1,11 +1,29 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, FolderLock, GitMerge, Loader2, Maximize2, Play, RotateCcw, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  FolderLock,
+  GitMerge,
+  Loader2,
+  Maximize2,
+  Play,
+  RotateCcw,
+  Users,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
-import type { CodingPlanStep, CodingTeamMember, PlanStepSummary, PlanWorkstream, TeamMemberStatus, TranscriptEntry } from '@/lib/dev-sessions/types';
+import type {
+  CodingPlanStep,
+  CodingTeamMember,
+  PlanStepSummary,
+  PlanWorkstream,
+  TeamMemberStatus,
+  TranscriptEntry,
+} from '@/lib/dev-sessions/types';
 import { TEAM_LEAD_PERSONA, teamMemberPersona, type TeamPersona } from '@/lib/dev-sessions/agents';
 import { AgentAvatar, ChatPane } from './ChatPane';
 import { CodingPlanChecklist } from './CodingPlanChecklist';
@@ -93,7 +111,8 @@ export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstr
         <div className="min-w-0">
           <div className="text-sm font-semibold text-gray-900">Coded by a team of {workstreams.length + 1} agents</div>
           <div className="text-xs text-gray-500">
-            {TEAM_LEAD_PERSONA.name} leads · {workstreams.length} engineers, {startNow} starting at once · each owns its own files
+            {TEAM_LEAD_PERSONA.name} leads · {workstreams.length} engineers, {startNow} starting at once · each owns its
+            own files
           </div>
         </div>
       </div>
@@ -106,7 +125,8 @@ export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstr
                 <AgentAvatar agent={personas[i]} size="sm" />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-gray-900">
-                    <span className="font-medium">{personas[i].name}</span> <span className="text-gray-500">· {ws.title}</span>
+                    <span className="font-medium">{personas[i].name}</span>{' '}
+                    <span className="text-gray-500">· {ws.title}</span>
                   </div>
                   <div className="text-xs text-gray-500">{after ? `Starts after ${after}` : 'Starts right away'}</div>
                 </div>
@@ -166,7 +186,13 @@ function MemberLog({
         <>
           <StatusPill status={member.status} />
           {!expandedView && (
-            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setExpanded(true)} title={`Open ${persona.name}'s full log`}>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              onClick={() => setExpanded(true)}
+              title={`Open ${persona.name}'s full log`}
+            >
               <Maximize2 className="w-4 h-4" />
             </Button>
           )}
@@ -218,13 +244,37 @@ const LEAD_TAB = '__lead__';
  * every other agent.
  */
 export function CodingTeamPanel(props: CodingTeamPanelProps) {
-  const { workstreams, members, teamStatus, teamFinished, steps, branch, entriesFor, runningTools, canStart, starting, onStart, leadChat } = props;
+  const {
+    workstreams,
+    members,
+    teamStatus,
+    teamFinished,
+    steps,
+    branch,
+    entriesFor,
+    runningTools,
+    canStart,
+    starting,
+    onStart,
+    leadChat,
+  } = props;
   const lineup: CodingTeamMember[] =
-    members ?? workstreams.map((ws) => ({ ...ws, branch: '', status: 'waiting', note: null, startedAt: null, finishedAt: null, transcript: [] }));
+    members ??
+    workstreams.map((ws) => ({
+      ...ws,
+      branch: '',
+      status: 'waiting',
+      note: null,
+      startedAt: null,
+      finishedAt: null,
+      transcript: [],
+    }));
   const personas = lineup.map((m, i) => teamMemberPersona(i, m.title));
 
   const [picked, setPicked] = useState<string | null>(null);
-  const defaultTab = teamFinished ? LEAD_TAB : (lineup.find((m) => m.status === 'running') ?? lineup[0])?.id ?? LEAD_TAB;
+  const defaultTab = teamFinished
+    ? LEAD_TAB
+    : ((lineup.find((m) => m.status === 'running') ?? lineup[0])?.id ?? LEAD_TAB);
   const selected = picked ?? defaultTab;
   const selectedIndex = lineup.findIndex((m) => m.id === selected);
   const member = selectedIndex >= 0 ? lineup[selectedIndex] : null;
@@ -259,8 +309,14 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             </div>
           </div>
           {canStart && (
-            <Button size="sm" variant="blue" onClick={onStart} disabled={starting}>
-              {starting ? <Loader2 className="animate-spin" /> : teamStatus === 'not_started' ? <Play /> : <RotateCcw />}
+            <Button size="sm" onClick={onStart} disabled={starting}>
+              {starting ? (
+                <Loader2 className="animate-spin" />
+              ) : teamStatus === 'not_started' ? (
+                <Play />
+              ) : (
+                <RotateCcw />
+              )}
               {teamStatus === 'not_started' ? 'Start the team' : 'Resume the team'}
             </Button>
           )}
@@ -277,7 +333,12 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             )}
           </div>
           <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full bg-green-500 transition-all" style={{ width: `${teamStepIds.length ? (doneSteps / teamStepIds.length) * 100 : 0}%` }} />
+            <div
+              className="h-full bg-green-500 transition-all"
+              style={{
+                width: `${teamStepIds.length ? (doneSteps / teamStepIds.length) * 100 : 0}%`,
+              }}
+            />
           </div>
         </div>
         {teamFinished && (
@@ -297,7 +358,9 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
               aria-selected={selected === m.id}
               onClick={() => setPicked(m.id)}
               className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
-                selected === m.id ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                selected === m.id
+                  ? 'border-blue-300 bg-blue-50 text-blue-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
               title={`${personas[i].name} · ${m.title} — ${STATUS_META[m.status].label}`}
             >
@@ -312,7 +375,9 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             aria-selected={selected === LEAD_TAB}
             onClick={() => setPicked(LEAD_TAB)}
             className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
-              selected === LEAD_TAB ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+              selected === LEAD_TAB
+                ? 'border-blue-300 bg-blue-50 text-blue-800'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
             }`}
           >
             <AgentAvatar agent={TEAM_LEAD_PERSONA} size="xs" />
@@ -327,12 +392,22 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
           <div className="flex-shrink-0 space-y-2">
             <CodingPlanChecklist
               title={`${personas[selectedIndex].name}'s steps · ${member.title}`}
-              steps={member.stepIds.map((id) => steps.find((s) => s.id === id) ?? { id, title: id, status: 'pending' as const })}
+              steps={member.stepIds.map(
+                (id) =>
+                  steps.find((s) => s.id === id) ?? {
+                    id,
+                    title: id,
+                    status: 'pending' as const,
+                  },
+              )}
             />
             <OwnedPaths paths={member.ownedPaths} />
-            {member.note && (member.status === 'failed' || member.status === 'blocked' || member.status === 'waiting') && (
-              <div className={`text-xs ${member.status === 'waiting' ? 'text-gray-500' : 'text-red-600'}`}>{member.note}</div>
-            )}
+            {member.note &&
+              (member.status === 'failed' || member.status === 'blocked' || member.status === 'waiting') && (
+                <div className={`text-xs ${member.status === 'waiting' ? 'text-gray-500' : 'text-red-600'}`}>
+                  {member.note}
+                </div>
+              )}
           </div>
           <MemberLog
             key={member.id}

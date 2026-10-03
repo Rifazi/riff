@@ -54,24 +54,36 @@ export function SplitProposalCard({
                 <span className="text-sm font-medium text-gray-900">{part.title}</span>
                 <span className="ml-2 font-mono text-[11px] text-gray-500">{part.sessionKey}</span>
                 {part.dependsOn.length > 0 && (
-                  <span className="ml-2 text-[11px] text-gray-500">after {part.dependsOn.map((d) => d + 1).join(', ')}</span>
+                  <span className="ml-2 text-[11px] text-gray-500">
+                    after {part.dependsOn.map((d) => d + 1).join(', ')}
+                  </span>
                 )}
               </span>
-              <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${openIndex === i ? 'rotate-180' : ''}`} />
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-gray-400 transition-transform ${openIndex === i ? 'rotate-180' : ''}`}
+              />
             </button>
             {openIndex === i && (
-              <div className="px-3 pb-2.5 pt-1 text-xs text-gray-700 whitespace-pre-wrap border-t border-purple-50">{part.brief}</div>
+              <div className="px-3 pb-2.5 pt-1 text-xs text-gray-700 whitespace-pre-wrap border-t border-purple-50">
+                {part.brief}
+              </div>
             )}
           </li>
         ))}
       </ol>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="blue" disabled={disabled || busy !== null} onClick={onAccept}>
+        <Button size="sm" disabled={disabled || busy !== null} onClick={onAccept}>
           {busy === 'accept' ? <Loader2 className="animate-spin" /> : <GitFork />}
           Split into {proposal.parts.length} sessions
         </Button>
-        <Button size="sm" variant="outline" className="bg-white" disabled={disabled || busy !== null} onClick={onDismiss}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="bg-white"
+          disabled={disabled || busy !== null}
+          onClick={onDismiss}
+        >
           {busy === 'dismiss' && <Loader2 className="animate-spin" />}
           Keep as one
         </Button>
@@ -83,7 +95,10 @@ export function SplitProposalCard({
 
 function SessionLink({ session }: { session: SessionRecord }) {
   return (
-    <Link href={sessionHref(session.id, stageGroupFor(session))} className="inline-flex items-center gap-1.5 hover:underline">
+    <Link
+      href={sessionHref(session.id, stageGroupFor(session))}
+      className="inline-flex items-center gap-1.5 hover:underline"
+    >
       <span className="font-medium">{session.title}</span>
       <span className="font-mono text-[11px] opacity-70">{session.sessionKey}</span>
     </Link>
@@ -93,7 +108,11 @@ function SessionLink({ session }: { session: SessionRecord }) {
 /** Where this session sits in a split: the children of a split parent, or a child's parent and dependencies. */
 export function SplitLinks({ session }: { session: SessionRecord }) {
   const related = session.splitInto.length > 0 || session.splitFrom;
-  const { data: sessions } = useQuery({ queryKey: ['sessions'], queryFn: () => api.listSessions(), enabled: Boolean(related) });
+  const { data: sessions } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: () => api.listSessions(),
+    enabled: Boolean(related),
+  });
   if (!related) return null;
   const byId = new Map((sessions ?? []).map((s) => [s.id, s]));
 
@@ -108,7 +127,8 @@ export function SplitLinks({ session }: { session: SessionRecord }) {
               <li key={id}>
                 {child ? (
                   <>
-                    <SessionLink session={child} /> <Badge variant="secondary">{STAGE_LABEL[child.stage] ?? child.stage}</Badge>
+                    <SessionLink session={child} />{' '}
+                    <Badge variant="secondary">{STAGE_LABEL[child.stage] ?? child.stage}</Badge>
                   </>
                 ) : (
                   <span className="text-gray-500">(deleted session)</span>
@@ -129,7 +149,8 @@ export function SplitLinks({ session }: { session: SessionRecord }) {
       Part of {parent ? <SessionLink session={parent} /> : <span className="font-medium">{origin.title}</span>}
       {deps.length > 0 && (
         <>
-          {' '}· builds on{' '}
+          {' '}
+          · builds on{' '}
           {deps.map((dep, i) => (
             <span key={dep.id}>
               {i > 0 && ', '}

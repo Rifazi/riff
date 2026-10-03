@@ -12,7 +12,12 @@ import { api } from '@/lib/dev-sessions/api';
 const ADD_NEW = '__add_new_app__';
 
 function folderName(path: string): string {
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+  return (
+    path
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() ?? ''
+  );
 }
 
 function prettifyName(raw: string): string {
@@ -96,7 +101,6 @@ function AddAppForm({ onAdded, onCancel }: { onAdded: (appId: string) => void; o
         <Button
           type="button"
           size="sm"
-          variant="blue"
           disabled={!repoRoot.trim() || !name.trim() || createMutation.isPending}
           onClick={() => createMutation.mutate()}
         >
@@ -128,7 +132,11 @@ export function AppPicker({
   triggerClassName?: string;
   enabled?: boolean;
 }) {
-  const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps, enabled });
+  const { data: apps } = useQuery({
+    queryKey: ['apps'],
+    queryFn: api.listApps,
+    enabled,
+  });
   const [adding, setAdding] = useState(false);
 
   // Default to the first app, but never override a choice already made.
@@ -154,10 +162,7 @@ export function AppPicker({
   }
 
   return (
-    <Select
-      value={value || undefined}
-      onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}
-    >
+    <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}>
       <SelectTrigger className={`bg-white ${triggerClassName}`}>
         <SelectValue placeholder={apps ? 'Choose an app' : 'Loading…'} />
       </SelectTrigger>

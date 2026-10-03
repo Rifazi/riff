@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Paintbrush } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { api } from '@/lib/dev-sessions/api';
 import type { SessionRecord, ThemeApplyResult, ThemeDraft } from '@/lib/dev-sessions/types';
 import { ErrorText, Notice } from './PageShell';
@@ -31,7 +38,10 @@ export function ThemeProposalPanel({
 }) {
   const proposal = session.themeProposal;
   const queryClient = useQueryClient();
-  const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
+  const { data: apps } = useQuery({
+    queryKey: ['apps'],
+    queryFn: api.listApps,
+  });
   const { data: themeState } = useQuery({
     queryKey: ['app-theme', session.appId],
     queryFn: () => api.getAppTheme(session.appId),
@@ -74,10 +84,13 @@ export function ThemeProposalPanel({
       <Notice tone="blue">
         <div className="space-y-2">
           <div>
-            <span className="font-medium">{agentName} suggested a theme: {proposal.theme.name}.</span> {proposal.summary}
+            <span className="font-medium">
+              {agentName} suggested a theme: {proposal.theme.name}.
+            </span>{' '}
+            {proposal.summary}
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="blue" disabled={disabled} onClick={() => setOpen(true)}>
+            <Button size="sm" disabled={disabled} onClick={() => setOpen(true)}>
               <Paintbrush />
               Open theme picker
             </Button>
@@ -93,8 +106,8 @@ export function ThemeProposalPanel({
           <DialogHeader>
             <DialogTitle>Theme for {appName}</DialogTitle>
             <DialogDescription>
-              {agentName}: {proposal.summary} Adjust anything, then apply. It&apos;s saved to <code>theme/theme.json</code> and
-              committed on the base branch.
+              {agentName}: {proposal.summary} Adjust anything, then apply. It&apos;s saved to{' '}
+              <code>theme/theme.json</code> and committed on the base branch.
             </DialogDescription>
           </DialogHeader>
           <ThemeStudio value={draft} onChange={setDraft} current={themeState?.current ?? null} appName={appName} />
@@ -106,7 +119,7 @@ export function ThemeProposalPanel({
             <Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>
               Decide later
             </Button>
-            <Button variant="blue" disabled={!draft || busy || disabled} onClick={() => applyMutation.mutate()}>
+            <Button disabled={!draft || busy || disabled} onClick={() => applyMutation.mutate()}>
               <Paintbrush />
               {applyMutation.isPending ? 'Applying…' : `Apply ${draft?.theme.name ?? 'theme'}`}
             </Button>

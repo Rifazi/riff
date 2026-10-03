@@ -57,7 +57,10 @@ function compactQaReport(markdown: string): string {
     .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''));
   let text = `QA result: ${field('result') ?? '?'}`;
   if (failed.length > 0) text += ` — failing checks: ${failed.join(', ')}`;
-  text += findings.length > 0 ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  text +=
+    findings.length > 0
+      ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}`
+      : '\n\nNo blocking findings were listed.';
   if (notes.length > 0) {
     text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n) => `- ${n}`).join('\n')}`;
   }
@@ -110,7 +113,8 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     : codingTeam.status === 'running' && !teamActive
       ? ('interrupted' as const)
       : codingTeam.status;
-  const teamFinished = Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
+  const teamFinished =
+    Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
 
   // Watching a run started elsewhere (another window, or before a reload):
   // poll instead of streaming.
@@ -145,7 +149,10 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     },
   });
 
-  const rejectMutation = useMutation({ mutationFn: () => api.rejectCoding(sessionId), onSuccess: refresh });
+  const rejectMutation = useMutation({
+    mutationFn: () => api.rejectCoding(sessionId),
+    onSuccess: refresh,
+  });
 
   const [showSendBackForm, setShowSendBackForm] = useState(false);
   const [sendBackNote, setSendBackNote] = useState('');
@@ -185,11 +192,13 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         // as the agent works instead of only when the whole turn finishes.
         if (event.type === 'tool_result') {
           queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-          queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
+          queryClient.invalidateQueries({
+            queryKey: ['coding-diff', sessionId],
+          });
         }
       },
       attachments,
-      stepTurn ? { stepTurn: true } : undefined
+      stepTurn ? { stepTurn: true } : undefined,
     );
   };
 
@@ -205,7 +214,15 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     if (session.coordinatorEnabled) return;
     void handleSend(CODING_KICKOFF_MESSAGE, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming, planDoc, teamMode]);
+  }, [
+    session.id,
+    session.branch,
+    session.coordinatorEnabled,
+    session.transcripts.coding.length,
+    streaming,
+    planDoc,
+    teamMode,
+  ]);
 
   // QA sent this back for fixes — relay the report as the next message.
   const kickedOffQaFix = useRef(false);
@@ -225,12 +242,12 @@ export function CodingStage({ session }: { session: SessionRecord }) {
           api
             .getQaReport(sessionId)
             .then((r) => (r.markdown ? compactQaReport(r.markdown) : null))
-            .catch(() => null)
+            .catch(() => null),
         );
       const findings =
         text ?? 'QA sent this back for fixes, but the findings could not be loaded — check the QA tab for details.';
       void handleSend(
-        `QA sent this back for fixes. Please address the findings below, then stop for review as usual once done:\n\n${findings}`
+        `QA sent this back for fixes. Please address the findings below, then stop for review as usual once done:\n\n${findings}`,
       );
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,7 +264,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     void handleSend(
       `Requirements and/or the plan were revised and reconciled — see the updated documents above.\n\n` +
         `Original note: ${session.pendingRequirementsRelayNote ?? '(no note provided)'}\n\n` +
-        `Continue on this branch, reconciling your checklist and any already-implemented work with the changes.`
+        `Continue on this branch, reconciling your checklist and any already-implemented work with the changes.`,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.codingReconciliationPending, streaming]);
@@ -265,7 +282,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     () => () => {
       autoRunActive.current = false;
     },
-    []
+    [],
   );
 
   const stopAutoRun = (reason: string | null) => {
@@ -275,11 +292,19 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   };
 
   const fetchSession = () =>
-    queryClient.fetchQuery({ queryKey: ['session', sessionId], queryFn: () => api.getSession(sessionId), staleTime: 0 });
+    queryClient.fetchQuery({
+      queryKey: ['session', sessionId],
+      queryFn: () => api.getSession(sessionId),
+      staleTime: 0,
+    });
   const fetchCommitCount = (branch: string | null) =>
     branch
       ? queryClient
-          .fetchQuery({ queryKey: ['coding-diff', sessionId, branch], queryFn: () => api.getCodingDiff(sessionId), staleTime: 0 })
+          .fetchQuery({
+            queryKey: ['coding-diff', sessionId, branch],
+            queryFn: () => api.getCodingDiff(sessionId),
+            staleTime: 0,
+          })
           .then((d) => d.commits.length)
           .catch(() => 0)
       : Promise.resolve(0);
@@ -309,7 +334,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       const reason = autoRunStopReason(turn, before, progressOf(current, commits), current);
       if (reason) return stopAutoRun(reason);
     }
-    stopAutoRun(`it hit the limit of ${MAX_AUTO_RUN_ATTEMPTS} steps in a row — check the checklist, then turn it back on to keep going.`);
+    stopAutoRun(
+      `it hit the limit of ${MAX_AUTO_RUN_ATTEMPTS} steps in a row — check the checklist, then turn it back on to keep going.`,
+    );
   };
 
   const entries = streaming ? [...session.transcripts.coding, ...overlay] : session.transcripts.coding;
@@ -320,7 +347,10 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   const showStepControls = canContinue || autoRun;
   const busy = streaming || teamActive;
   const canStartTeam =
-    teamMode && !teamActive && !approved && (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
+    teamMode &&
+    !teamActive &&
+    !approved &&
+    (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
 
   const leadChat = (
     <ChatPane
@@ -374,73 +404,75 @@ export function CodingStage({ session }: { session: SessionRecord }) {
             <ErrorText>{team.error ?? error}</ErrorText>
           </div>
         ) : (
-        <div className="flex flex-col flex-1 min-h-0 gap-3">
-          {plan && plan.length > 0 && (
-            <div className="flex-shrink-0 space-y-2">
-              <CodingPlanChecklist steps={plan} />
-              {showStepControls && (
-                <div className="flex flex-wrap items-center gap-4">
-                  {!autoRun && (
-                    <Button
-                      size="sm"
-                      variant="blue"
-                      onClick={() => void handleSend(CONTINUE_MESSAGE, undefined, true)}
-                    >
-                      <Play />
-                      Continue to next step
-                    </Button>
-                  )}
-                  <label
-                    className="flex items-center gap-2 text-sm text-gray-700"
-                    title={
-                      session.coordinatorEnabled
-                        ? `${COORDINATOR_PERSONA.name} is already driving this session — turn the coordinator off to use this.`
-                        : 'Continue through each remaining step without clicking — still stops for your approval before QA.'
-                    }
-                  >
-                    <Switch
-                      checked={autoRun}
-                      disabled={session.coordinatorEnabled}
-                      onCheckedChange={(checked) =>
-                        checked
-                          ? void runAutoLoop()
-                          : stopAutoRun(streaming ? 'you turned it off. The step already running will finish, then nothing more is sent.' : null)
+          <div className="flex flex-col flex-1 min-h-0 gap-3">
+            {plan && plan.length > 0 && (
+              <div className="flex-shrink-0 space-y-2">
+                <CodingPlanChecklist steps={plan} />
+                {showStepControls && (
+                  <div className="flex flex-wrap items-center gap-4">
+                    {!autoRun && (
+                      <Button size="sm" onClick={() => void handleSend(CONTINUE_MESSAGE, undefined, true)}>
+                        <Play />
+                        Continue to next step
+                      </Button>
+                    )}
+                    <label
+                      className="flex items-center gap-2 text-sm text-gray-700"
+                      title={
+                        session.coordinatorEnabled
+                          ? `${COORDINATOR_PERSONA.name} is already driving this session — turn the coordinator off to use this.`
+                          : 'Continue through each remaining step without clicking — still stops for your approval before QA.'
                       }
-                    />
-                    Auto-run remaining steps
-                  </label>
-                </div>
-              )}
-              {autoRunStopped && !autoRun && <Notice tone="amber">Auto-run stopped: {autoRunStopped}</Notice>}
-            </div>
-          )}
-          <ChatPane
-            entries={entries}
-            onSend={handleSend}
-            disabled={streaming || approved || autoRun}
-            streaming={streaming}
-            runningTool={runningTool}
-            agent={AGENT}
-            emptyHint={`${AGENT.name} implements the approved plan on a new branch.`}
-            placeholder={
-              approved
-                ? 'Coding approved — read only.'
-                : autoRun
-                  ? 'Auto-running remaining steps — turn it off to type a message…'
-                  : session.branch
-                    ? 'Ask for changes, or approve the diff…'
-                    : `Ask ${AGENT.name} to implement the approved plan…`
-            }
-          />
-          <ErrorText>{error}</ErrorText>
-        </div>
+                    >
+                      <Switch
+                        checked={autoRun}
+                        disabled={session.coordinatorEnabled}
+                        onCheckedChange={(checked) =>
+                          checked
+                            ? void runAutoLoop()
+                            : stopAutoRun(
+                                streaming
+                                  ? 'you turned it off. The step already running will finish, then nothing more is sent.'
+                                  : null,
+                              )
+                        }
+                      />
+                      Auto-run remaining steps
+                    </label>
+                  </div>
+                )}
+                {autoRunStopped && !autoRun && <Notice tone="amber">Auto-run stopped: {autoRunStopped}</Notice>}
+              </div>
+            )}
+            <ChatPane
+              entries={entries}
+              onSend={handleSend}
+              disabled={streaming || approved || autoRun}
+              streaming={streaming}
+              runningTool={runningTool}
+              agent={AGENT}
+              emptyHint={`${AGENT.name} implements the approved plan on a new branch.`}
+              placeholder={
+                approved
+                  ? 'Coding approved — read only.'
+                  : autoRun
+                    ? 'Auto-running remaining steps — turn it off to type a message…'
+                    : session.branch
+                      ? 'Ask for changes, or approve the diff…'
+                      : `Ask ${AGENT.name} to implement the approved plan…`
+              }
+            />
+            <ErrorText>{error}</ErrorText>
+          </div>
         )
       }
       document={
         <div className="flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm">
           <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 className="text-sm font-semibold text-gray-900">Diff against the base branch</h2>
-            {diffData?.stat && <div className="text-xs text-gray-500 font-mono truncate">{diffData.stat.trim().split('\n').pop()}</div>}
+            {diffData?.stat && (
+              <div className="text-xs text-gray-500 font-mono truncate">{diffData.stat.trim().split('\n').pop()}</div>
+            )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-4">
             <DiffViewer diff={diffData?.diff ?? null} />
@@ -462,15 +494,17 @@ export function CodingStage({ session }: { session: SessionRecord }) {
           <div className="flex-shrink-0 px-4 pb-4">
             {plan && !allStepsDone && !approved && (
               <Notice tone="amber">
-                {plan.filter((s) => s.status === 'done').length} of {plan.length} planned steps done — approving now sends
-                this partial implementation to QA.
+                {plan.filter((s) => s.status === 'done').length} of {plan.length} planned steps done — approving now
+                sends this partial implementation to QA.
               </Notice>
             )}
             <ApprovalBar
               approveLabel={approved ? 'Approved — QA started' : 'Approve diff and start QA'}
               onApprove={() => approveMutation.mutate()}
               approveDisabled={approved || !hasCommits || busy}
-              approveDisabledReason={teamActive ? 'The coding team is still working' : !hasCommits ? 'No commits on a branch yet' : undefined}
+              approveDisabledReason={
+                teamActive ? 'The coding team is still working' : !hasCommits ? 'No commits on a branch yet' : undefined
+              }
               busy={approveMutation.isPending}
               onReject={() => rejectMutation.mutate()}
               rejectDisabled={approved || busy}
@@ -490,7 +524,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               </Button>
             ) : (
               <div className="mt-3 space-y-2">
-                <label className="block text-xs font-medium text-gray-600">What needs to change in the requirements?</label>
+                <label className="block text-xs font-medium text-gray-600">
+                  What needs to change in the requirements?
+                </label>
                 <textarea
                   value={sendBackNote}
                   onChange={(e) => setSendBackNote(e.target.value)}
@@ -502,7 +538,6 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 <div className="flex gap-2">
                   <Button
                     size="sm"
-                    variant="blue"
                     onClick={() => sendBackMutation.mutate(sendBackNote)}
                     disabled={!sendBackNote.trim() || sendBackMutation.isPending}
                   >

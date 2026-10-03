@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -9,7 +9,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { api } from '@/lib/dev-sessions/api';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { buildMeetingSource } from '@/lib/dev-sessions/meeting';
@@ -76,7 +83,11 @@ export function RequirementsButton({ source, disabled }: { source: RequirementsS
         className="bg-purple-600 text-white hover:bg-purple-700"
         disabled={disabled}
         onClick={() => setOpen(true)}
-        title={disabled ? `This ${source.kind} has nothing to work from yet` : `Turn this ${source.kind} into requirements, then plan, code and QA it`}
+        title={
+          disabled
+            ? `This ${source.kind} has nothing to work from yet`
+            : `Turn this ${source.kind} into requirements, then plan, code and QA it`
+        }
       >
         <ClipboardList />
         {latest ? `Dev session: ${STAGE_LABEL[latest.stage] ?? latest.stage}` : 'Create requirements'}
@@ -122,10 +133,15 @@ function RequirementsDialog({
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const summary = includeSummary && summaryAvailable ? ((await source.getSummaryMarkdown())?.trim() || null) : null;
+      const summary = includeSummary && summaryAvailable ? (await source.getSummaryMarkdown())?.trim() || null : null;
       const input = await buildSource(source, summary);
       if (!input.transcript.trim()) throw new Error(`This ${source.kind} has nothing to work from yet.`);
-      return api.createSession({ title: title.trim(), sessionKey: sessionKey.trim() || undefined, appId, source: input });
+      return api.createSession({
+        title: title.trim(),
+        sessionKey: sessionKey.trim() || undefined,
+        appId,
+        source: input,
+      });
     },
     onSuccess: (session) => {
       Analytics.trackButtonClick(`create_requirements_from_${source.kind}`, isJournal ? 'journal' : 'meeting_details');
@@ -145,8 +161,8 @@ function RequirementsDialog({
           </DialogTitle>
           <DialogDescription>
             {AGENT_PERSONAS.requirements.name}, the requirements agent, reads{' '}
-            {isJournal ? 'every note in the journal and the transcript behind it' : 'the full transcript'}, asks you about
-            anything unclear, and drafts a requirements document. After you approve it, the session continues to
+            {isJournal ? 'every note in the journal and the transcript behind it' : 'the full transcript'}, asks you
+            about anything unclear, and drafts a requirements document. After you approve it, the session continues to
             planning, coding and QA.
           </DialogDescription>
         </DialogHeader>
@@ -199,7 +215,9 @@ function RequirementsDialog({
             {summaryAvailable && (
               <label className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2 cursor-pointer">
                 <span className="text-sm">
-                  <span className="font-medium text-gray-900">{isJournal ? 'Include the journal overview' : 'Include the AI summary'}</span>
+                  <span className="font-medium text-gray-900">
+                    {isJournal ? 'Include the journal overview' : 'Include the AI summary'}
+                  </span>
                   <span className="block text-xs text-gray-500">
                     Sent alongside the {isJournal ? 'notes' : 'transcript'} as extra context.
                   </span>
@@ -207,7 +225,9 @@ function RequirementsDialog({
                 <Switch checked={includeSummary} onCheckedChange={setIncludeSummary} />
               </label>
             )}
-            {createMutation.isError && <div className="text-sm text-red-600">{(createMutation.error as Error).message}</div>}
+            {createMutation.isError && (
+              <div className="text-sm text-red-600">{(createMutation.error as Error).message}</div>
+            )}
           </div>
         )}
 
@@ -216,7 +236,6 @@ function RequirementsDialog({
             Cancel
           </Button>
           <Button
-            variant="blue"
             onClick={() => createMutation.mutate()}
             disabled={healthy !== true || !appId || !title.trim() || createMutation.isPending}
           >
