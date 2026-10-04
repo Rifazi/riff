@@ -24,7 +24,7 @@ interface JournalMarkdownProps {
 
 export function JournalMarkdown({ markdown, onCite, citedIds }: JournalMarkdownProps) {
   return (
-    <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-headings:font-semibold prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2 prose-p:my-2 prose-li:my-0.5">
+    <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-h2:text-base prose-h2:mt-5 prose-h2:mb-2 prose-p:my-2 prose-li:my-0.5">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -37,7 +37,7 @@ export function JournalMarkdown({ markdown, onCite, citedIds }: JournalMarkdownP
                 <button
                   type="button"
                   onClick={() => onCite(id)}
-                  className={`mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded px-1 align-text-top text-[10px] font-semibold no-underline ${known ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-gray-100 text-gray-400'}`}
+                  className={`mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded px-1 align-text-top text-[10px] font-semibold no-underline ${known ? 'bg-primary/15 text-primary hover:bg-primary/25' : 'bg-muted text-muted-foreground'}`}
                 >
                   {id}
                 </button>

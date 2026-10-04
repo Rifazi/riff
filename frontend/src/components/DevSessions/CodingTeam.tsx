@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -274,7 +274,13 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
       finishedAt: null,
       transcript: [],
     }));
-  const personas = lineup.map((m, i) => teamMemberPersona(i, m.title));
+  // Keyed on the titles so each persona keeps its identity across refetches:
+  // the member logs' ChatPane rows are memoized on it.
+  const titlesKey = JSON.stringify(lineup.map((m) => m.title));
+  const personas = useMemo(
+    () => (JSON.parse(titlesKey) as string[]).map((title, i) => teamMemberPersona(i, title)),
+    [titlesKey]
+  );
 
   const [picked, setPicked] = useState<string | null>(null);
   const defaultTab = teamFinished

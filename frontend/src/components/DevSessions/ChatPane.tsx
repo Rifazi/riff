@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
@@ -80,18 +80,47 @@ export function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?
 
 const RESULT_PREVIEW_CHARS = 800;
 
+// Long chats render only their most recent entries until the human asks for
+// more: a few hundred markdown bubbles make every update slow.
+const VISIBLE_ENTRIES_STEP = 120;
+
+function ToolCallBody({ entry }: { entry: TranscriptEntry }) {
+  const [showFull, setShowFull] = useState(false);
+  const result = entry.toolResult !== undefined ? JSON.stringify(entry.toolResult) : null;
+  return (
+    <div className="px-2.5 pb-2 space-y-1 break-all whitespace-pre-wrap">
+      {entry.toolInput !== undefined && <div>in: {JSON.stringify(entry.toolInput)}</div>}
+      {result !== null && (
+        <div>
+          out: {showFull ? result : result.slice(0, RESULT_PREVIEW_CHARS)}
+          {result.length > RESULT_PREVIEW_CHARS && (
+            <button
+              type="button"
+              onClick={() => setShowFull((v) => !v)}
+              className="ml-1 font-sans text-primary hover:underline"
+            >
+              {showFull ? 'show less' : `… show full output (${result.length.toLocaleString()} chars)`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
   // Live SSE overlay entries (id "overlay-N", see useAgentTurnStream) open
   // by default so a running turn is visible; historical ones stay collapsed.
-  const isLive = entry.id.startsWith('overlay-');
-  const [showFull, setShowFull] = useState(false);
-  const result = entry.toolResult !== undefined ? JSON.stringify(entry.toolResult) : null;
+  // The body (which stringifies the whole input and output) is only built
+  // while open.
+  const [open, setOpen] = useState(() => entry.id.startsWith('overlay-'));
   const name = stripToolPrefix(entry.toolName);
   const summary = entry.role === 'tool_call' ? summarizeToolInput(entry.toolInput) : null;
 
   return (
     <details
-      open={isLive}
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
       className={`group rounded-md border text-xs font-mono ${
         entry.isError
           ? 'border-destructive/30 bg-destructive/10 text-destructive'
@@ -107,23 +136,7 @@ function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
           {entry.isError ? ' (error)' : ''}
         </span>
       </summary>
-      <div className="px-2.5 pb-2 space-y-1 break-all whitespace-pre-wrap">
-        {entry.toolInput !== undefined && <div>in: {JSON.stringify(entry.toolInput)}</div>}
-        {result !== null && (
-          <div>
-            out: {showFull ? result : result.slice(0, RESULT_PREVIEW_CHARS)}
-            {result.length > RESULT_PREVIEW_CHARS && (
-              <button
-                type="button"
-                onClick={() => setShowFull((v) => !v)}
-                className="ml-1 font-sans text-primary hover:underline"
-              >
-                {showFull ? 'show less' : `… show full output (${result.length.toLocaleString()} chars)`}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      {open && <ToolCallBody entry={entry} />}
     </details>
   );
 }
@@ -259,6 +272,79 @@ function QuestionBubble({
   );
 }
 
+interface ChatEntryProps {
+  entry: TranscriptEntry;
+  agent: AgentPersona;
+  /** Position in the open question batch, or -1. */
+  questionIndex: number;
+  /** Part of the batch currently awaiting an answer. */
+  questionPending: boolean;
+  answer?: DraftAnswer;
+  onAnswer: (id: string, answer: DraftAnswer) => void;
+  disabled: boolean;
+}
+
+// Memoized so typing in the composer, or one more streamed event, only
+// renders what changed rather than re-parsing every message's markdown.
+const ChatEntry = React.memo(function ChatEntry({
+  entry,
+  agent,
+  questionIndex,
+  questionPending,
+  answer,
+  onAnswer,
+  disabled,
+}: ChatEntryProps) {
+  if (entry.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-3.5 py-2 text-sm whitespace-pre-wrap break-words">
+          {entry.text}
+        </div>
+      </div>
+    );
+  }
+  if (entry.role === 'assistant') {
+    return (
+      <div className="flex gap-2 items-start">
+        <AgentAvatar agent={agent} size="sm" />
+        <div className="max-w-[85%] min-w-0 rounded-2xl rounded-tl-sm bg-muted text-foreground px-3.5 py-2 text-sm break-words">
+          <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (entry.role === 'tool_call' && QUESTION_TOOL_NAMES.has(stripToolPrefix(entry.toolName))) {
+    return (
+      <QuestionBubble
+        entry={entry}
+        index={questionIndex}
+        answer={answer}
+        onChange={(next) => onAnswer(entry.id, next)}
+        disabled={disabled}
+        readOnly={!questionPending}
+      />
+    );
+  }
+  if (entry.role === 'tool_call' || entry.role === 'tool_result') {
+    return <ToolCallBubble entry={entry} />;
+  }
+  if (entry.role === 'system') {
+    return (
+      <div
+        className={`text-center text-xs px-3 py-1.5 rounded-md ${
+          entry.isError ? 'bg-destructive/10 text-destructive border border-destructive/30' : 'text-muted-foreground'
+        }`}
+      >
+        {entry.text}
+      </div>
+    );
+  }
+  return null;
+});
+
 export function ChatPane({
   entries,
   onSend,
@@ -311,6 +397,18 @@ export function ChatPane({
   const pendingIds = pendingQuestions.map((e) => e.id);
   const pendingKey = pendingIds.join('|');
   const answeredCount = pendingQuestions.filter((q) => answerText(answers[q.id])).length;
+
+  const [visibleLimit, setVisibleLimit] = useState(VISIBLE_ENTRIES_STEP);
+  // Never hide a question that's waiting for an answer.
+  const firstPendingIndex = batchOpen ? entries.indexOf(pendingQuestions[0]) : -1;
+  let firstVisible = Math.max(0, entries.length - visibleLimit);
+  if (firstPendingIndex >= 0) firstVisible = Math.min(firstVisible, firstPendingIndex);
+  const hiddenCount = firstVisible;
+
+  const setAnswer = useCallback(
+    (id: string, answer: DraftAnswer) => setAnswers((prev) => ({ ...prev, [id]: answer })),
+    []
+  );
 
   useEffect(() => {
     setAnswers((prev) => {
@@ -373,69 +471,39 @@ export function ChatPane({
             {emptyHint ?? 'Say what you want to build.'}
           </div>
         )}
-        {entries.map((entry, i) => {
-          if (entry.role === 'user') {
-            return (
-              <div key={entry.id} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-3.5 py-2 text-sm whitespace-pre-wrap break-words">
-                  {entry.text}
-                </div>
-              </div>
-            );
-          }
-          if (entry.role === 'assistant') {
-            return (
-              <div key={entry.id} className="flex gap-2 items-start">
-                <AgentAvatar agent={agent} size="sm" />
-                <div className="max-w-[85%] min-w-0 rounded-2xl rounded-tl-sm bg-muted text-foreground px-3.5 py-2 text-sm break-words">
-                  <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-          if (entry.role === 'tool_call') {
-            if (duplicatePendingIds.has(entry.id)) return null;
-            if (QUESTION_TOOL_NAMES.has(stripToolPrefix(entry.toolName))) {
-              const index = pendingIds.indexOf(entry.id);
-              const isPending = batchOpen && index >= 0;
-              return (
-                <QuestionBubble
-                  key={entry.id}
-                  entry={entry}
-                  index={index}
-                  answer={answers[entry.id]}
-                  onChange={(answer) => setAnswers((prev) => ({ ...prev, [entry.id]: answer }))}
-                  disabled={disabled}
-                  readOnly={!isPending}
-                />
-              );
-            }
-            return <ToolCallBubble key={entry.id} entry={entry} />;
-          }
+        {hiddenCount > 0 && (
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setVisibleLimit((n) => n + VISIBLE_ENTRIES_STEP)}
+              className="text-xs text-primary hover:underline"
+            >
+              Show {Math.min(hiddenCount, VISIBLE_ENTRIES_STEP)} earlier of {hiddenCount.toLocaleString()} hidden
+            </button>
+          </div>
+        )}
+        {entries.slice(firstVisible).map((entry, offset) => {
+          const i = firstVisible + offset;
+          if (duplicatePendingIds.has(entry.id)) return null;
           if (entry.role === 'tool_result') {
             // A question tool's result is a trivial placeholder — the
             // question bubble from the preceding tool_call already shows it.
             const prev = entries[i - 1];
             if (prev?.role === 'tool_call' && QUESTION_TOOL_NAMES.has(stripToolPrefix(prev.toolName))) return null;
-            return <ToolCallBubble key={entry.id} entry={entry} />;
           }
-          if (entry.role === 'system') {
-            return (
-              <div
-                key={entry.id}
-                className={`text-center text-xs px-3 py-1.5 rounded-md ${
-                  entry.isError
-                    ? 'bg-destructive/10 text-destructive border border-destructive/30'
-                    : 'text-muted-foreground'
-                }`}
-              >
-                {entry.text}
-              </div>
-            );
-          }
-          return null;
+          const questionIndex = pendingIds.indexOf(entry.id);
+          return (
+            <ChatEntry
+              key={entry.id}
+              entry={entry}
+              agent={agent}
+              questionIndex={questionIndex}
+              questionPending={batchOpen && questionIndex >= 0}
+              answer={answers[entry.id]}
+              onAnswer={setAnswer}
+              disabled={disabled}
+            />
+          );
         })}
         {streaming && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -22,7 +22,11 @@ export function formatShortDate(iso: string | null | undefined): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 }
 
 /** Wall-clock time a moment of the recording happened: meeting start + offset. */
@@ -59,6 +63,15 @@ interface CoverColor {
   dot: string;
 }
 
+// THEME CARVE-OUT: these are deliberately literal palette classes, not theme
+// tokens. A notebook's color is user-chosen data (like a folder label colour) —
+// it's picked per notebook and stored in the database, and its whole purpose is
+// to tell notebooks apart at a glance on the shelf. Mapping it onto the theme's
+// single primary colour would delete that feature, so this map is the one place
+// in frontend/src allowed to name palette colours; the palette-regression guard
+// in frontend/tests/theme/no-palette-classes.test.ts allowlists this file.
+// Everything that renders *around* a swatch (text, borders, chrome) still uses
+// theme tokens — see NotebookCover.
 // Full class strings so Tailwind keeps them. Keys match NOTEBOOK_COLORS in repository.rs.
 export const NOTEBOOK_COLORS: Record<string, CoverColor> = {
   indigo: { spine: 'bg-indigo-600', cover: 'bg-indigo-50', ink: 'text-indigo-900', dot: 'bg-indigo-500' },

@@ -240,6 +240,34 @@
     scrollbar-color: var(--color-border) transparent;
   }
 
+  /*
+   * @tailwindcss/typography ships its own gray palette as the `prose`
+   * defaults (body, headings, links, bullets, code, borders), which would
+   * stay gray whatever theme is applied — and those colors come from the
+   * plugin's CSS, so no amount of grepping components finds them.
+   * Point its variables at the theme's tokens once, here, so every
+   * `prose` block inherits the theme instead of each call site
+   * overriding colors class by class.
+   */
+  .prose {
+    --tw-prose-body: var(--foreground);
+    --tw-prose-headings: var(--foreground);
+    --tw-prose-lead: var(--muted-foreground);
+    --tw-prose-links: var(--primary);
+    --tw-prose-bold: var(--foreground);
+    --tw-prose-counters: var(--muted-foreground);
+    --tw-prose-bullets: var(--border);
+    --tw-prose-hr: var(--border);
+    --tw-prose-quotes: var(--foreground);
+    --tw-prose-quote-borders: var(--border);
+    --tw-prose-captions: var(--muted-foreground);
+    --tw-prose-code: var(--foreground);
+    --tw-prose-pre-code: var(--foreground);
+    --tw-prose-pre-bg: var(--muted);
+    --tw-prose-th-borders: var(--border);
+    --tw-prose-td-borders: var(--border);
+  }
+
   /* BlockNote Editor - Override fixed dimensions for responsive layout */
   .bn-container {
     width: 100% !important;
