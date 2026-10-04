@@ -97,8 +97,9 @@ module.exports = {
       },
       // Tailwind's own defaults for the color-less forms of these
       // utilities are literal palette values (`border` alone → gray-200,
-      // `ring` alone → blue-500, ring offsets → #fff), which would put
-      // off-theme colors back on screen wherever a class omits the color.
+      // `ring` alone → blue-500, ring offsets → plain white), which would
+      // put off-theme colors back on screen wherever a class omits the
+      // color.
       // Point the defaults at the theme instead.
       borderColor: {
         DEFAULT: themeColor('--border'),

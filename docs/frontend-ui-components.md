@@ -1,6 +1,8 @@
 # Frontend UI Components
 
-This document describes the centralized, theme-driven UI component library for the Riff frontend. All components are theme-aware and draw their colors and styling from the generated `theme/tokens.css` CSS variables, not from hard-coded values.
+This document describes the centralized, theme-driven UI component library for the Riff frontend. All components are theme-aware and draw their colors and styling from Riff's generated theme tokens (`--color-*`, `--radius-*`), not from hard-coded values.
+
+> **No theme is applied to this repo yet.** There is no `theme/theme.json`, so the generated `theme/*.css` files don't exist either. Every color in the app already resolves to the theme's documented token names; until a theme exists those names are filled in by a clearly-marked placeholder block in `globals.css` (plain named CSS colors, so it reads as scaffolding rather than a palette to maintain). See [Applying a theme](#applying-a-theme).
 
 ## Component Library
 
@@ -12,14 +14,15 @@ Each component below is defined once and imported wherever needed, ensuring cons
 
 - **`button.tsx`** (`Button`)
   - Usage: `import { Button } from '@/components/ui/button'`
-  - Variants: `default`, `secondary`, `success`, `destructive`, `outline`, `ghost`
+  - Variants: `default`, `secondary`, `success`, `destructive`, `outline`, `ghost`, `link`
+  - Sizes: `default`, `sm`, `lg`, `icon`
   - Used in: Recording controls, settings, dialogs, Dev Sessions actions, journal review flows
-  - Note: The `green`/`blue`/`red`/`gray` variants are deprecated (left in place for gradual migration) but are no longer used after consolidation; use `default`, `success`, `destructive`, or semantic variants instead
+  - The off-theme `green`/`blue`/`red`/`gray` variants this button used to carry (literal Tailwind palette classes that bypassed the theme entirely — the original source of the "purple vs blue" inconsistency) have been **removed**. Their call sites were retargeted to `default`, `success` and `destructive`.
 
 - **`dialog.tsx`** (`Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogDescription`, `DialogFooter`)
   - Usage: `import { Dialog, DialogContent, ... } from '@/components/ui/dialog'`
   - Used in: Model download progress, retranscribe, permission checks, confirmations, import/update dialogs, Dev Sessions approval/confirm flows
-  - Theme-aware: background, text, and border colors pulled from `--color-card`, `--color-text`, `--color-border`
+  - Theme-aware: background, text, and border colors pulled from `--color-surface`, `--color-text`, `--color-border`
 
 - **`card.tsx`** (`Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`)
   - Usage: `import { Card, CardContent, ... } from '@/components/ui/card'`
@@ -34,8 +37,9 @@ Each component below is defined once and imported wherever needed, ensuring cons
 
 - **`badge.tsx`** (`Badge`)
   - Usage: `import { Badge } from '@/components/ui/badge'`
-  - Variants: `default`, `secondary`, `success`, `warning`, `destructive`, `info`
+  - Variants: `default`, `secondary`, `success`, `warning`, `destructive`, `info`, `outline`
   - Used in: Journal review count indicators, status pills, topic tags, Dev Sessions status/stage indicators
+  - Replaces PageShell's local `Pill` component and its `neutral`/`blue`/`green`/`red`/`amber` tones
   - Replaces all ad hoc `rounded-full bg-* px-2 py-1` colored pill elements
 
 - **`dropdown-menu.tsx`** (`DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuItem`)
@@ -45,14 +49,14 @@ Each component below is defined once and imported wherever needed, ensuring cons
 
 - **`spinner.tsx`** (`Spinner`)
   - Usage: `import { Spinner } from '@/components/ui/spinner'`
-  - Props: `size` (small/medium/large), `className` for customization
-  - Theme-aware: border colors draw from `--color-primary`
+  - Props: `size` (`xs`, `sm`, `default`, `lg`), `className` for customization
+  - Theme-aware: the ring is `border-current` over `text-primary`, so it inherits the theme's primary color by default and any `text-*` token override at the call site otherwise
   - Replaces all ad hoc `animate-spin rounded-full border-*` divs (found in StatusOverlays, AISummary, ChunkProgressDisplay, RecordingControls, ModelDownloadProgress, MeetingJournalStrip)
 
 - **`skeleton.tsx`** (`Skeleton`)
   - Usage: `import { Skeleton } from '@/components/ui/skeleton'`
   - Pattern: `<Skeleton className="h-20 w-32 rounded-lg" />`
-  - Theme-aware: background color from `--color-muted`
+  - Theme-aware: `animate-pulse bg-muted`, i.e. the theme's `--color-surface-muted`
   - Replaces all ad hoc `animate-pulse bg-gray-100 rounded-lg` loading blocks
 
 - **`tabs.tsx`** (`Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`)
@@ -66,41 +70,55 @@ Each component below is defined once and imported wherever needed, ensuring cons
   - Used in: Permission warnings, permission status, update notifications, Dev Sessions notices
   - Replaces PageShell's local `Notice` component
 
-- **`toast.tsx` / `sonner`** (Toast notifications)
+- **`sonner`** (Toast notifications — there is no `ui/toast.tsx`; sonner is the only toast mechanism)
   - Usage: `import { toast } from 'sonner'`
-  - Configuration: Integrated in `frontend/src/app/layout.tsx` with `<Toaster>` and theme-aware `toastOptions`
-  - Variants: success, error, info (rendered via `richColors` and CSS variable hooks)
+  - Configuration: a single `<Toaster>` in `frontend/src/app/layout.tsx`
+  - Variants: `success`, `error`, `warning`, `info`. sonner's `richColors` prop (its own fixed green/red palette, independent of the theme) was **removed** in favor of `toastOptions.classNames`, which maps each tone onto theme tokens (`bg-success text-success-foreground`, `bg-destructive text-destructive-foreground`, and so on)
   - Used in: Recording status, download progress, journal filing, Dev Sessions approval feedback
+  - `components/MessageToast.tsx`, a second hand-rolled toast with no importers anywhere in the repo, was deleted
 
 ## Theme Token Aliasing
 
-The app's CSS variables in `frontend/src/app/globals.css` are now aliased directly onto the generated theme tokens, rather than defining their own hard-coded HSL values:
+There are three layers between a theme token and a Tailwind class, and only the first one is allowed to name a color.
 
-**In globals.css** (`:root` and `.dark` selectors):
+**1. Riff's theme tokens** — `--color-bg`, `--color-surface`, `--color-surface-muted`, `--color-border`, `--color-text`, `--color-text-muted`, `--color-primary`, `--color-on-primary`, `--color-success`, `--color-warning`, `--color-danger`, `--color-info`, `--radius-*`. Generated into `theme/*.css` from `theme/theme.json` by Riff's theme picker. The single source of truth.
 
-- `--primary: var(--color-primary)`
-- `--background: var(--color-bg)`
-- `--card: var(--color-card)`
-- `--foreground: var(--color-text)`
+**2. The shadcn-style aliases in `globals.css`** (`:root` and `.dark`) — every one is a direct `var(--color-*)` reference, never a color literal:
+
+- `--background: var(--color-bg)`, `--foreground: var(--color-text)`
+- `--card` / `--popover`: `var(--color-surface)`, with `-foreground` on `var(--color-text)`
+- `--primary: var(--color-primary)`, `--primary-foreground: var(--color-on-primary)`
+- `--secondary` / `--muted` / `--accent`: `var(--color-surface-muted)` (`--muted-foreground` on `var(--color-text-muted)`)
 - `--destructive: var(--color-danger)`
-- `--success: var(--color-success)` (new)
-- `--warning: var(--color-warning)` (new)
-- `--info: var(--color-info)` (new)
-- ... and others (see the full `:root` block in globals.css for complete list)
+- `--border` / `--input`: `var(--color-border)`; `--ring: var(--color-primary)`; `--radius: var(--radius-md)`
+- `--chart-1..5`: primary, success, info, warning, danger
 
-**In tailwind.config.js**:
+Note what is _not_ here: there are no `--success`/`--warning`/`--info` aliases, because nothing needs them — Tailwind reads `--color-success`/`--color-warning`/`--color-info` straight from layer 1. The theme schema only defines an "on-primary" foreground, so `--destructive-foreground`, `--color-on-success`, `--color-on-warning` and `--color-on-info` are set to `white`, matching the theme system's own `.ui-btn--danger` convention (a named CSS color, not a hex literal, so it isn't a second palette to maintain).
 
-- Tailwind's `colors` block references `var(--color-*)` tokens instead of hard-coded hex/HSL values
-- The hardcoded `tertiary: '#64748b'` color has been removed (no uses)
-- New color keys `success`, `warning`, `info` added to match badge and alert variants
+**3. `tailwind.config.js`** maps those variables onto Tailwind color keys, plus `success`/`warning`/`info` (new, matching the badge and alert variants) and `chart-1..5`. The hard-coded `tertiary: '#64748b'` key was removed (it had no uses).
 
-This ensures that when a theme is applied via Riff's theme picker (which generates `theme/theme.json` → `theme/tokens.css`), every component automatically renders in the theme's colors without any per-component code changes.
+One non-obvious detail lives here: every color goes through a `themeColor()` helper rather than a plain `'var(--primary)'` string. Tailwind 3 can only inject an alpha channel into a color it can parse, and `var(...)` is unparseable — so with plain strings, **every utility with an opacity modifier is silently dropped**, and `bg-primary/10`, `hover:bg-primary/90` and the Alert tints would render as nothing at all. `themeColor()` returns a function, takes the alpha Tailwind hands it, and blends with `color-mix()`, which works for whatever color format the theme emits (hex, `rgb()`, `oklch()`, ...). The color-less forms of `border`, `ring` and `ring-offset` are repointed at the theme too, since Tailwind's defaults for those are literal palette values (`gray-200`, `blue-500`).
+
+Together this means applying or changing a theme requires no per-component code changes.
+
+### Applying a theme
+
+Pick a theme on the app's Theme page in Riff (Dev Sessions → Apps → Theme). That writes `theme/theme.json` and generates `theme/*.css`. Then, in `globals.css`:
+
+1. Add `@import "../../../theme/index.css";` as the first line, above the `@tailwind` directives.
+2. Delete the `PLACEHOLDER TOKENS` block.
+
+Until step 2 happens the app still renders correctly either way: the placeholder block sits in `@layer base` while `theme/index.css` is imported unlayered, so a real theme outranks it regardless of import order. `audit_theme` reports the placeholder definitions as colliding with the theme's own token names — that warning is what step 2 resolves, and it is expected while no theme exists.
 
 ## Known Limitations and Future Cleanup
 
-### Deliberately-Left-In-Place Dead Code
+### No theme applied yet
 
-The `button.tsx` variant set still includes the deprecated `green`, `blue`, `red`, and `gray` cva entries. These are **not used anywhere** after consolidation (all call sites have been retargeted to `default`, `success`, or `destructive`), but are left in place rather than removing them in a separate pass. This is a minor code-cleanliness issue, not a functional one, and can be cleaned up in a future maintenance pass without affecting any feature.
+The biggest open item is not code: no theme has been picked for this app, so the UI currently renders on the placeholder tokens described above. Picking one in Riff and doing the two-line swap in [Applying a theme](#applying-a-theme) is what turns this work into its intended visible result.
+
+### Theme-editing UI keeps its own color values
+
+`components/DevSessions/themes/ThemeEditor.tsx` contains literal shadow values (`0 1px 2px rgb(15 23 42 / 0.06)`, ...) as selectable presets. These are **data, not styling**: they are candidate values the user picks for _another_ app's theme, so they can't come from this app's own tokens. `audit_theme` flags them; that is a false positive, and the requirements for this work carve the target-app theme-editing logic out of scope explicitly.
 
 ### Chart Colors
 
@@ -178,20 +196,25 @@ The following main app, journal, and Dev Sessions screens/components have been c
 
 ## Verification and Auditing
 
-Run `audit_theme` to verify that no new hard-coded colors are introduced outside the theme directory:
+`audit_theme` is a **Riff agent tool, not an npm script** — there is nothing to run from a shell. Ask an agent in a Dev Session to run it; it reports hard-coded colors outside `theme/`, app-defined tokens that should be aliased onto the theme, and whether the Tailwind config references the theme.
+
+To check by hand that no off-theme colors have crept back in, grep the frontend for literal palette classes and color literals:
 
 ```bash
-pnpm audit_theme
+# should return nothing
+git grep -nE '(bg|text|border|ring|divide|from|via|to|placeholder|shadow|fill|stroke)-(gray|slate|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)' -- frontend/src
+git grep -nE '#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(' -- frontend/src
 ```
 
-This checks:
+The second grep's only expected hits are the shadow presets in `themes/ThemeEditor.tsx` (see above).
 
-- No hex/rgb/hsl color literals in `frontend/**` (outside `theme/`)
-- All CSS variables in `globals.css` are aliased onto theme tokens
-- Tailwind config references theme tokens instead of hard-coded values
+### Lint and test scripts
+
+Before this work the repo root had no working `lint` or `test` script, so the frontend's eslint rules were never actually enforced and a backlog of pre-existing violations had accumulated. The root scripts are now wired up to the frontend's eslint config and the bun test suite. `no-explicit-any`, `no-unused-vars` and `no-unescaped-entities` are downgraded to warnings for that pre-existing backlog, with an override in `frontend/eslint.config.mjs` holding the files this work added at `error` level — add new files to that override list rather than widening the relaxation.
 
 ## Future Enhancements
 
+- Apply a theme (see [Applying a theme](#applying-a-theme)) and delete the placeholder token block
 - Consider extracting form-related compound components (`FormField`, `FormLabel`, etc.) into the library if used widely
-- Evaluate whether chart-specific colors in TokenUsagePanel should be parameterized from the theme or kept as a special case for CVD accessibility
+- Re-check the TokenUsagePanel chart's colorblind separation whenever the theme changes, since its series now follow the theme's primary/success/info/warning hues
 - Maintain the library as new screens are added to the app
