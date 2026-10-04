@@ -12,6 +12,13 @@ The component library is located at `frontend/src/components/ui/` and provides r
 
 Each component below is defined once and imported wherever needed, ensuring consistency and single-source-of-truth maintenance:
 
+- **`page.tsx`** (`Page`, `PageHeader`, `PageBody`) — the page frame
+  - Usage: `import { Page, PageHeader, PageBody } from '@/components/ui/page'`
+  - Every top-level screen composes these: `Page` is the full-height root on `bg-background`, `PageHeader` is the one title bar (optional `back` above the title, `subtitle` below, `actions` on the right, same size and padding everywhere), and `PageBody` is either a centered scrolling column (`max-w-6xl`, or `max-w-7xl` with `wide` for card grids) or, with `fill`, a full-height area for split views
+  - Content panels inside the body are `Card`s (`bg-card`); the page itself is never `bg-muted` or `bg-card`
+  - Dev Sessions wraps it as `PageShell` (adds the agent-server banner); meetings, meeting details, journals, settings and the recording screen use it directly. It replaced `JournalShell`, the old `PageShell` header, the hand-rolled headers in meetings/settings, meeting details' compact `bg-muted` bar and the unused `MainNav`
+  - Guarded by `tests/theme/page-frame.test.ts`: no other file may set a full-height page background or render a page `<h1>`, and every route page must render inside the frame
+
 - **`button.tsx`** (`Button`)
   - Usage: `import { Button } from '@/components/ui/button'`
   - Variants: `default`, `secondary`, `success`, `destructive`, `outline`, `ghost`, `link`
@@ -189,7 +196,7 @@ The following main app, journal, and Dev Sessions screens/components have been c
 
 **Dev Sessions**
 
-- Page shell and app chrome (`components/DevSessions/PageShell.tsx`)
+- Page shell and app chrome (`components/DevSessions/PageShell.tsx`, built on `ui/page`)
 - Session and chat UI (`components/DevSessions/ChatPane.tsx`, etc.)
 - Apps pages (`app/dev-sessions/apps/**`)
 - Stage and team panels (`components/DevSessions/stages/**`)

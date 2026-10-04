@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Page, PageBody, PageHeader } from '@/components/ui/page';
 import { AgentServerBanner } from './AgentServerBanner';
 
 interface PageShellProps {
@@ -14,28 +15,16 @@ interface PageShellProps {
   fill?: boolean;
 }
 
+/** The app's standard page (`ui/page`) plus the agent-server banner every Dev Sessions page shows. */
 export function PageShell({ title, subtitle, actions, back, children, fill }: PageShellProps) {
   return (
-    <div className="h-screen bg-muted flex flex-col min-w-0">
-      <div className="flex-shrink-0 border-b border-border bg-muted">
-        <div className="px-8 py-5 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            {back && <div className="mb-1">{back}</div>}
-            <h1 className="text-2xl font-bold text-foreground truncate">{title}</h1>
-            {subtitle && <div className="mt-1 text-sm text-muted-foreground">{subtitle}</div>}
-          </div>
-          {actions && <div className="flex items-center gap-2 flex-shrink-0">{actions}</div>}
-        </div>
-      </div>
+    <Page>
+      <PageHeader title={title} subtitle={subtitle} actions={actions} back={back} />
       <AgentServerBanner />
-      {fill ? (
-        <div className="flex-1 min-h-0 flex flex-col px-8 py-4">{children}</div>
-      ) : (
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="max-w-6xl mx-auto px-8 py-6">{children}</div>
-        </div>
-      )}
-    </div>
+      <PageBody fill={fill} className={fill ? 'px-8 py-4' : undefined}>
+        {children}
+      </PageBody>
+    </Page>
   );
 }
 

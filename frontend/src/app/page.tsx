@@ -23,6 +23,7 @@ import { TranscriptRecovery } from "@/components/TranscriptRecovery";
 import { indexedDBService } from "@/services/indexedDBService";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { Page } from "@/components/ui/page";
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -215,7 +216,7 @@ export default function Home() {
     status === RecordingStatus.PROCESSING_TRANSCRIPTS || isProcessing;
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <Page>
       {/* All Modals supported*/}
       <SettingsModals modals={modals} messages={messages} onClose={hideModal} />
 
@@ -281,6 +282,6 @@ export default function Home() {
           sidebarCollapsed={sidebarCollapsed}
         />
       </div>
-    </div>
+    </Page>
   );
 }

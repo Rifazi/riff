@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
 import { BackButton } from '@/components/BackButton';
+import { Page, PageBody, PageHeader } from '@/components/ui/page';
 import { MeetingSummary, SummaryProcessResponse } from '@/types';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import Analytics from '@/lib/analytics';
@@ -219,80 +220,83 @@ export default function PageContent({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen min-w-0 bg-muted"
     >
-      <div className="flex-shrink-0 flex items-center gap-3 border-b border-border bg-muted px-4 py-2">
-        <BackButton fallbackHref="/meetings" preferFallback={fromRecordingFlow} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-          {meetingData.meetingTitle || meeting.title}
-        </span>
-        <RequirementsButton
-          source={requirementsSource}
-          disabled={(totalCount ?? meetingData.transcripts.length) === 0}
-        />
-      </div>
-      <MeetingJournalStrip meetingId={meeting.id} />
-      <div className="flex flex-1 min-w-0 overflow-hidden">
-        <MeetingDetailsSplitView
-          activeTab={activeTab}
-          onTabChange={(tab) => {
-            manuallySelectedTabMeetingIdsRef.current.add(meeting.id);
-            setActiveTab(tab);
-          }}
-          transcript={
-            <TranscriptPanel
-              transcripts={meetingData.transcripts}
-              customPrompt={customPrompt}
-              onPromptChange={setCustomPrompt}
-              onCopyTranscript={copyOperations.handleCopyTranscript}
-              onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
-              isRecording={isRecording}
-              disableAutoScroll={true}
-              usePagination={true}
-              segments={segments}
-              hasMore={hasMore}
-              isLoadingMore={isLoadingMore}
-              totalCount={totalCount}
-              loadedCount={loadedCount}
-              onLoadMore={onLoadMore}
-              meetingId={meeting.id}
-              meetingFolderPath={meeting.folder_path}
-              onRefetchTranscripts={onRefetchTranscripts}
-            />
-          }
-          summary={
-            <SummaryPanel
-              meeting={meeting}
-              meetingTitle={meetingData.meetingTitle}
-              summaryRef={meetingData.blockNoteSummaryRef}
-              isSaving={meetingData.isSaving}
-              isSummaryDirty={meetingData.isSummaryDirty}
-              onSaveAll={meetingData.saveAllChanges}
-              onCopySummary={copyOperations.handleCopySummary}
-              aiSummary={meetingData.aiSummary}
-              summaryStatus={summaryGeneration.summaryStatus}
-              transcripts={meetingData.transcripts}
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={handleSaveModelConfig}
-              onGenerateSummary={summaryGeneration.handleGenerateSummary}
-              onStopGeneration={summaryGeneration.handleStopGeneration}
-              customPrompt={customPrompt}
-              onSaveSummary={meetingData.handleSaveSummary}
-              onSummaryChange={meetingData.handleSummaryChange}
-              onDirtyChange={meetingData.setIsSummaryDirty}
-              summaryError={summaryGeneration.summaryError}
-              onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
-              getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
-              availableTemplates={templates.availableTemplates}
-              selectedTemplate={templates.selectedTemplate}
-              onTemplateSelect={templates.handleTemplateSelection}
-              isModelConfigLoading={isModelConfigLoading}
-              onOpenModelSettings={handleRegisterModalOpen}
+      <Page>
+        <PageHeader
+          back={<BackButton fallbackHref="/meetings" preferFallback={fromRecordingFlow} />}
+          title={meetingData.meetingTitle || meeting.title}
+          actions={
+            <RequirementsButton
+              source={requirementsSource}
+              disabled={(totalCount ?? meetingData.transcripts.length) === 0}
             />
           }
         />
-      </div>
+        <PageBody fill>
+          <MeetingJournalStrip meetingId={meeting.id} />
+          <div className="flex flex-1 min-w-0 overflow-hidden">
+            <MeetingDetailsSplitView
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                manuallySelectedTabMeetingIdsRef.current.add(meeting.id);
+                setActiveTab(tab);
+              }}
+              transcript={
+                <TranscriptPanel
+                  transcripts={meetingData.transcripts}
+                  customPrompt={customPrompt}
+                  onPromptChange={setCustomPrompt}
+                  onCopyTranscript={copyOperations.handleCopyTranscript}
+                  onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
+                  isRecording={isRecording}
+                  disableAutoScroll={true}
+                  usePagination={true}
+                  segments={segments}
+                  hasMore={hasMore}
+                  isLoadingMore={isLoadingMore}
+                  totalCount={totalCount}
+                  loadedCount={loadedCount}
+                  onLoadMore={onLoadMore}
+                  meetingId={meeting.id}
+                  meetingFolderPath={meeting.folder_path}
+                  onRefetchTranscripts={onRefetchTranscripts}
+                />
+              }
+              summary={
+                <SummaryPanel
+                  meeting={meeting}
+                  meetingTitle={meetingData.meetingTitle}
+                  summaryRef={meetingData.blockNoteSummaryRef}
+                  isSaving={meetingData.isSaving}
+                  isSummaryDirty={meetingData.isSummaryDirty}
+                  onSaveAll={meetingData.saveAllChanges}
+                  onCopySummary={copyOperations.handleCopySummary}
+                  aiSummary={meetingData.aiSummary}
+                  summaryStatus={summaryGeneration.summaryStatus}
+                  transcripts={meetingData.transcripts}
+                  modelConfig={modelConfig}
+                  setModelConfig={setModelConfig}
+                  onSaveModelConfig={handleSaveModelConfig}
+                  onGenerateSummary={summaryGeneration.handleGenerateSummary}
+                  onStopGeneration={summaryGeneration.handleStopGeneration}
+                  customPrompt={customPrompt}
+                  onSaveSummary={meetingData.handleSaveSummary}
+                  onSummaryChange={meetingData.handleSummaryChange}
+                  onDirtyChange={meetingData.setIsSummaryDirty}
+                  summaryError={summaryGeneration.summaryError}
+                  onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+                  getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+                  availableTemplates={templates.availableTemplates}
+                  selectedTemplate={templates.selectedTemplate}
+                  onTemplateSelect={templates.handleTemplateSelection}
+                  isModelConfigLoading={isModelConfigLoading}
+                  onOpenModelSettings={handleRegisterModalOpen}
+                />
+              }
+            />
+          </div>
+        </PageBody>
+      </Page>
     </motion.div>
   );
 }

@@ -21,6 +21,7 @@ import { SearchSettings } from "@/components/SearchSettings";
 import { DevAgentSettings } from "@/components/DevSessions/DevAgentSettings";
 import { useConfig } from "@/contexts/ConfigContext";
 import { BackButton } from "@/components/BackButton";
+import { Page, PageBody, PageHeader } from "@/components/ui/page";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // Tabs configuration (constant)
@@ -81,76 +82,67 @@ export default function SettingsPage() {
   }, [activeTab]);
 
   return (
-    <div className="h-screen bg-background flex flex-col">
-      {/* Fixed Header */}
-      <div className="sticky top-0 z-10 bg-background border-b border-border">
-        <div className="max-w-6xl mx-auto px-8 py-6">
-          <BackButton fallbackHref="/" className="mb-1" />
-          <h1 className="text-3xl font-bold">Settings</h1>
-        </div>
-      </div>
+    <Page>
+      <PageHeader title="Settings" back={<BackButton fallbackHref="/" />} />
 
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
-          {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-border p-0 h-auto">
-              {TABS.map((tab, index) => {
-                const Icon = tab.icon;
-                return (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    ref={(el) => {
-                      tabRefs.current[index] = el;
-                    }}
-                    className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10"
-                  >
-                    <Icon className="w-4 h-4" />
-                    {tab.label}
-                  </TabsTrigger>
-                );
-              })}
+      <PageBody>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="bg-transparent relative rounded-none border-b border-border p-0 h-auto">
+            {TABS.map((tab, index) => {
+              const Icon = tab.icon;
+              return (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  ref={(el) => {
+                    tabRefs.current[index] = el;
+                  }}
+                  className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10"
+                >
+                  <Icon className="w-4 h-4" />
+                  {tab.label}
+                </TabsTrigger>
+              );
+            })}
 
-              <motion.div
-                className="absolute bottom-0 z-20 h-0.5 bg-primary"
-                layoutId="underline"
-                style={{
-                  left: underlineStyle.left,
-                  width: underlineStyle.width,
-                }}
-                transition={{ type: "spring", stiffness: 400, damping: 40 }}
-              />
-            </TabsList>
+            <motion.div
+              className="absolute bottom-0 z-20 h-0.5 bg-primary"
+              layoutId="underline"
+              style={{
+                left: underlineStyle.left,
+                width: underlineStyle.width,
+              }}
+              transition={{ type: "spring", stiffness: 400, damping: 40 }}
+            />
+          </TabsList>
 
-            <TabsContent value="general">
-              <PreferenceSettings />
-            </TabsContent>
-            <TabsContent value="recording">
-              <RecordingSettings />
-            </TabsContent>
-            <TabsContent value="Transcriptionmodels">
-              <TranscriptSettings
-                transcriptModelConfig={transcriptModelConfig}
-                setTranscriptModelConfig={setTranscriptModelConfig}
-              />
-            </TabsContent>
-            <TabsContent value="summaryModels">
-              <SummaryModelSettings />
-            </TabsContent>
-            <TabsContent value="search">
-              <SearchSettings />
-            </TabsContent>
-            <TabsContent value="devAgents">
-              <DevAgentSettings />
-            </TabsContent>
-            <TabsContent value="beta" className="mt-6">
-              <BetaSettings />
-            </TabsContent>
-          </Tabs>
-        </div>
-      </div>
-    </div>
+          <TabsContent value="general">
+            <PreferenceSettings />
+          </TabsContent>
+          <TabsContent value="recording">
+            <RecordingSettings />
+          </TabsContent>
+          <TabsContent value="Transcriptionmodels">
+            <TranscriptSettings
+              transcriptModelConfig={transcriptModelConfig}
+              setTranscriptModelConfig={setTranscriptModelConfig}
+            />
+          </TabsContent>
+          <TabsContent value="summaryModels">
+            <SummaryModelSettings />
+          </TabsContent>
+          <TabsContent value="search">
+            <SearchSettings />
+          </TabsContent>
+          <TabsContent value="devAgents">
+            <DevAgentSettings />
+          </TabsContent>
+          <TabsContent value="beta" className="mt-6">
+            <BetaSettings />
+          </TabsContent>
+        </Tabs>
+      </PageBody>
+    </Page>
   );
 }

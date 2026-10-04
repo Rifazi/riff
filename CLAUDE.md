@@ -476,6 +476,7 @@ Every meeting flows recording → AI summary → journals. Auto-summary is on by
 - [frontend/src/app/page.tsx](frontend/src/app/page.tsx) - Main recording interface
 - [frontend/src/components/Sidebar/SidebarProvider.tsx](frontend/src/components/Sidebar/SidebarProvider.tsx) - Global state management
 - [frontend/src/components/ui/](frontend/src/components/ui/) - The shared primitives every screen builds on (Button, Dialog, Card, Badge, Input/Select, Spinner, Skeleton, Tabs, Alert, ...). Use these; don't hand-roll a local copy
+- [frontend/src/components/ui/page.tsx](frontend/src/components/ui/page.tsx) - `Page` / `PageHeader` / `PageBody`: the one page background and title bar every screen uses. Never set a page background or write a page header yourself
 - [frontend/src/app/globals.css](frontend/src/app/globals.css) - Theme token layer: Riff's `--color-*` tokens and the shadcn-style aliases over them. Colors live here, never in a component
 - [frontend/tailwind.config.js](frontend/tailwind.config.js) - Maps those tokens onto Tailwind color keys (alpha-modifier-capable via `themeColor()`)
 - [docs/frontend-ui-components.md](docs/frontend-ui-components.md) - How the library and theming fit together; read before adding UI
