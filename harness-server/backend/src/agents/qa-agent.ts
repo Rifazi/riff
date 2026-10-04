@@ -4,13 +4,21 @@ import path from 'node:path';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
+import {
+  appendTranscriptEntry,
+  setClaudeSessionId,
+  setHistory,
+  updateSession,
+  addStageUsage,
+} from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { classifyTextTool } from './tool-defs/classify-text-tool.js';
+import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -39,6 +47,7 @@ const TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
+  'classify_text',
   'read_file',
   'outline_file',
   'get_diff',
@@ -52,7 +61,7 @@ export async function runQaAgentTurn(
   session: SessionRecord,
   userMessage: string,
   onEvent: (event: AgentEvent) => void,
-  attachments: ParsedAttachment[] = []
+  attachments: ParsedAttachment[] = [],
 ): Promise<SessionRecord> {
   if (!session.branch || !session.requirementsPath) {
     throw new Error('QA needs a branch and an approved requirements document.');
@@ -71,7 +80,9 @@ export async function runQaAgentTurn(
   if (session.qaRerunPending) {
     if (session.qaReportPath) {
       try {
-        previousFindings = compactQaFindings(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'));
+        previousFindings = compactQaFindings(
+          await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'),
+        );
       } catch {
         // report unreadable — the fresh pass just reviews from scratch
       }
@@ -121,9 +132,16 @@ export async function runQaAgentTurn(
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
+      appId: app.id,
+      sessionId: session.id,
+    });
     const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
-    const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+    const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({
+      repoRoot: app.repoRoot,
+      baseBranch: baseBranchFor(app),
+      checkCommands: app.checkCommands,
+    });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -134,6 +152,7 @@ export async function runQaAgentTurn(
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
+          classifyTextToolClaude,
           readFileToolClaude,
           getDiffToolClaude,
           runCheckedCommandToolClaude,
@@ -171,13 +190,18 @@ export async function runQaAgentTurn(
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
     const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
-    const { runCheckedCommandTool, getDiffTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+    const { runCheckedCommandTool, getDiffTool } = createQaTools({
+      repoRoot: app.repoRoot,
+      baseBranch: baseBranchFor(app),
+      checkCommands: app.checkCommands,
+    });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
+      classify_text: classifyTextTool,
       read_file: readFileTool,
       get_diff: getDiffTool,
       run_checked_command: runCheckedCommandTool,
