@@ -144,8 +144,8 @@ All central components follow shadcn/ui patterns:
 
 The app's root layout (`frontend/src/app/layout.tsx`) includes:
 
-- `<Toaster>` for sonner-based toast notifications (theme-aware via CSS variable hooks)
-- Tailwind CSS globals import pointing to aliased theme tokens
+- `<Toaster>` for sonner-based toast notifications, themed through `toastOptions.classNames` (see the `sonner` entry above)
+- The `globals.css` import, which defines the token layers described in [Theme Token Aliasing](#theme-token-aliasing)
 - No other global providers needed for the UI component library
 
 ## File Locations Reference
