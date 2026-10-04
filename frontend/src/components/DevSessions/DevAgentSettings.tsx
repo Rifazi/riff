@@ -365,7 +365,7 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
             onChange={(e) => setApiToken(e.target.value)}
             autoComplete="off"
           />
-          <p className="text-xs text-gray-500 mt-1.5">
+          <p className="text-xs text-muted-foreground mt-1.5">
             Create one at{' '}
             <ExternalAnchor
               href="https://id.atlassian.com/manage-profile/security/api-tokens"
@@ -431,8 +431,8 @@ function LightStepsRow({
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
-        <div className="font-medium text-gray-900">Cheaper model for light steps</div>
-        <div className="text-xs text-gray-500">
+        <div className="font-medium text-foreground">Cheaper model for light steps</div>
+        <div className="text-xs text-muted-foreground">
           Coding steps the planner marks as mechanical (docs, config, pattern-following) run on this. If it doesn&apos;t
           finish the step, the coding model takes over. QA always reviews on its own model.
         </div>
@@ -486,8 +486,8 @@ function LocalCoordinatorRow({
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
-        <div className="font-medium text-gray-900">Coordinator on the built-in local model</div>
-        <div className="text-xs text-gray-500">
+        <div className="font-medium text-foreground">Coordinator on the built-in local model</div>
+        <div className="text-xs text-muted-foreground">
           The continue-or-ready decisions run on Riff&apos;s own summary model — free and on this machine. If it&apos;s
           unavailable or gives an unusable answer, the coordinator model above decides instead.
         </div>
@@ -499,7 +499,7 @@ function LocalCoordinatorRow({
           onCheckedChange={(on) => onSave({ ...value, useLocalModel: on })}
           aria-label="Run the coordinator on the built-in local model"
         />
-        <span className="text-xs text-gray-600">
+        <span className="text-xs text-muted-foreground">
           {localModel.available
             ? `Using ${localModel.model}`
             : `Not available: ${localModel.reason ?? 'unknown reason'} — using ${value.model}.`}
