@@ -112,7 +112,7 @@ export function TranscriptRecovery({
     }
   };
 
-  const selectedMeeting = recoverableMeetings.find(m => m.meetingId === selectedMeetingId);
+  const selectedMeeting = recoverableMeetings.find((m) => m.meetingId === selectedMeetingId);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -120,7 +120,8 @@ export function TranscriptRecovery({
         <DialogHeader className="px-6 pt-6">
           <DialogTitle className="text-2xl">Recover Interrupted Meetings</DialogTitle>
           <DialogDescription>
-            We found {recoverableMeetings.length} meeting{recoverableMeetings.length !== 1 ? 's' : ''} that {recoverableMeetings.length !== 1 ? 'were' : 'was'} interrupted. Select a meeting to preview and recover it.
+            We found {recoverableMeetings.length} meeting{recoverableMeetings.length !== 1 ? 's' : ''} that{' '}
+            {recoverableMeetings.length !== 1 ? 'were' : 'was'} interrupted. Select a meeting to preview and recover it.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,7 +139,7 @@ export function TranscriptRecovery({
                       'w-full text-left p-3 rounded-lg border transition-colors',
                       selectedMeetingId === meeting.meetingId
                         ? 'bg-primary/10 border-primary'
-                        : 'hover:bg-muted border-transparent'
+                        : 'hover:bg-muted border-transparent',
                     )}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -155,11 +156,11 @@ export function TranscriptRecovery({
                       </div>
                       {meeting.folderPath ? (
                         <span title="Audio available">
-                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
                         </span>
                       ) : (
                         <span title="No audio">
-                          <AlertCircle className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                          <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" />
                         </span>
                       )}
                     </div>
@@ -187,12 +188,12 @@ export function TranscriptRecovery({
                         {selectedMeeting.transcriptCount} transcripts
                       </span>
                       {selectedMeeting.folderPath ? (
-                        <span className="flex items-center gap-1 text-green-600">
+                        <span className="flex items-center gap-1 text-success">
                           <CheckCircle2 className="w-4 h-4" />
                           Audio available
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-yellow-600">
+                        <span className="flex items-center gap-1 text-warning">
                           <AlertCircle className="w-4 h-4" />
                           No audio
                         </span>
@@ -210,7 +211,8 @@ export function TranscriptRecovery({
                       <div className="space-y-3">
                         <Alert>
                           <AlertDescription>
-                            Showing first {previewTranscripts.length} transcript segments (of {selectedMeeting.transcriptCount} total)
+                            Showing first {previewTranscripts.length} transcript segments (of{' '}
+                            {selectedMeeting.transcriptCount} total)
                           </AlertDescription>
                         </Alert>
                         {previewTranscripts.map((transcript, index) => {
@@ -244,7 +246,8 @@ export function TranscriptRecovery({
                         })}
                         {selectedMeeting.transcriptCount > 10 && (
                           <p className="text-sm text-muted-foreground italic">
-                            ... and {selectedMeeting.transcriptCount - 10} more transcript{selectedMeeting.transcriptCount - 10 !== 1 ? 's' : ''}
+                            ... and {selectedMeeting.transcriptCount - 10} more transcript
+                            {selectedMeeting.transcriptCount - 10 !== 1 ? 's' : ''}
                           </p>
                         )}
                       </div>
@@ -265,11 +268,7 @@ export function TranscriptRecovery({
         </div>
 
         <DialogFooter className="px-6 pb-6">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            disabled={isRecovering || isDeleting}
-          >
+          <Button variant="outline" onClick={onClose} disabled={isRecovering || isDeleting}>
             Cancel
           </Button>
           <Button
@@ -289,10 +288,7 @@ export function TranscriptRecovery({
               </>
             )}
           </Button>
-          <Button
-            onClick={handleRecover}
-            disabled={!selectedMeetingId || isRecovering || isDeleting}
-          >
+          <Button onClick={handleRecover} disabled={!selectedMeetingId || isRecovering || isDeleting}>
             {isRecovering ? (
               <>
                 <CheckCircle2 className="w-4 h-4 mr-2 animate-spin" />

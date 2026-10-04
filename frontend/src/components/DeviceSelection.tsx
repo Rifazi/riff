@@ -314,8 +314,8 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
         {/* Microphone Selection */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Mic className="h-4 w-4 text-gray-600" />
-            <Label htmlFor="mic-selection" className="text-sm font-medium text-gray-700">
+            <Mic className="h-4 w-4 text-muted-foreground" />
+            <Label htmlFor="mic-selection" className="text-sm font-medium text-foreground">
               Microphone
             </Label>
           </div>
@@ -336,18 +336,18 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
               ))}
             </SelectContent>
           </Select>
-          {inputDevices.length === 0 && <p className="text-xs text-gray-500">No microphone devices found</p>}
+          {inputDevices.length === 0 && <p className="text-xs text-muted-foreground">No microphone devices found</p>}
 
           {/* Audio Level Meters for Input Devices */}
           {showLevels && inputDevices.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-gray-100">
-              <p className="text-xs text-gray-600 font-medium">Microphone Levels:</p>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground font-medium">Microphone Levels:</p>
               {inputDevices.map((device) => {
                 const levelData = audioLevels.get(device.name);
                 return (
                   <div key={`level-${device.name}`} className="space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-600 truncate max-w-[200px]">{device.name}</span>
+                      <span className="text-xs text-muted-foreground truncate max-w-[200px]">{device.name}</span>
                       {levelData && (
                         <CompactAudioLevelMeter
                           rmsLevel={levelData.rms_level}
@@ -375,8 +375,8 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
         {/* System Audio Selection */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Speaker className="h-4 w-4 text-gray-600" />
-            <Label htmlFor="system-selection" className="text-sm font-medium text-gray-700">
+            <Speaker className="h-4 w-4 text-muted-foreground" />
+            <Label htmlFor="system-selection" className="text-sm font-medium text-foreground">
               System Audio
             </Label>
           </div>
@@ -399,11 +399,11 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
             </SelectContent>
           </Select>
 
-          {outputDevices.length === 0 && <p className="text-xs text-gray-500">No system audio devices found</p>}
+          {outputDevices.length === 0 && <p className="text-xs text-muted-foreground">No system audio devices found</p>}
 
           {/* Backend Selection - available on all platforms */}
           {!disabled && (
-            <div className="pt-3 border-t border-gray-100">
+            <div className="pt-3 border-t border-border">
               <AudioBackendSelector disabled={disabled} />
             </div>
           )}
@@ -411,7 +411,7 @@ export function DeviceSelection({ selectedDevices, onDeviceChange, disabled = fa
       </div>
 
       {/* Info text */}
-      <div className="text-xs text-gray-500 space-y-1">
+      <div className="text-xs text-muted-foreground space-y-1">
         <p>
           • <strong>Microphone:</strong> Records your voice and ambient sound
         </p>

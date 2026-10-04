@@ -1,10 +1,4 @@
-import {
-  FormField,
-  FormItem,
-  FormLabel,
-  FormControl,
-  FormMessage,
-} from '@/components/ui/form';
+import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import {
   Select,
   SelectTrigger,
@@ -54,11 +48,7 @@ export const FormSelectItem = ({
             <div className={formStyle}>
               <FormLabel className={formLabelStyle}>{label}</FormLabel>
               <FormControl className={formControlStyle}>
-                <Select
-                  onValueChange={field.onChange}
-                  value={field.value}
-                  defaultValue={defaultValue}
-                >
+                <Select onValueChange={field.onChange} value={field.value} defaultValue={defaultValue}>
                   <FormControl>
                     <SelectTrigger className="focus:ring-transparent">
                       <SelectValue placeholder={placeholder} />
@@ -68,11 +58,7 @@ export const FormSelectItem = ({
                     <SelectGroup>
                       <SelectLabel>{selectLabel}</SelectLabel>
                       {options.map((item, i) => (
-                        <SelectItem
-                          key={`${item}+${i}`}
-                          value={item.value}
-                          className="hover:bg-slate-100 cursor-pointer"
-                        >
+                        <SelectItem key={`${item}+${i}`} value={item.value} className="hover:bg-accent cursor-pointer">
                           {item.label}
                         </SelectItem>
                       ))}

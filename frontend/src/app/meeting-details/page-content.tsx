@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
@@ -58,7 +58,7 @@ export default function PageContent({
   console.log('📄 PAGE CONTENT: Initializing with data:', {
     meetingId: meeting.id,
     summaryDataKeys: summaryData ? Object.keys(summaryData) : null,
-    transcriptsCount: meeting.transcripts?.length
+    transcriptsCount: meeting.transcripts?.length,
   });
 
   // State
@@ -153,19 +153,22 @@ export default function PageContent({
   // Read lazily at click time so the latest edited summary is what gets sent.
   const aiSummaryRef = useRef(meetingData.aiSummary);
   aiSummaryRef.current = meetingData.aiSummary;
-  const requirementsSource = useMemo<RequirementsSource>(() => ({
-    kind: 'meeting',
-    id: meeting.id,
-    title: meetingData.meetingTitle || meeting.title,
-    meetingCreatedAt: meeting.created_at,
-    getSummaryMarkdown: async () => {
-      const summary = aiSummaryRef.current;
-      if (!hasVisibleSummaryContent(summary)) return null;
-      const fromEditor = await meetingData.blockNoteSummaryRef.current?.getMarkdown?.().catch(() => '');
-      if (fromEditor?.trim()) return fromEditor;
-      return summary && typeof summary.markdown === 'string' ? summary.markdown : null;
-    },
-  }), [meeting.id, meeting.title, meeting.created_at, meetingData.meetingTitle, meetingData.blockNoteSummaryRef]);
+  const requirementsSource = useMemo<RequirementsSource>(
+    () => ({
+      kind: 'meeting',
+      id: meeting.id,
+      title: meetingData.meetingTitle || meeting.title,
+      meetingCreatedAt: meeting.created_at,
+      getSummaryMarkdown: async () => {
+        const summary = aiSummaryRef.current;
+        if (!hasVisibleSummaryContent(summary)) return null;
+        const fromEditor = await meetingData.blockNoteSummaryRef.current?.getMarkdown?.().catch(() => '');
+        if (fromEditor?.trim()) return fromEditor;
+        return summary && typeof summary.markdown === 'string' ? summary.markdown : null;
+      },
+    }),
+    [meeting.id, meeting.title, meeting.created_at, meetingData.meetingTitle, meetingData.blockNoteSummaryRef],
+  );
 
   // Track page view
   useEffect(() => {
@@ -174,9 +177,9 @@ export default function PageContent({
 
   useEffect(() => {
     if (
-      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed')
-      && !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id)
-      && !manuallySelectedTabMeetingIdsRef.current.has(meeting.id)
+      (meetingData.aiSummary || summaryGeneration.summaryStatus === 'completed') &&
+      !autoSwitchedSummaryMeetingIdsRef.current.has(meeting.id) &&
+      !manuallySelectedTabMeetingIdsRef.current.has(meeting.id)
     ) {
       autoSwitchedSummaryMeetingIdsRef.current.add(meeting.id);
       setActiveTab('summary');
@@ -186,11 +189,11 @@ export default function PageContent({
   // Auto-generate only after the model configuration has settled.
   useEffect(() => {
     if (
-      !shouldAutoGenerate
-      || summaryGeneration.summaryStatus !== 'idle'
-      || isModelConfigLoading
-      || meetingData.transcripts.length === 0
-      || autoGenerationStartedMeetingIdRef.current === meeting.id
+      !shouldAutoGenerate ||
+      summaryGeneration.summaryStatus !== 'idle' ||
+      isModelConfigLoading ||
+      meetingData.transcripts.length === 0 ||
+      autoGenerationStartedMeetingIdRef.current === meeting.id
     ) {
       return;
     }
@@ -216,11 +219,11 @@ export default function PageContent({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="flex flex-col h-screen min-w-0 bg-gray-50"
+      className="flex flex-col h-screen min-w-0 bg-muted"
     >
-      <div className="flex-shrink-0 flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-2">
+      <div className="flex-shrink-0 flex items-center gap-3 border-b border-border bg-muted px-4 py-2">
         <BackButton fallbackHref="/meetings" preferFallback={fromRecordingFlow} />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
           {meetingData.meetingTitle || meeting.title}
         </span>
         <RequirementsButton
