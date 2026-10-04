@@ -385,6 +385,24 @@ export interface RedactedJiraSettings extends JiraSettingsFields {
   hasToken: boolean;
 }
 
+// One of the curated zero-shot-classification models the agents' on-device
+// classify_text tool can run. The list comes from the agent server so the UI
+// never hard-codes model IDs.
+export interface ClassificationModelOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+// On-disk cache state for one classification model, read separately from
+// settings (GET /api/settings/classification-cache) because it hits the
+// filesystem and changes independently of the saved selection.
+export interface ClassificationCacheEntry {
+  id: string;
+  downloaded: boolean;
+  sizeBytes: number;
+}
+
 export interface SettingsResponse {
   credentials: Record<Provider, { hasKey: boolean }>;
   models: Record<Role, RoleModelConfig>;
@@ -392,6 +410,8 @@ export interface SettingsResponse {
   defaultLightModels: Record<Provider, string>;
   localModel: { available: boolean; model: string | null; reason: string | null };
   jira: RedactedJiraSettings;
+  classification: { model: string };
+  classificationModels: ClassificationModelOption[];
 }
 
 export interface JiraTicketRef {
