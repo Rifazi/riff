@@ -118,6 +118,8 @@ The biggest open item is not code: no theme has been picked for this app, so the
 
 ### Theme-editing UI keeps its own color values
 
+The theme studio is also the only place in the frontend still rendering native `<select>` elements (`themes/ThemeEditor.tsx`, and `themes/ThemeShowcase.tsx`'s `ui-select` sample): both deliberately render the _previewed_ theme's own CSS rather than this app's `ui/select`, which is the point of the preview. Everywhere else now uses `ui/select`.
+
 `components/DevSessions/themes/ThemeEditor.tsx` contains literal shadow values (`0 1px 2px rgb(15 23 42 / 0.06)`, ...) as selectable presets. These are **data, not styling**: they are candidate values the user picks for _another_ app's theme, so they can't come from this app's own tokens. `audit_theme` flags them; that is a false positive, and the requirements for this work carve the target-app theme-editing logic out of scope explicitly.
 
 ### Chart Colors
@@ -198,19 +200,32 @@ The following main app, journal, and Dev Sessions screens/components have been c
 
 `audit_theme` is a **Riff agent tool, not an npm script** — there is nothing to run from a shell. Ask an agent in a Dev Session to run it; it reports hard-coded colors outside `theme/`, app-defined tokens that should be aliased onto the theme, and whether the Tailwind config references the theme.
 
-To check by hand that no off-theme colors have crept back in, grep the frontend for literal palette classes and color literals:
+The same check runs automatically: `frontend/tests/theme/no-palette-classes.test.ts` walks `frontend/src` on every `npm test` and fails on a literal Tailwind palette class or a literal `white`/`black` utility, with the carve-outs below encoded as explicit allowlists (each one justified in a comment, and each kept honest by a test that fails if the file stops needing it).
+
+To check the same thing by hand, grep for literal palette classes, literal white/black utilities, and raw color literals:
 
 ```bash
-# should return nothing
-git grep -nE '(bg|text|border|ring|divide|from|via|to|placeholder|shadow|fill|stroke)-(gray|slate|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)' -- frontend/src
+# numbered palette classes
+git grep -nE '(bg|text|border|ring|divide|from|via|to|placeholder|shadow|fill|stroke)-(gray|slate|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}' -- frontend/src
+# literal white/black utilities
+git grep -nE '(bg|text|border|ring|fill|stroke|from|via|to)-(white|black)(/[0-9]{1,3})?' -- frontend/src
+# raw color literals
 git grep -nE '#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\(' -- frontend/src
 ```
 
-The second grep's only expected hits are the shadow presets in `themes/ThemeEditor.tsx` (see above).
+None of the three comes back empty — each has a short, deliberate set of expected hits, listed below. Anything outside this table is a regression:
+
+| Grep                  | Expected hits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Palette classes       | `lib/journal/format.ts` (per-notebook cover colors, chosen per notebook and stored in the database) and `lib/dev-sessions/agents.ts` (per-engineer lane colors, one recognisable hue per roster member across the Plan and Coding tabs). Both are color-as-data, not chrome.                                                                                                                                                                                                                                                         |
+| White/black utilities | The modal scrims in `ui/dialog.tsx` and `ui/sheet.tsx` (`bg-black/80`), the drag-and-drop import overlay in `ImportAudio/ImportDropOverlay.tsx` (`bg-black/60` plus the `text-white` label that sits on it), the swatch ring in `DevSessions/themes/ThemeTile.tsx` (`border-white`), and the hairline on a cover-colored pill in `MeetingDetails/MeetingJournalStrip.tsx` (`border-black/5`). All are veils or hairlines drawn over arbitrary content, where a fixed translucent black/white is the intended effect under any theme. |
+| Color literals        | The shadow presets in `themes/ThemeEditor.tsx` (see above), plus the placeholder token block in `globals.css` until a theme is applied.                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### Lint and test scripts
 
-Before this work the repo root had no working `lint` or `test` script, so the frontend's eslint rules were never actually enforced and a backlog of pre-existing violations had accumulated. The root scripts are now wired up to the frontend's eslint config and the bun test suite. `no-explicit-any`, `no-unused-vars` and `no-unescaped-entities` are downgraded to warnings for that pre-existing backlog, with an override in `frontend/eslint.config.mjs` holding the files this work added at `error` level — add new files to that override list rather than widening the relaxation.
+Before this work the repo root had no working `lint` or `test` script, so the frontend's eslint rules were never actually enforced and a backlog of pre-existing violations had accumulated. The root scripts are now wired up to the frontend's eslint config and the bun test suite.
+
+Rather than relaxing a rule repo-wide, `frontend/eslint.config.mjs` keeps three explicit lists of the legacy files that carry that backlog — `legacyExplicitAnyFiles`, `legacyUnusedVarsFiles` and `legacyUnescapedEntitiesFiles` — and switches `@typescript-eslint/no-explicit-any`, `@typescript-eslint/no-unused-vars` and `react/no-unescaped-entities` **off for those files only**. Every other file in the frontend, including every new one, is held to the rules at their default error level. When you clean a legacy file up, delete its entry; never add a new file to a list.
 
 ## Future Enhancements
 

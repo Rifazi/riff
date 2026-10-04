@@ -27,6 +27,40 @@ const PALETTE_CLASS =
   /-(gray|slate|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}/g;
 
 /**
+ * `bg-white` / `text-black` bypass the theme just as completely as a numbered
+ * palette class does — a `bg-white` header stays white under a dark theme — so
+ * they are caught too, with an optional alpha modifier (`bg-black/80`).
+ */
+const NEUTRAL_CLASS = /\b(?:bg|text|border|ring|fill|stroke|from|via|to)-(?:white|black)(?:\/[0-9]{1,3})?\b/g;
+
+/**
+ * The utilities each file is excused for naming in literal white/black, and
+ * why. A file that is not listed here may not use them at all, and a listed
+ * file may only use the exact utilities named. What they have in common:
+ * every one is a scrim or hairline drawn *over arbitrary content*, where a
+ * fixed translucent black or white is the intended effect under any theme —
+ * not a surface that should follow the theme's background.
+ */
+const NEUTRAL_ALLOWLIST = new Map<string, string[]>([
+  // Radix overlay scrims behind a modal dialog/sheet: a translucent veil over
+  // whatever the page was showing, not a themed surface.
+  ['components/ui/dialog.tsx', ['bg-black/80']],
+  ['components/ui/sheet.tsx', ['bg-black/80']],
+  // The drag-and-drop import overlay is the same kind of scrim, plus the text
+  // on top of it, which has to stay legible against the veil rather than
+  // against the theme's background.
+  ['components/ImportAudio/ImportDropOverlay.tsx', ['bg-black/60', 'text-white', 'text-white/80']],
+  // A ring around a swatch of *another* app's proposed theme colour in the
+  // Dev Sessions theme picker: it separates the swatch from whatever
+  // arbitrary colour sits behind it, so it cannot come from this app's theme.
+  ['components/DevSessions/themes/ThemeTile.tsx', ['border-white']],
+  // Hairline on a pill painted with a notebook's own cover colour (see the
+  // lib/journal/format.ts entry below): it shades that arbitrary colour
+  // slightly rather than drawing a themed border.
+  ['components/MeetingDetails/MeetingJournalStrip.tsx', ['border-black/5']],
+]);
+
+/**
  * The only files allowed to name palette colours, because the colour is *data*
  * chosen per entity rather than app chrome — collapsing them onto the theme's
  * single primary hue would delete a real feature, not fix a bug. Keep this
@@ -70,13 +104,13 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-function matchesIn(path: string): Violation[] {
+function matchesIn(path: string, pattern: RegExp = PALETTE_CLASS): Violation[] {
   const file = relative(SRC_DIR, path);
 
   return readFileSync(path, 'utf8')
     .split('\n')
     .flatMap((text, index) =>
-      Array.from(text.matchAll(PALETTE_CLASS), (match) => ({
+      Array.from(text.matchAll(pattern), (match) => ({
         file,
         line: index + 1,
         match: match[0],
@@ -85,7 +119,13 @@ function matchesIn(path: string): Violation[] {
 }
 
 function violationsIn(path: string): Violation[] {
-  return ALLOWLIST.has(relative(SRC_DIR, path)) ? [] : matchesIn(path);
+  const file = relative(SRC_DIR, path);
+  const excused = NEUTRAL_ALLOWLIST.get(file) ?? [];
+
+  return [
+    ...(ALLOWLIST.has(file) ? [] : matchesIn(path)),
+    ...matchesIn(path, NEUTRAL_CLASS).filter(({ match }) => !excused.includes(match)),
+  ];
 }
 
 describe('no literal Tailwind palette classes in frontend/src', () => {
@@ -120,9 +160,32 @@ describe('no literal Tailwind palette classes in frontend/src', () => {
     expect(stale).toEqual([]);
   });
 
+  test('a reintroduced white or black utility would be caught', () => {
+    const reintroduced = 'className="bg-white text-black/70"';
+
+    expect(Array.from(reintroduced.matchAll(NEUTRAL_CLASS), (match) => match[0])).toEqual([
+      'bg-white',
+      'text-black/70',
+    ]);
+  });
+
+  test('every file excused for white/black still uses exactly what it was excused for', () => {
+    // Same honesty check as the palette allowlist above, in both directions:
+    // an entry that no longer matches is dead and should be deleted, and an
+    // excused utility that is no longer used should not stay excused.
+    const stale = Array.from(NEUTRAL_ALLOWLIST).flatMap(([file, excused]) => {
+      const used = new Set(matchesIn(join(SRC_DIR, file), NEUTRAL_CLASS).map(({ match }) => match));
+
+      return excused.filter((utility) => !used.has(utility)).map((utility) => `src/${file} — ${utility}`);
+    });
+
+    expect(stale).toEqual([]);
+  });
+
   test('theme token utilities are not mistaken for palette classes', () => {
     const themed = 'className="bg-muted text-primary-foreground border-border bg-primary/10 gap-2"';
 
     expect(Array.from(themed.matchAll(PALETTE_CLASS))).toEqual([]);
+    expect(Array.from(themed.matchAll(NEUTRAL_CLASS))).toEqual([]);
   });
 });
