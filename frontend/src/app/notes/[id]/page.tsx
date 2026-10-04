@@ -1,5 +1,6 @@
 import React from 'react';
 import { Clock, Users, Calendar, Tag } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 interface PageProps {
   params: {
@@ -18,12 +19,7 @@ interface Note {
 
 export function generateStaticParams() {
   // Return all possible note IDs
-  return [
-    { id: 'team-sync-dec-26' },
-    { id: 'product-review' },
-    { id: 'project-ideas' },
-    { id: 'action-items' }
-  ];
+  return [{ id: 'team-sync-dec-26' }, { id: 'product-review' }, { id: 'project-ideas' }, { id: 'action-items' }];
 }
 
 const NotePage = ({ params }: PageProps) => {
@@ -58,7 +54,7 @@ Team sync discussion about Q1 2024 goals and current project status.
 - Discussed current project bottlenecks
 - Reviewed customer feedback from last release
 - Planned resource allocation for upcoming sprint
-      `
+      `,
     },
     'product-review': {
       title: 'Product Review',
@@ -81,7 +77,7 @@ Quarterly product review session with stakeholders.
 - [ ] Update product roadmap
 - [ ] Schedule user research sessions
 - [ ] Review competitor analysis
-      `
+      `,
     },
     'project-ideas': {
       title: 'Project Ideas',
@@ -99,7 +95,7 @@ Quarterly product review session with stakeholders.
 - Enhanced search functionality
 - Better note organization
 - Real-time collaboration
-      `
+      `,
     },
     'action-items': {
       title: 'Action Items',
@@ -122,8 +118,8 @@ Quarterly product review session with stakeholders.
 - [ ] Refactor legacy code
 - [ ] Improve code documentation
 - [ ] Setup development guidelines
-      `
-    }
+      `,
+    },
   };
 
   const note = sampleData[params.id as keyof typeof sampleData];
@@ -136,22 +132,22 @@ Quarterly product review session with stakeholders.
     <div className="p-8 max-w-4xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-4">{note.title}</h1>
-        
-        <div className="flex flex-wrap gap-4 text-gray-600">
+
+        <div className="flex flex-wrap gap-4 text-muted-foreground">
           {note.date && (
             <div className="flex items-center gap-1">
               <Calendar className="w-4 h-4" />
               <span>{note.date}</span>
             </div>
           )}
-          
+
           {note.time && (
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
               <span>{note.time}</span>
             </div>
           )}
-          
+
           {note.attendees && (
             <div className="flex items-center gap-1">
               <Users className="w-4 h-4" />
@@ -162,25 +158,32 @@ Quarterly product review session with stakeholders.
 
         <div className="flex gap-2 mt-4">
           {note.tags.map((tag) => (
-            <div key={tag} className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm">
+            <Badge key={tag} variant="secondary" className="gap-1 px-2 py-1 text-sm">
               <Tag className="w-3 h-3" />
               {tag}
-            </div>
+            </Badge>
           ))}
         </div>
       </div>
 
       <div className="prose prose-blue max-w-none">
-        <div dangerouslySetInnerHTML={{ __html: note.content.split('\n').map(line => {
-          if (line.startsWith('# ')) {
-            return `<h1>${line.slice(2)}</h1>`;
-          } else if (line.startsWith('## ')) {
-            return `<h2>${line.slice(3)}</h2>`;
-          } else if (line.startsWith('- ')) {
-            return `<li>${line.slice(2)}</li>`;
-          }
-          return line;
-        }).join('\n') }} />
+        <div
+          dangerouslySetInnerHTML={{
+            __html: note.content
+              .split('\n')
+              .map((line) => {
+                if (line.startsWith('# ')) {
+                  return `<h1>${line.slice(2)}</h1>`;
+                } else if (line.startsWith('## ')) {
+                  return `<h2>${line.slice(3)}</h2>`;
+                } else if (line.startsWith('- ')) {
+                  return `<li>${line.slice(2)}</li>`;
+                }
+                return line;
+              })
+              .join('\n'),
+          }}
+        />
       </div>
     </div>
   );
