@@ -102,7 +102,7 @@ export function ThemeProposalPanel({
       </Notice>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-6xl w-[95vw] max-h-[92vh] overflow-y-auto custom-scrollbar bg-gray-50">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[92vh] overflow-y-auto custom-scrollbar bg-muted">
           <DialogHeader>
             <DialogTitle>Theme for {appName}</DialogTitle>
             <DialogDescription>

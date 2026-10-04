@@ -80,7 +80,6 @@ export function RequirementsButton({ source, disabled }: { source: RequirementsS
     <>
       <Button
         size="sm"
-        className="bg-purple-600 text-white hover:bg-purple-700"
         disabled={disabled}
         onClick={() => setOpen(true)}
         title={
@@ -92,7 +91,7 @@ export function RequirementsButton({ source, disabled }: { source: RequirementsS
         <ClipboardList />
         {latest ? `Dev session: ${STAGE_LABEL[latest.stage] ?? latest.stage}` : 'Create requirements'}
         {sessions && sessions.length > 1 && (
-          <span className="rounded-full bg-white/25 px-1.5 text-[10px] leading-4">{sessions.length}</span>
+          <span className="rounded-full bg-primary-foreground/25 px-1.5 text-[10px] leading-4">{sessions.length}</span>
         )}
       </Button>
       <RequirementsDialog open={open} onOpenChange={setOpen} source={source} />
@@ -156,7 +155,7 @@ function RequirementsDialog({
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-purple-600" />
+            <Sparkles className="w-5 h-5 text-primary" />
             Create requirements from this {source.kind}
           </DialogTitle>
           <DialogDescription>
@@ -168,7 +167,7 @@ function RequirementsDialog({
         </DialogHeader>
 
         {healthy === false ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div className="rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-sm text-foreground">
             The agent server isn't running yet.{' '}
             <Link href="/dev-sessions" className="font-medium underline" onClick={() => onOpenChange(false)}>
               Open Dev Sessions
@@ -178,20 +177,24 @@ function RequirementsDialog({
         ) : (
           <div className="space-y-4 py-1">
             {existing && existing.length > 0 && (
-              <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
-                <div className="text-xs font-medium text-gray-500 mb-1">Continue a session from this {source.kind}</div>
+              <div className="rounded-md bg-muted border border-border px-3 py-2">
+                <div className="text-xs font-medium text-muted-foreground mb-1">
+                  Continue a session from this {source.kind}
+                </div>
                 <ul className="space-y-1">
                   {existing.map((s) => (
                     <li key={s.id}>
                       <Link
                         href={sessionHref(s.id, stageGroupFor(s))}
                         onClick={() => onOpenChange(false)}
-                        className="flex items-center justify-between gap-2 text-sm text-blue-600 hover:underline"
+                        className="flex items-center justify-between gap-2 text-sm text-primary hover:underline"
                       >
                         <span className="truncate">
-                          {s.title} <span className="text-gray-400">· {s.appName}</span>
+                          {s.title} <span className="text-muted-foreground">· {s.appName}</span>
                         </span>
-                        <span className="text-xs text-gray-500 flex-shrink-0">{STAGE_LABEL[s.stage] ?? s.stage}</span>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                          {STAGE_LABEL[s.stage] ?? s.stage}
+                        </span>
                       </Link>
                     </li>
                   ))}
@@ -208,17 +211,17 @@ function RequirementsDialog({
             </div>
             <div className="space-y-1.5">
               <Label>
-                Ticket ID <span className="text-gray-400 font-normal">(optional)</span>
+                Ticket ID <span className="text-muted-foreground font-normal">(optional)</span>
               </Label>
               <Input value={sessionKey} onChange={(e) => setSessionKey(e.target.value)} placeholder="e.g. API-1234" />
             </div>
             {summaryAvailable && (
-              <label className="flex items-center justify-between gap-3 rounded-md border border-gray-200 px-3 py-2 cursor-pointer">
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 cursor-pointer">
                 <span className="text-sm">
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-foreground">
                     {isJournal ? 'Include the journal overview' : 'Include the AI summary'}
                   </span>
-                  <span className="block text-xs text-gray-500">
+                  <span className="block text-xs text-muted-foreground">
                     Sent alongside the {isJournal ? 'notes' : 'transcript'} as extra context.
                   </span>
                 </span>
@@ -226,7 +229,7 @@ function RequirementsDialog({
               </label>
             )}
             {createMutation.isError && (
-              <div className="text-sm text-red-600">{(createMutation.error as Error).message}</div>
+              <div className="text-sm text-destructive">{(createMutation.error as Error).message}</div>
             )}
           </div>
         )}

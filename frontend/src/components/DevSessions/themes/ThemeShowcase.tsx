@@ -25,16 +25,30 @@ const ROWS = [
 
 const noNav = (e: React.MouseEvent) => e.preventDefault();
 
-export function ThemeShowcase({ tokens, mode, appName = 'Acme' }: { tokens: ThemeTokens | undefined; mode: ThemeMode; appName?: string }) {
+export function ThemeShowcase({
+  tokens,
+  mode,
+  appName = 'Acme',
+}: {
+  tokens: ThemeTokens | undefined;
+  mode: ThemeMode;
+  appName?: string;
+}) {
   const [tab, setTab] = useState(TABS[0]);
   const radioGroup = useId();
 
   return (
-    <ThemeFrame tokens={tokens} mode={mode} className="rounded-lg overflow-hidden border border-gray-200 min-h-[400px]">
+    <ThemeFrame tokens={tokens} mode={mode} className="rounded-lg overflow-hidden border border-border min-h-[400px]">
       <nav className="ui-nav">
         <span className="ui-nav__brand">{appName}</span>
         {['Dashboard', 'Customers', 'Reports'].map((label) => (
-          <a key={label} href="#" onClick={noNav} className="ui-nav__link" aria-current={label === 'Customers' ? 'page' : undefined}>
+          <a
+            key={label}
+            href="#"
+            onClick={noNav}
+            className="ui-nav__link"
+            aria-current={label === 'Customers' ? 'page' : undefined}
+          >
             {label}
           </a>
         ))}
@@ -63,7 +77,13 @@ export function ThemeShowcase({ tokens, mode, appName = 'Acme' }: { tokens: Them
 
         <div role="tablist" className="ui-tabs">
           {TABS.map((label) => (
-            <button key={label} role="tab" className="ui-tab" aria-selected={tab === label} onClick={() => setTab(label)}>
+            <button
+              key={label}
+              role="tab"
+              className="ui-tab"
+              aria-selected={tab === label}
+              onClick={() => setTab(label)}
+            >
               {label}
             </button>
           ))}

@@ -25,14 +25,17 @@ export function CoordinatorControl({ session, streaming }: { session: SessionRec
   const enabled = session.coordinatorEnabled;
 
   return (
-    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer" title={COORDINATOR_PERSONA.fullName}>
+    <label
+      className="flex items-center gap-2 text-sm text-foreground cursor-pointer"
+      title={COORDINATOR_PERSONA.fullName}
+    >
       <Switch
         checked={enabled}
         disabled={toggleMutation.isPending || streaming}
         onCheckedChange={(checked) => toggleMutation.mutate(checked)}
       />
       <span className="font-medium">Auto-drive with {COORDINATOR_PERSONA.name}</span>
-      <span className="text-gray-500 hidden lg:inline">
+      <span className="text-muted-foreground hidden lg:inline">
         {streaming && enabled
           ? `— ${COORDINATOR_PERSONA.name} is driving this stage…`
           : enabled

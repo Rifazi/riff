@@ -24,13 +24,7 @@ const AGENT = AGENT_PERSONAS.plan;
 
 const PLAN_KICKOFF_MESSAGE = 'Please break the approved requirements into a concrete, reviewable step-by-step plan.';
 
-function JiraTickets({
-  sessionId,
-  doc,
-}: {
-  sessionId: string;
-  doc: Awaited<ReturnType<typeof api.getPlanDoc>>;
-}) {
+function JiraTickets({ sessionId, doc }: { sessionId: string; doc: Awaited<ReturnType<typeof api.getPlanDoc>> }) {
   const queryClient = useQueryClient();
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
 
@@ -47,21 +41,28 @@ function JiraTickets({
   const remaining = doc.steps.filter((step) => !createdStepIds.has(step.id));
 
   return (
-    <div className="mt-3 pt-3 border-t border-gray-100">
+    <div className="mt-3 pt-3 border-t border-border">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Ticket className="w-4 h-4" />
           Jira tickets
         </div>
         {jiraConfigured && remaining.length > 0 && (
-          <Button size="sm" variant="outline" onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+          >
             {createMutation.isPending && <Loader2 className="animate-spin" />}
-            {createMutation.isPending ? 'Creating…' : `Create ${remaining.length} ticket${remaining.length === 1 ? '' : 's'}`}
+            {createMutation.isPending
+              ? 'Creating…'
+              : `Create ${remaining.length} ticket${remaining.length === 1 ? '' : 's'}`}
           </Button>
         )}
       </div>
       {!jiraConfigured && (
-        <div className="text-xs text-gray-500 mt-1">
+        <div className="text-xs text-muted-foreground mt-1">
           Add a Jira base URL, email and API token under Settings → Dev Agents to create one ticket per plan step.
         </div>
       )}
@@ -69,11 +70,14 @@ function JiraTickets({
         <ul className="mt-2 space-y-1 text-sm">
           {created.map((issue) => (
             <li key={issue.stepId} className="flex items-center gap-2">
-              <ExternalAnchor href={issue.url} className="inline-flex items-center gap-1 text-blue-600 hover:underline font-medium">
+              <ExternalAnchor
+                href={issue.url}
+                className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
+              >
                 {issue.key}
                 <ExternalLink className="w-3 h-3" />
               </ExternalAnchor>
-              <span className="text-gray-600 truncate">{issue.title}</span>
+              <span className="text-muted-foreground truncate">{issue.title}</span>
             </li>
           ))}
         </ul>
@@ -131,9 +135,15 @@ export function PlanStage({ session }: { session: SessionRecord }) {
   }, [doc?.body, isEditing]);
 
   const handleSend = (message: string, attachments?: AttachmentInput[]) =>
-    send(`/api/sessions/${sessionId}/plan/message`, message, refresh, (event) => {
-      if (event.type === 'tool_result') queryClient.invalidateQueries({ queryKey: ['plan-doc', sessionId] });
-    }, attachments);
+    send(
+      `/api/sessions/${sessionId}/plan/message`,
+      message,
+      refresh,
+      (event) => {
+        if (event.type === 'tool_result') queryClient.invalidateQueries({ queryKey: ['plan-doc', sessionId] });
+      },
+      attachments,
+    );
 
   // Kick this stage off automatically when it's reached with nothing said
   // yet. Coordinator mode (if on) drives this via its own effect instead.
@@ -170,7 +180,7 @@ export function PlanStage({ session }: { session: SessionRecord }) {
     kickedOffPlanRelay.current = true;
     void handleSend(
       `Requirements were revised (see note below) and re-approved while coding was in progress — reconcile the ` +
-        `plan and existing coding checklist accordingly.\n\n---\n${session.pendingRequirementsRelayNote ?? '(no note provided)'}`
+        `plan and existing coding checklist accordingly.\n\n---\n${session.pendingRequirementsRelayNote ?? '(no note provided)'}`,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.planRelayPending, streaming]);

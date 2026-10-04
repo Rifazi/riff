@@ -417,7 +417,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                       </Button>
                     )}
                     <label
-                      className="flex items-center gap-2 text-sm text-gray-700"
+                      className="flex items-center gap-2 text-sm text-foreground"
                       title={
                         session.coordinatorEnabled
                           ? `${COORDINATOR_PERSONA.name} is already driving this session — turn the coordinator off to use this.`
@@ -467,23 +467,25 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         )
       }
       document={
-        <div className="flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
-            <h2 className="text-sm font-semibold text-gray-900">Diff against the base branch</h2>
+        <div className="flex flex-col flex-1 min-h-0 rounded-lg border border-border bg-card shadow-sm">
+          <div className="px-4 py-3 border-b border-border flex-shrink-0">
+            <h2 className="text-sm font-semibold text-foreground">Diff against the base branch</h2>
             {diffData?.stat && (
-              <div className="text-xs text-gray-500 font-mono truncate">{diffData.stat.trim().split('\n').pop()}</div>
+              <div className="text-xs text-muted-foreground font-mono truncate">
+                {diffData.stat.trim().split('\n').pop()}
+              </div>
             )}
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-4">
             <DiffViewer diff={diffData?.diff ?? null} />
             {diffData && diffData.commits.length > 0 && (
               <div>
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Commits</div>
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Commits</div>
                 <ul className="space-y-1">
                   {diffData.commits.map((c) => (
-                    <li key={c.hash} className="flex items-start gap-2 text-sm text-gray-700">
-                      <GitCommit className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
-                      <span className="font-mono text-xs text-gray-500 mt-0.5">{c.hash.slice(0, 8)}</span>
+                    <li key={c.hash} className="flex items-start gap-2 text-sm text-foreground">
+                      <GitCommit className="w-4 h-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+                      <span className="font-mono text-xs text-muted-foreground mt-0.5">{c.hash.slice(0, 8)}</span>
                       <span>{c.message}</span>
                     </li>
                   ))}
@@ -514,7 +516,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="mt-2 text-gray-600"
+                className="mt-2 text-muted-foreground"
                 onClick={() => setShowSendBackForm(true)}
                 disabled={approved || busy}
                 title="Reopen Requirements to revise something already partially implemented, without abandoning this branch"
@@ -531,7 +533,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                   value={sendBackNote}
                   onChange={(e) => setSendBackNote(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                   placeholder="This note is relayed to the requirements agent."
                 />
                 <ErrorText>{sendBackMutation.error ? (sendBackMutation.error as Error).message : null}</ErrorText>

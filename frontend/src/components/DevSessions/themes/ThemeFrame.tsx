@@ -19,7 +19,10 @@ export function useThemes() {
  * writes the app's tokens.css), debounced while the user drags a slider.
  * Keeps showing the last valid tokens while an edit is invalid.
  */
-export function useThemeTokens(theme: ThemeDefinition | null): { tokens: ThemeTokens | undefined; error: string | null } {
+export function useThemeTokens(theme: ThemeDefinition | null): {
+  tokens: ThemeTokens | undefined;
+  error: string | null;
+} {
   const { data: themes } = useThemes();
   const preset = theme ? themes?.presets.find((p) => sameTheme(p.theme, theme)) : undefined;
   const [debounced, setDebounced] = useState(theme);
@@ -71,7 +74,7 @@ export function ThemeFrame({
   children: React.ReactNode;
 }) {
   useComponentsCss();
-  if (!tokens) return <div className={`${className} bg-gray-100 animate-pulse`} />;
+  if (!tokens) return <div className={`${className} bg-muted animate-pulse`} />;
   const style = { ...tokens[mode], colorScheme: mode } as React.CSSProperties;
   return (
     <div data-ui-theme="" style={style} className={className}>

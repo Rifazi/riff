@@ -39,7 +39,8 @@ export function ThemeStudio({
   const { tokens, error: previewError } = useThemeTokens(value?.theme ?? null);
 
   if (isLoading) return <LoadingState label="Loading themes…" />;
-  if (error || !data) return <ErrorText>Couldn&apos;t load themes: {(error as Error | null)?.message ?? 'no response'}</ErrorText>;
+  if (error || !data)
+    return <ErrorText>Couldn&apos;t load themes: {(error as Error | null)?.message ?? 'no response'}</ErrorText>;
 
   // Which starting point the draft came from; "Edited" once it differs.
   const matches = (key: string) => {
@@ -62,8 +63,9 @@ export function ThemeStudio({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs text-gray-500">
-          Start from the current theme or a preset, then adjust anything. The result is saved to the app&apos;s <code>theme/theme.json</code>.
+        <div className="text-xs text-muted-foreground">
+          Start from the current theme or a preset, then adjust anything. The result is saved to the app&apos;s{' '}
+          <code>theme/theme.json</code>.
         </div>
         <ModeToggle mode={mode} onChange={setMode} />
       </div>
@@ -75,7 +77,9 @@ export function ThemeStudio({
             onClick={() => onChange(null)}
             aria-pressed={value === null}
             className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed p-4 text-sm ${
-              value === null ? 'border-blue-500 ring-2 ring-blue-500/30 text-gray-900' : 'border-gray-300 text-gray-500 hover:bg-white'
+              value === null
+                ? 'border-primary ring-2 ring-primary/30 text-foreground'
+                : 'border-border text-muted-foreground hover:bg-muted'
             }`}
           >
             <Ban className="h-5 w-5" />
@@ -107,7 +111,7 @@ export function ThemeStudio({
 
       {value && (
         <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-4 items-start">
-          <div className="rounded-lg border border-gray-200 bg-white p-3 lg:sticky lg:top-0 lg:max-h-[calc(100vh-12rem)] overflow-y-auto custom-scrollbar">
+          <div className="rounded-lg border border-border bg-card p-3 lg:sticky lg:top-0 lg:max-h-[calc(100vh-12rem)] overflow-y-auto custom-scrollbar">
             <ThemeEditor theme={value.theme} mode={mode} onChange={(theme) => onChange({ ...value, theme })} />
           </div>
           <div className="space-y-2 min-w-0">

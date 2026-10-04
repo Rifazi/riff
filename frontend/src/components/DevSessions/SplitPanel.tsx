@@ -30,41 +30,41 @@ export function SplitProposalCard({
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <div className="rounded-md border border-purple-200 bg-purple-50/60 p-3 space-y-3">
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-3">
       <div className="flex items-start gap-2">
-        <GitFork className="w-4 h-4 mt-0.5 text-purple-700 flex-shrink-0" />
+        <GitFork className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" />
         <div>
-          <div className="text-sm font-semibold text-gray-900">
+          <div className="text-sm font-semibold text-foreground">
             {agentName} suggests splitting this into {proposal.parts.length} sessions
           </div>
-          <p className="text-sm text-gray-700 mt-0.5">{proposal.rationale}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{proposal.rationale}</p>
         </div>
       </div>
 
       <ol className="space-y-1.5">
         {proposal.parts.map((part, i) => (
-          <li key={part.sessionKey} className="rounded border border-purple-100 bg-white">
+          <li key={part.sessionKey} className="rounded border border-border bg-card">
             <button
               type="button"
               onClick={() => setOpenIndex(openIndex === i ? null : i)}
               className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left"
             >
-              <span className="text-xs font-medium text-gray-400 w-4">{i + 1}.</span>
+              <span className="text-xs font-medium text-muted-foreground w-4">{i + 1}.</span>
               <span className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-gray-900">{part.title}</span>
-                <span className="ml-2 font-mono text-[11px] text-gray-500">{part.sessionKey}</span>
+                <span className="text-sm font-medium text-foreground">{part.title}</span>
+                <span className="ml-2 font-mono text-[11px] text-muted-foreground">{part.sessionKey}</span>
                 {part.dependsOn.length > 0 && (
-                  <span className="ml-2 text-[11px] text-gray-500">
+                  <span className="ml-2 text-[11px] text-muted-foreground">
                     after {part.dependsOn.map((d) => d + 1).join(', ')}
                   </span>
                 )}
               </span>
               <ChevronDown
-                className={`w-3.5 h-3.5 text-gray-400 transition-transform ${openIndex === i ? 'rotate-180' : ''}`}
+                className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${openIndex === i ? 'rotate-180' : ''}`}
               />
             </button>
             {openIndex === i && (
-              <div className="px-3 pb-2.5 pt-1 text-xs text-gray-700 whitespace-pre-wrap border-t border-purple-50">
+              <div className="px-3 pb-2.5 pt-1 text-xs text-foreground whitespace-pre-wrap border-t border-border">
                 {part.brief}
               </div>
             )}
@@ -80,14 +80,14 @@ export function SplitProposalCard({
         <Button
           size="sm"
           variant="outline"
-          className="bg-white"
+          className="bg-card"
           disabled={disabled || busy !== null}
           onClick={onDismiss}
         >
           {busy === 'dismiss' && <Loader2 className="animate-spin" />}
           Keep as one
         </Button>
-        <span className="text-xs text-gray-500">Each part gets its own requirements → plan → code → QA.</span>
+        <span className="text-xs text-muted-foreground">Each part gets its own requirements → plan → code → QA.</span>
       </div>
     </div>
   );
@@ -131,7 +131,7 @@ export function SplitLinks({ session }: { session: SessionRecord }) {
                     <Badge variant="secondary">{STAGE_LABEL[child.stage] ?? child.stage}</Badge>
                   </>
                 ) : (
-                  <span className="text-gray-500">(deleted session)</span>
+                  <span className="text-muted-foreground">(deleted session)</span>
                 )}
               </li>
             );

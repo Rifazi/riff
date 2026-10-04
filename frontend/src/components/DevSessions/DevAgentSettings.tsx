@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -69,18 +70,18 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
-      <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-      <p className="text-sm text-gray-600 mt-1 mb-4">{description}</p>
-      <div className="divide-y divide-gray-100">{children}</div>
-    </div>
+    <Card className="p-6">
+      <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+      <p className="text-sm text-muted-foreground mt-1 mb-4">{description}</p>
+      <div className="divide-y divide-border">{children}</div>
+    </Card>
   );
 }
 
 function TestResult({ result, okText }: { result: { ok: boolean; error?: string } | null; okText: string }) {
   if (!result) return null;
   return (
-    <div className={`flex items-center gap-1.5 text-sm mt-2 ${result.ok ? 'text-green-700' : 'text-red-600'}`}>
+    <div className={`flex items-center gap-1.5 text-sm mt-2 ${result.ok ? 'text-success' : 'text-destructive'}`}>
       {result.ok ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
       {result.ok ? okText : `Failed: ${result.error}`}
     </div>
@@ -101,8 +102,8 @@ function ClaudeLoginRow() {
     <div className="py-4 first:pt-0">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="font-medium text-gray-900">{PROVIDER_LABEL.claude}</div>
-          <p className="text-sm text-gray-500 mt-1 max-w-xl">
+          <div className="font-medium text-foreground">{PROVIDER_LABEL.claude}</div>
+          <p className="text-sm text-muted-foreground mt-1 max-w-xl">
             Uses whatever <code>claude login</code> set up on this machine — billed against your Claude subscription,
             not an API key. If it isn't logged in, run <code>claude login</code> in a terminal, then test again.
           </p>
@@ -148,7 +149,7 @@ function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boole
   return (
     <div className="py-4">
       <div className="flex items-center gap-2 mb-2">
-        <span className="font-medium text-gray-900">{PROVIDER_LABEL[provider]}</span>
+        <span className="font-medium text-foreground">{PROVIDER_LABEL[provider]}</span>
         <Badge variant={hasKey ? 'success' : 'secondary'}>{hasKey ? 'Configured' : 'Not set'}</Badge>
       </div>
       <div className="flex gap-2">
@@ -222,8 +223,8 @@ function RoleModelRow({
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
-        <div className="font-medium text-gray-900">{label}</div>
-        <div className="text-xs text-gray-500">{hint}</div>
+        <div className="font-medium text-foreground">{label}</div>
+        <div className="text-xs text-muted-foreground">{hint}</div>
       </div>
       <div className="flex gap-2">
         <Select
@@ -329,7 +330,7 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
 
   const row = (label: React.ReactNode, input: React.ReactNode) => (
     <div className="py-3 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-2 items-center">
-      <div className="text-sm font-medium text-gray-700">{label}</div>
+      <div className="text-sm font-medium text-foreground">{label}</div>
       {input}
     </div>
   );
@@ -368,7 +369,7 @@ function JiraSettings({ jira }: { jira: RedactedJiraSettings }) {
             Create one at{' '}
             <ExternalAnchor
               href="https://id.atlassian.com/manage-profile/security/api-tokens"
-              className="text-blue-600 hover:underline"
+              className="text-primary hover:underline"
             >
               id.atlassian.com/manage-profile/security/api-tokens
             </ExternalAnchor>{' '}

@@ -47,12 +47,12 @@ const SHADOW_PRESETS: { label: string; sm: string; md: string }[] = [
 ];
 
 const inputClass =
-  'w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500';
+  'w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <fieldset className="space-y-2 border-t border-gray-100 pt-3 first:border-0 first:pt-0">
-      <legend className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</legend>
+    <fieldset className="space-y-2 border-t border-border pt-3 first:border-0 first:pt-0">
+      <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</legend>
       {children}
     </fieldset>
   );
@@ -60,7 +60,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-2 text-xs text-gray-700">
+    <label className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-2 text-xs text-foreground">
       <span>{label}</span>
       {children}
     </label>
@@ -78,7 +78,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
           type="color"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-6 w-8 flex-shrink-0 cursor-pointer rounded border border-gray-200 bg-white p-0.5"
+          className="h-6 w-8 flex-shrink-0 cursor-pointer rounded border border-border bg-background p-0.5"
           aria-label={`${label} color`}
         />
         <input
@@ -110,8 +110,15 @@ function RangeField({
   return (
     <Row label={label}>
       <span className="flex items-center gap-2">
-        <input type="range" min={0} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} className="flex-1" />
-        <span className="w-9 text-right tabular-nums text-gray-500">{value}px</span>
+        <input
+          type="range"
+          min={0}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="flex-1"
+        />
+        <span className="w-9 text-right tabular-nums text-muted-foreground">{value}px</span>
       </span>
     </Row>
   );
@@ -126,8 +133,10 @@ export function ThemeEditor({
   mode: ThemeMode;
   onChange: (theme: ThemeDefinition) => void;
 }) {
-  const set = <K extends keyof ThemeDefinition>(key: K, value: ThemeDefinition[K]) => onChange({ ...theme, [key]: value });
-  const shadowPreset = SHADOW_PRESETS.find((s) => s.sm === theme.shadow.sm && s.md === theme.shadow.md)?.label ?? 'Custom';
+  const set = <K extends keyof ThemeDefinition>(key: K, value: ThemeDefinition[K]) =>
+    onChange({ ...theme, [key]: value });
+  const shadowPreset =
+    SHADOW_PRESETS.find((s) => s.sm === theme.shadow.sm && s.md === theme.shadow.md)?.label ?? 'Custom';
   const pill = theme.radius.full >= 999;
 
   return (
@@ -137,15 +146,26 @@ export function ThemeEditor({
           <input value={theme.name} onChange={(e) => set('name', e.target.value)} className={inputClass} />
         </Row>
         <Row label="Description">
-          <input value={theme.description} onChange={(e) => set('description', e.target.value)} className={inputClass} />
+          <input
+            value={theme.description}
+            onChange={(e) => set('description', e.target.value)}
+            className={inputClass}
+          />
         </Row>
       </Section>
 
       <Section title={`Colors · ${mode} mode`}>
         {COLOR_FIELDS.map(({ key, label }) => (
-          <ColorField key={key} label={label} value={theme[mode][key]} onChange={(hex) => set(mode, { ...theme[mode], [key]: hex })} />
+          <ColorField
+            key={key}
+            label={label}
+            value={theme[mode][key]}
+            onChange={(hex) => set(mode, { ...theme[mode], [key]: hex })}
+          />
         ))}
-        <p className="text-[11px] text-gray-400">Switch the preview to {mode === 'light' ? 'dark' : 'light'} to edit its colors.</p>
+        <p className="text-[11px] text-muted-foreground">
+          Switch the preview to {mode === 'light' ? 'dark' : 'light'} to edit its colors.
+        </p>
       </Section>
 
       <Section title="Typography">
@@ -166,7 +186,11 @@ export function ThemeEditor({
           </Row>
         ))}
         <Row label="Heading weight">
-          <select value={theme.headingWeight} onChange={(e) => set('headingWeight', Number(e.target.value))} className={inputClass}>
+          <select
+            value={theme.headingWeight}
+            onChange={(e) => set('headingWeight', Number(e.target.value))}
+            className={inputClass}
+          >
             {[400, 500, 600, 650, 700, 800].map((w) => (
               <option key={w} value={w}>
                 {w}
@@ -177,9 +201,24 @@ export function ThemeEditor({
       </Section>
 
       <Section title="Shape">
-        <RangeField label="Small corners" value={theme.radius.sm} max={24} onChange={(v) => set('radius', { ...theme.radius, sm: v })} />
-        <RangeField label="Corners" value={theme.radius.md} max={24} onChange={(v) => set('radius', { ...theme.radius, md: v })} />
-        <RangeField label="Card corners" value={theme.radius.lg} max={32} onChange={(v) => set('radius', { ...theme.radius, lg: v })} />
+        <RangeField
+          label="Small corners"
+          value={theme.radius.sm}
+          max={24}
+          onChange={(v) => set('radius', { ...theme.radius, sm: v })}
+        />
+        <RangeField
+          label="Corners"
+          value={theme.radius.md}
+          max={24}
+          onChange={(v) => set('radius', { ...theme.radius, md: v })}
+        />
+        <RangeField
+          label="Card corners"
+          value={theme.radius.lg}
+          max={32}
+          onChange={(v) => set('radius', { ...theme.radius, lg: v })}
+        />
         <Row label="Pills">
           <span className="flex items-center gap-2">
             <input
@@ -187,11 +226,15 @@ export function ThemeEditor({
               checked={pill}
               onChange={(e) => set('radius', { ...theme.radius, full: e.target.checked ? 9999 : theme.radius.md })}
             />
-            <span className="text-gray-500">Fully round badges, switches and avatars</span>
+            <span className="text-muted-foreground">Fully round badges, switches and avatars</span>
           </span>
         </Row>
         <Row label="Border width">
-          <select value={theme.borderWidth} onChange={(e) => set('borderWidth', Number(e.target.value))} className={inputClass}>
+          <select
+            value={theme.borderWidth}
+            onChange={(e) => set('borderWidth', Number(e.target.value))}
+            className={inputClass}
+          >
             {[1, 2, 3].map((w) => (
               <option key={w} value={w}>
                 {w}px
@@ -218,7 +261,11 @@ export function ThemeEditor({
 
       <Section title="Spacing">
         <Row label="Density">
-          <select value={theme.density} onChange={(e) => set('density', e.target.value as Density)} className={inputClass}>
+          <select
+            value={theme.density}
+            onChange={(e) => set('density', e.target.value as Density)}
+            className={inputClass}
+          >
             <option value="compact">Compact</option>
             <option value="comfortable">Comfortable</option>
             <option value="spacious">Spacious</option>

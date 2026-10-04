@@ -32,15 +32,15 @@ export function MarkdownDocument({ markdown }: { markdown: string }) {
   return (
     <div>
       {visible.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4 pb-3 border-b border-gray-100 text-xs text-gray-500">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4 pb-3 border-b border-border text-xs text-muted-foreground">
           {visible.map(([key, value]) => (
             <span key={key}>
-              <span className="font-medium text-gray-600">{key}:</span> {value}
+              <span className="font-medium text-muted-foreground">{key}:</span> {value}
             </span>
           ))}
         </div>
       )}
-      <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:before:content-none prose-code:after:content-none">
+      <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-pre:bg-muted prose-pre:text-foreground prose-code:before:content-none prose-code:after:content-none">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
       </div>
     </div>
