@@ -1,8 +1,9 @@
-"use client";
+'use client';
 
 import { MeetingSummary, Summary, Transcript } from '@/types';
 import { BlockNoteSummaryView, BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummaryView';
 import { EmptyStateSummary } from '@/components/EmptyStateSummary';
+import { Spinner } from '@/components/ui/spinner';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
@@ -48,8 +49,10 @@ interface SummaryPanelProps {
   onDirtyChange: (isDirty: boolean) => void;
   summaryError: string | null;
   onRegenerateSummary: () => Promise<void>;
-  getSummaryStatusMessage: (status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error') => string;
-  availableTemplates: Array<{ id: string, name: string, description: string }>;
+  getSummaryStatusMessage: (
+    status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error',
+  ) => string;
+  availableTemplates: Array<{ id: string; name: string; description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
@@ -150,15 +153,13 @@ export function SummaryPanel({
         try {
           const saved = await saveMeetingSummaryLanguage(request.meetingId, request.language);
           const latest = latestLanguageSaveRequestRef.current;
-          if (
-            latest?.version === request.version &&
-            activeMeetingIdRef.current === request.meetingId
-          ) {
+          if (latest?.version === request.version && activeMeetingIdRef.current === request.meetingId) {
             setSummaryLang(saved.language);
             setSummaryLangStorage(saved.storage);
             if (saved.storage === 'local_fallback') {
               toast.info('Summary language saved on this device', {
-                description: 'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
+                description:
+                  'This meeting has no recording folder, so the preference cannot be written to meeting metadata.',
               });
             }
             if (request.language) {
@@ -170,10 +171,7 @@ export function SummaryPanel({
           if (latest?.version === request.version) return;
         } catch (err) {
           const latest = latestLanguageSaveRequestRef.current;
-          if (
-            latest?.version === request.version &&
-            activeMeetingIdRef.current === request.meetingId
-          ) {
+          if (latest?.version === request.version && activeMeetingIdRef.current === request.meetingId) {
             console.error('Failed to persist summary language:', err);
             toast.error('Failed to save summary language');
             setSummaryLang(request.rollback.language);
@@ -210,7 +208,8 @@ export function SummaryPanel({
     void persistLatestLanguageSelection();
   };
 
-  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const isSummaryLoading =
+    summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
   const hasSummary = hasVisibleSummaryContent(aiSummary);
 
   const languageSlot = (
@@ -224,13 +223,10 @@ export function SummaryPanel({
         >
           <Languages size={18} />
           <span className="hidden @[40rem]:inline">{effectiveLangLabel}</span>
-          <ChevronDown size={14} className="text-gray-400" />
+          <ChevronDown size={14} className="text-muted-foreground" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="w-auto p-0 border-0 shadow-none bg-transparent"
-      >
+      <PopoverContent align="end" className="w-auto p-0 border-0 shadow-none bg-transparent">
         <LanguagePickerPopover
           value={summaryLang}
           onChange={handleLangChange}
@@ -242,9 +238,9 @@ export function SummaryPanel({
   );
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden h-full w-full @container">
+    <div className="flex-1 min-w-0 flex flex-col bg-card overflow-hidden h-full w-full @container">
       {/* Top-level actions — always visible, same pattern as TranscriptPanel */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-border">
         <div className="flex items-center justify-center w-full min-w-0 gap-2 flex-wrap">
           <div className="flex-shrink-0 min-w-0">
             <SummaryGeneratorButtonGroup
@@ -282,8 +278,8 @@ export function SummaryPanel({
       {isSummaryLoading ? (
         <div className="flex items-center justify-center flex-1">
           <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-            <p className="text-gray-600">Generating AI Summary...</p>
+            <Spinner size="lg" className="mb-4" />
+            <p className="text-muted-foreground">Generating AI Summary...</p>
           </div>
         </div>
       ) : !hasSummary ? (
@@ -311,15 +307,20 @@ export function SummaryPanel({
               meeting={{
                 id: meeting.id,
                 title: meetingTitle,
-                created_at: meeting.created_at
+                created_at: meeting.created_at,
               }}
             />
           </div>
           {summaryStatus !== 'idle' && (
-            <div className={`mt-4 p-4 rounded-lg ${summaryStatus === 'error' ? 'bg-red-100 text-red-700' :
-              summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
-                'bg-blue-100 text-blue-700'
-              }`}>
+            <div
+              className={`mt-4 p-4 rounded-lg ${
+                summaryStatus === 'error'
+                  ? 'bg-destructive/10 text-destructive'
+                  : summaryStatus === 'completed'
+                    ? 'bg-success/10 text-success'
+                    : 'bg-info/10 text-info'
+              }`}
+            >
               <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
             </div>
           )}

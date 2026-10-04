@@ -1,13 +1,8 @@
-"use client";
+'use client';
 
 import { ModelConfig, ModelSettingsModal } from '@/components/ModelSettingsModal';
-import {
-  Dialog,
-  DialogContent,
-  DialogTrigger,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { VisuallyHidden } from "@/components/ui/visually-hidden"
+import { Dialog, DialogContent, DialogTrigger, DialogTitle } from '@/components/ui/dialog';
+import { VisuallyHidden } from '@/components/ui/visually-hidden';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import {
@@ -29,7 +24,7 @@ interface SummaryGeneratorButtonGroupProps {
   onStopGeneration: () => void;
   customPrompt: string;
   summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
-  availableTemplates: Array<{ id: string, name: string, description: string }>;
+  availableTemplates: Array<{ id: string; name: string; description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
   hasTranscripts?: boolean;
@@ -53,7 +48,7 @@ export function SummaryGeneratorButtonGroup({
   hasSummary = false,
   isModelConfigLoading = false,
   onOpenModelSettings,
-  languageSlot
+  languageSlot,
 }: SummaryGeneratorButtonGroupProps) {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -78,7 +73,8 @@ export function SummaryGeneratorButtonGroup({
     return null;
   }
 
-  const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const isGenerating =
+    summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
 
   return (
     <ButtonGroup>
@@ -87,7 +83,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border-red-200 px-3 gap-2"
+          className="bg-destructive/10 hover:bg-destructive/20 border-destructive/30 text-destructive px-3 gap-2"
           onClick={() => {
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
@@ -101,7 +97,7 @@ export function SummaryGeneratorButtonGroup({
         <Button
           variant="outline"
           size="sm"
-          className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 px-3 gap-2"
+          className="bg-primary/10 hover:bg-primary/20 border-primary/30 text-primary px-3 gap-2"
           onClick={() => {
             Analytics.trackButtonClick('generate_summary', 'meeting_details');
             void onGenerateSummary(customPrompt);
@@ -110,7 +106,9 @@ export function SummaryGeneratorButtonGroup({
           title={
             isModelConfigLoading
               ? 'Loading model configuration...'
-              : hasSummary ? 'Regenerate AI Summary' : 'Generate AI Summary'
+              : hasSummary
+                ? 'Regenerate AI Summary'
+                : 'Generate AI Summary'
           }
         >
           {isModelConfigLoading ? (
@@ -132,18 +130,12 @@ export function SummaryGeneratorButtonGroup({
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
         <DialogTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            title="Summary Settings"
-          >
+          <Button variant="outline" size="sm" title="Summary Settings">
             <Settings />
             <span className="hidden @[40rem]:inline">AI Model</span>
           </Button>
         </DialogTrigger>
-        <DialogContent
-          aria-describedby={undefined}
-        >
+        <DialogContent aria-describedby={undefined}>
           <VisuallyHidden>
             <DialogTitle>Model Settings</DialogTitle>
           </VisuallyHidden>
@@ -164,11 +156,7 @@ export function SummaryGeneratorButtonGroup({
       {availableTemplates.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              title="Select summary template"
-            >
+            <Button variant="outline" size="sm" title="Select summary template">
               <FileText />
               <span className="hidden @[40rem]:inline">Template</span>
             </Button>
@@ -182,12 +170,9 @@ export function SummaryGeneratorButtonGroup({
                 className="flex items-center justify-between gap-2"
               >
                 <span>{template.name}</span>
-                {selectedTemplate === template.id && (
-                  <Check className="h-4 w-4 text-green-600" />
-                )}
+                {selectedTemplate === template.id && <Check className="h-4 w-4 text-success" />}
               </DropdownMenuItem>
             ))}
-
           </DropdownMenuContent>
         </DropdownMenu>
       )}

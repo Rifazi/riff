@@ -1,9 +1,10 @@
-"use client";
+'use client';
 
 import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { Textarea } from '@/components/ui/textarea';
 import { useMemo } from 'react';
 
 interface TranscriptPanelProps {
@@ -28,7 +29,6 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
-
 }
 
 export function TranscriptPanel({
@@ -56,7 +56,7 @@ export function TranscriptPanel({
       return segments;
     }
     // Convert transcripts to segments for virtualization
-    return transcripts.map(t => ({
+    return transcripts.map((t) => ({
       id: t.id,
       timestamp: t.audio_start_time ?? 0,
       endTime: t.audio_end_time,
@@ -66,11 +66,11 @@ export function TranscriptPanel({
   }, [transcripts, usePagination, segments]);
 
   return (
-    <div className="flex h-full min-w-0 w-full bg-white flex-col relative @container">
+    <div className="flex h-full min-w-0 w-full bg-card flex-col relative @container">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-4 border-b border-border">
         <TranscriptButtonGroup
-          transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : (transcripts?.length || 0)}
+          transcriptCount={usePagination ? (totalCount ?? convertedSegments.length) : transcripts?.length || 0}
           onCopyTranscript={onCopyTranscript}
           onOpenMeetingFolder={onOpenMeetingFolder}
           meetingId={meetingId}
@@ -100,10 +100,10 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-gray-200">
-          <textarea
+        <div className="p-1 border-t border-border">
+          <Textarea
             placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm min-h-[80px] resize-y"
+            className="w-full shadow-sm min-h-[80px] resize-y"
             value={customPrompt}
             onChange={(e) => onPromptChange(e.target.value)}
           />

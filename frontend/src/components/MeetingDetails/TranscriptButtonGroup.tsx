@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,6 @@ import Analytics from '@/lib/analytics';
 import { RetranscribeDialog } from './RetranscribeDialog';
 import { useConfig } from '@/contexts/ConfigContext';
 
-
 interface TranscriptButtonGroupProps {
   transcriptCount: number;
   onCopyTranscript: () => void;
@@ -17,7 +16,6 @@ interface TranscriptButtonGroupProps {
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
 }
-
 
 export function TranscriptButtonGroup({
   transcriptCount,
@@ -73,7 +71,7 @@ export function TranscriptButtonGroup({
           <Button
             size="sm"
             variant="outline"
-            className="bg-gradient-to-r from-blue-50 to-purple-50 hover:from-blue-100 hover:to-purple-100 border-blue-200 px-2 @[22rem]:px-4"
+            className="bg-primary/10 hover:bg-primary/20 border-primary/30 text-primary px-2 @[22rem]:px-4"
             onClick={() => {
               Analytics.trackButtonClick('enhance_transcript', 'meeting_details');
               setShowRetranscribeDialog(true);
