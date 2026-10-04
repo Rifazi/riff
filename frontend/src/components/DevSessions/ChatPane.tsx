@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentInput, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona } from '@/lib/dev-sessions/agents';
 import { ACCEPTED_ATTACHMENT_TYPES, readAttachments } from '@/lib/dev-sessions/attachments';
@@ -68,7 +70,7 @@ export function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?
   const dims = size === 'xs' ? 'w-5 h-5 text-[9px]' : size === 'sm' ? 'w-6 h-6 text-[10px]' : 'w-9 h-9 text-xs';
   return (
     <div
-      className={`${dims} flex-shrink-0 rounded-full bg-gradient-to-br ${agent.gradient ?? 'from-blue-500 to-purple-500'} text-white font-semibold flex items-center justify-center`}
+      className={`${dims} flex-shrink-0 rounded-full bg-gradient-to-br ${agent.gradient ?? 'from-primary to-primary/60'} text-primary-foreground font-semibold flex items-center justify-center`}
       title={agent.fullName}
     >
       {agent.initials}
@@ -91,7 +93,9 @@ function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
     <details
       open={isLive}
       className={`group rounded-md border text-xs font-mono ${
-        entry.isError ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-gray-50 text-gray-600'
+        entry.isError
+          ? 'border-destructive/30 bg-destructive/10 text-destructive'
+          : 'border-border bg-muted text-muted-foreground'
       }`}
     >
       <summary className="flex items-center gap-1.5 px-2.5 py-1.5 cursor-pointer select-none list-none">
@@ -112,7 +116,7 @@ function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
               <button
                 type="button"
                 onClick={() => setShowFull((v) => !v)}
-                className="ml-1 font-sans text-blue-600 hover:underline"
+                className="ml-1 font-sans text-primary hover:underline"
               >
                 {showFull ? 'show less' : `… show full output (${result.length.toLocaleString()} chars)`}
               </button>
@@ -184,10 +188,10 @@ function QuestionBubble({
 
   if (readOnly) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-        <div className="text-xs font-medium text-gray-500 mb-0.5">Question</div>
-        <div className="text-sm text-gray-700">{question}</div>
-        {options.length > 0 && <div className="mt-1 text-xs text-gray-500">Options: {options.join(' · ')}</div>}
+      <div className="rounded-lg border border-border bg-muted px-3 py-2">
+        <div className="text-xs font-medium text-muted-foreground mb-0.5">Question</div>
+        <div className="text-sm text-foreground">{question}</div>
+        {options.length > 0 && <div className="mt-1 text-xs text-muted-foreground">Options: {options.join(' · ')}</div>}
       </div>
     );
   }
@@ -197,17 +201,19 @@ function QuestionBubble({
 
   return (
     <div
-      className={`rounded-lg border p-3 space-y-2.5 ${answered ? 'border-green-200 bg-green-50/50' : 'border-blue-200 bg-blue-50/60'}`}
+      className={`rounded-lg border p-3 space-y-2.5 ${
+        answered ? 'border-success/40 bg-success/10' : 'border-primary/40 bg-primary/10'
+      }`}
     >
       <div className="flex items-start gap-2">
         <span
           className={`flex-shrink-0 w-5 h-5 rounded-full text-[11px] font-semibold flex items-center justify-center ${
-            answered ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+            answered ? 'bg-success text-success-foreground' : 'bg-primary text-primary-foreground'
           }`}
         >
           {answered ? <Check className="w-3 h-3" /> : (index ?? 0) + 1}
         </span>
-        <div className="text-sm font-medium text-gray-900">{question}</div>
+        <div className="text-sm font-medium text-foreground">{question}</div>
       </div>
       {options.length > 0 && (
         <div className="flex flex-wrap gap-2 pl-7">
@@ -226,8 +232,8 @@ function QuestionBubble({
                 disabled={disabled}
                 className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md border text-sm text-left transition-colors disabled:opacity-50 ${
                   selected
-                    ? 'bg-blue-600 border-blue-600 text-white'
-                    : 'bg-white border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50'
+                    ? 'bg-primary border-primary text-primary-foreground'
+                    : 'bg-card border-border text-foreground hover:border-primary/40 hover:bg-primary/10'
                 }`}
               >
                 {option}
@@ -238,7 +244,7 @@ function QuestionBubble({
         </div>
       )}
       <div className="pl-7">
-        <textarea
+        <Textarea
           value={current.text}
           onChange={(e) => onChange?.({ ...current, text: e.target.value })}
           disabled={disabled}
@@ -246,7 +252,7 @@ function QuestionBubble({
             options.length > 0 ? 'Optional: add detail, or type your own answer instead…' : 'Type your answer…'
           }
           rows={2}
-          className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-y disabled:opacity-50"
+          className="min-h-0 resize-y"
         />
       </div>
     </div>
@@ -349,29 +355,29 @@ export function ChatPane({
   };
 
   return (
-    <div
-      className={`flex flex-col flex-1 min-h-0 bg-white rounded-lg border border-gray-200 shadow-sm ${className ?? ''}`}
-    >
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 flex-shrink-0">
+    <Card className={`flex flex-col flex-1 min-h-0 ${className ?? ''}`}>
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
         <AgentAvatar agent={agent} />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-gray-900" title={agent.fullName}>
+          <div className="text-sm font-semibold text-foreground" title={agent.fullName}>
             {agent.name}
           </div>
-          <div className="text-xs text-gray-500 break-words">{agent.title}</div>
+          <div className="text-xs text-muted-foreground break-words">{agent.title}</div>
         </div>
         {headerActions && <div className="flex items-center gap-2 flex-shrink-0">{headerActions}</div>}
       </div>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
         {entries.length === 0 && !streaming && (
-          <div className="py-8 text-center text-sm text-gray-500">{emptyHint ?? 'Say what you want to build.'}</div>
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            {emptyHint ?? 'Say what you want to build.'}
+          </div>
         )}
         {entries.map((entry, i) => {
           if (entry.role === 'user') {
             return (
               <div key={entry.id} className="flex justify-end">
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-blue-600 text-white px-3.5 py-2 text-sm whitespace-pre-wrap break-words">
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-3.5 py-2 text-sm whitespace-pre-wrap break-words">
                   {entry.text}
                 </div>
               </div>
@@ -381,7 +387,7 @@ export function ChatPane({
             return (
               <div key={entry.id} className="flex gap-2 items-start">
                 <AgentAvatar agent={agent} size="sm" />
-                <div className="max-w-[85%] min-w-0 rounded-2xl rounded-tl-sm bg-gray-100 text-gray-900 px-3.5 py-2 text-sm break-words">
+                <div className="max-w-[85%] min-w-0 rounded-2xl rounded-tl-sm bg-muted text-foreground px-3.5 py-2 text-sm break-words">
                   <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
                   </div>
@@ -420,7 +426,9 @@ export function ChatPane({
               <div
                 key={entry.id}
                 className={`text-center text-xs px-3 py-1.5 rounded-md ${
-                  entry.isError ? 'bg-red-50 text-red-700 border border-red-200' : 'text-gray-500'
+                  entry.isError
+                    ? 'bg-destructive/10 text-destructive border border-destructive/30'
+                    : 'text-muted-foreground'
                 }`}
               >
                 {entry.text}
@@ -430,8 +438,8 @@ export function ChatPane({
           return null;
         })}
         {streaming && (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             {runningTool ? `${agent.name} is running ${stripToolPrefix(runningTool)}…` : `${agent.name} is thinking…`}
           </div>
         )}
@@ -439,26 +447,28 @@ export function ChatPane({
 
       {readOnly ? (
         readOnlyNote && (
-          <div className="flex-shrink-0 border-t border-gray-100 px-4 py-2.5 text-xs text-gray-500">{readOnlyNote}</div>
+          <div className="flex-shrink-0 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+            {readOnlyNote}
+          </div>
         )
       ) : (
-        <div className="flex-shrink-0 border-t border-gray-100 p-3 space-y-2">
+        <div className="flex-shrink-0 border-t border-border p-3 space-y-2">
           {batchOpen && (
-            <div className="flex items-center gap-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+            <div className="flex items-center gap-3 rounded-md bg-primary/10 border border-primary/20 px-3 py-2">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-900">
+                <div className="text-sm font-medium text-foreground">
                   {answeredCount} of {pendingQuestions.length} question
                   {pendingQuestions.length === 1 ? '' : 's'} answered
                 </div>
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-muted-foreground">
                   {answeredCount < pendingQuestions.length
                     ? `Answer what you can — anything left blank is sent as "use your best judgment".`
                     : 'All answered — add a note below if you like, then send.'}
                 </div>
               </div>
-              <div className="h-1.5 w-24 rounded-full bg-blue-100 overflow-hidden flex-shrink-0">
+              <div className="h-1.5 w-24 rounded-full bg-primary/20 overflow-hidden flex-shrink-0">
                 <div
-                  className="h-full bg-blue-600 transition-all"
+                  className="h-full bg-primary transition-all"
                   style={{
                     width: `${(answeredCount / pendingQuestions.length) * 100}%`,
                   }}
@@ -466,13 +476,13 @@ export function ChatPane({
               </div>
             </div>
           )}
-          {attachError && <div className="text-xs text-red-600">{attachError}</div>}
+          {attachError && <div className="text-xs text-destructive">{attachError}</div>}
           {pendingFiles.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {pendingFiles.map((f) => (
                 <span
                   key={f.name}
-                  className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 pl-2 pr-1 py-0.5 text-xs text-gray-700"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-muted pl-2 pr-1 py-0.5 text-xs text-foreground"
                 >
                   <Paperclip className="w-3 h-3" />
                   {f.name}
@@ -481,7 +491,7 @@ export function ChatPane({
                     onClick={() => setPendingFiles((prev) => prev.filter((p) => p.name !== f.name))}
                     disabled={disabled}
                     aria-label={`Remove ${f.name}`}
-                    className="p-0.5 rounded-full hover:bg-gray-200"
+                    className="p-0.5 rounded-full hover:bg-accent"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -511,7 +521,7 @@ export function ChatPane({
             >
               <Paperclip />
             </Button>
-            <textarea
+            <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -528,7 +538,7 @@ export function ChatPane({
               }
               disabled={disabled}
               rows={2}
-              className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm bg-white shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 resize-none disabled:bg-gray-50 disabled:text-gray-400"
+              className="flex-1 min-h-0 shadow-sm resize-none disabled:bg-muted"
             />
             <Button onClick={send} disabled={!canSend}>
               <Send />
@@ -537,6 +547,6 @@ export function ChatPane({
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
