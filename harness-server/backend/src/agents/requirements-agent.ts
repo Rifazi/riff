@@ -5,7 +5,13 @@ import matter from 'gray-matter';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
+import {
+  appendTranscriptEntry,
+  setClaudeSessionId,
+  setHistory,
+  updateSession,
+  addStageUsage,
+} from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
@@ -28,6 +34,8 @@ import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-
 import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-tool.js';
 import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { classifyTextTool } from './tool-defs/classify-text-tool.js';
+import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
@@ -42,6 +50,7 @@ const TOOL_NAMES = [
   'propose_split',
   'propose_theme',
   'audit_theme',
+  'classify_text',
   'fetch_url',
 ];
 
@@ -52,7 +61,7 @@ export async function runRequirementsAgentTurn(
   attachments: ParsedAttachment[] = [],
   // Only the human's own typed message can turn this on (routes/requirements.ts
   // checks it with wantsWebAccess) — coordinator-driven turns never do.
-  options: { webAccess?: boolean } = {}
+  options: { webAccess?: boolean } = {},
 ): Promise<SessionRecord> {
   const webAccess = options.webAccess ?? false;
   await appendTranscriptEntry(session.id, 'requirements', { role: 'user', text: userMessage });
@@ -102,7 +111,8 @@ export async function runRequirementsAgentTurn(
     }
     let diffStat = '(unable to read diff stat)';
     try {
-      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
+      diffStat =
+        (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
     } catch {
       // repo/branch not in a readable state — proceed without it
     }
@@ -129,7 +139,10 @@ export async function runRequirementsAgentTurn(
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
+      appId: app.id,
+      sessionId: session.id,
+    });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -143,6 +156,7 @@ export async function runRequirementsAgentTurn(
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
           createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
+          classifyTextToolClaude,
           createFetchUrlToolClaude({ enabled: webAccess }),
         ],
       });
@@ -178,6 +192,7 @@ export async function runRequirementsAgentTurn(
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
       propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
+      classify_text: classifyTextTool,
       fetch_url: createFetchUrlTool({ enabled: webAccess }),
     };
 
@@ -197,7 +212,9 @@ export async function runRequirementsAgentTurn(
 
   const requirementsFilePath = path.join(config.requirementsDir, `${session.sessionKey}.md`);
   const fileExists = existsSync(requirementsFilePath);
-  const requirementsPath = fileExists ? path.relative(config.harnessRoot, requirementsFilePath) : session.requirementsPath;
+  const requirementsPath = fileExists
+    ? path.relative(config.harnessRoot, requirementsFilePath)
+    : session.requirementsPath;
 
   // write_requirements_doc (tool-defs/write-requirements-tool.ts) always
   // writes status: draft to the file, unconditionally — including when it
