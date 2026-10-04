@@ -71,8 +71,8 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
   const Icon = action?.icon ?? GitMerge;
 
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 space-y-2.5">
-      <div className="text-sm font-semibold text-gray-900">Ship it</div>
+    <div className="mt-3 rounded-lg border border-border bg-card p-3 space-y-2.5">
+      <div className="text-sm font-semibold text-card-foreground">Ship it</div>
 
       {delivered && (
         <Notice tone="green">
@@ -97,12 +97,12 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
       {canShip && (
         <>
           {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" />
               Checking how this repo is set up…
             </div>
           )}
-          {plan && <p className="text-sm text-gray-600">{plan.reason}</p>}
+          {plan && <p className="text-sm text-muted-foreground">{plan.reason}</p>}
           {plan && qaResult && qaResult !== 'pass' && (
             <Notice tone="amber">
               QA&apos;s result was &quot;{qaResult}&quot; — make sure you&apos;re happy with that before shipping.

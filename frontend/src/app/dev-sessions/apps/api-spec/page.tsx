@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { BackButton } from '@/components/BackButton';
+import { Card } from '@/components/ui/card';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
 import { LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import 'swagger-ui-react/swagger-ui.css';
@@ -28,9 +29,9 @@ function ApiSpecView() {
       back={<BackButton fallbackHref="/dev-sessions/apps" />}
     >
       {appId && (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <Card className="overflow-hidden">
           <SwaggerUI url={apiUrl(`/api/apps/${appId}/docs/openapi.json`)} />
-        </div>
+        </Card>
       )}
     </PageShell>
   );

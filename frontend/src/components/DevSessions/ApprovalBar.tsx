@@ -30,7 +30,7 @@ export function ApprovalBar({
   const [confirmingReject, setConfirmingReject] = useState(false);
 
   return (
-    <div className="flex flex-wrap items-center gap-2 pt-3 mt-3 border-t border-gray-100">
+    <div className="flex flex-wrap items-center gap-2 pt-3 mt-3 border-t border-border">
       <Button variant="success" onClick={onApprove} disabled={approveDisabled || busy}>
         {busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
         {busy ? 'Working…' : approveLabel}

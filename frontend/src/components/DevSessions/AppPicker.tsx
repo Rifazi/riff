@@ -64,7 +64,7 @@ function AddAppForm({ onAdded, onCancel }: { onAdded: (appId: string) => void; o
 
   return (
     <div
-      className="rounded-md border border-blue-200 bg-blue-50/50 p-3 space-y-2"
+      className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2"
       onKeyDown={(e) => {
         // Can sit inside another form (New session) — Enter adds the app, never submits that.
         if (e.key !== 'Enter' || !(e.target instanceof HTMLInputElement)) return;
@@ -72,16 +72,16 @@ function AddAppForm({ onAdded, onCancel }: { onAdded: (appId: string) => void; o
         if (repoRoot.trim() && name.trim() && !createMutation.isPending) createMutation.mutate();
       }}
     >
-      <div className="text-xs font-medium text-gray-700">Add a new app — the repository the agents will work on</div>
+      <div className="text-xs font-medium text-foreground">Add a new app — the repository the agents will work on</div>
       <div className="flex gap-2">
         <Input
           value={repoRoot}
           onChange={(e) => updatePath(e.target.value)}
           placeholder="/Users/you/my-repo"
-          className="font-mono text-xs bg-white"
+          className="font-mono text-xs bg-card"
           autoFocus
         />
-        <Button type="button" size="sm" variant="outline" className="h-9 bg-white" onClick={browse}>
+        <Button type="button" size="sm" variant="outline" className="h-9 bg-card" onClick={browse}>
           <FolderOpen />
           Browse…
         </Button>
@@ -93,10 +93,12 @@ function AddAppForm({ onAdded, onCancel }: { onAdded: (appId: string) => void; o
           setNameTouched(true);
         }}
         placeholder="App name"
-        className="bg-white"
+        className="bg-card"
       />
-      {createMutation.isError && <div className="text-xs text-red-600">{(createMutation.error as Error).message}</div>}
-      {notice && <div className="text-xs text-green-700">{notice}</div>}
+      {createMutation.isError && (
+        <div className="text-xs text-destructive">{(createMutation.error as Error).message}</div>
+      )}
+      {notice && <div className="text-xs text-success">{notice}</div>}
       <div className="flex gap-2">
         <Button
           type="button"
@@ -149,7 +151,7 @@ export function AppPicker({
   if (noApps || adding) {
     return (
       <div className="w-full basis-full">
-        {noApps && <div className="text-xs text-gray-500 mb-2">No apps yet — add the first one.</div>}
+        {noApps && <div className="text-xs text-muted-foreground mb-2">No apps yet — add the first one.</div>}
         <AddAppForm
           onAdded={(id) => {
             setAdding(false);
@@ -163,7 +165,7 @@ export function AppPicker({
 
   return (
     <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}>
-      <SelectTrigger className={`bg-white ${triggerClassName}`}>
+      <SelectTrigger className={`bg-card ${triggerClassName}`}>
         <SelectValue placeholder={apps ? 'Choose an app' : 'Loading…'} />
       </SelectTrigger>
       <SelectContent>
@@ -173,7 +175,7 @@ export function AppPicker({
           </SelectItem>
         ))}
         {apps && apps.length > 0 && <SelectSeparator />}
-        <SelectItem value={ADD_NEW} className="text-blue-600">
+        <SelectItem value={ADD_NEW} className="text-primary">
           ＋ Add new app…
         </SelectItem>
       </SelectContent>

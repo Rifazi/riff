@@ -14,6 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import type {
@@ -64,7 +65,7 @@ function TeamFaces({ personas }: { personas: TeamPersona[] }) {
       <AgentAvatar agent={TEAM_LEAD_PERSONA} />
       <div className="flex -space-x-1.5 ml-1">
         {personas.map((p) => (
-          <div key={p.name} className="rounded-full ring-2 ring-white">
+          <div key={p.name} className="rounded-full ring-2 ring-card">
             <AgentAvatar agent={p} size="sm" />
           </div>
         ))}
@@ -75,11 +76,11 @@ function TeamFaces({ personas }: { personas: TeamPersona[] }) {
 
 function OwnedPaths({ paths }: { paths: string[] }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 text-xs text-gray-500">
+    <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
       <FolderLock className="w-3.5 h-3.5 flex-shrink-0" />
       <span>Owns</span>
       {paths.map((p) => (
-        <code key={p} className="text-[11px] bg-gray-100 text-gray-700 rounded px-1.5 py-0.5 break-all">
+        <code key={p} className="text-[11px] bg-muted text-foreground rounded px-1.5 py-0.5 break-all">
           {p}
         </code>
       ))}
@@ -105,18 +106,20 @@ export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstr
   const stepTitle = (id: string) => steps.find((s) => s.id === id)?.title ?? id;
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
-      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-gray-100">
+    <Card>
+      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-border">
         <TeamFaces personas={personas} />
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900">Coded by a team of {workstreams.length + 1} agents</div>
-          <div className="text-xs text-gray-500">
+          <div className="text-sm font-semibold text-foreground">
+            Coded by a team of {workstreams.length + 1} agents
+          </div>
+          <div className="text-xs text-muted-foreground">
             {TEAM_LEAD_PERSONA.name} leads · {workstreams.length} engineers, {startNow} starting at once · each owns its
             own files
           </div>
         </div>
       </div>
-      <ul className="divide-y divide-gray-100">
+      <ul className="divide-y divide-border">
         {workstreams.map((ws, i) => {
           const after = waitsFor(ws, workstreams);
           return (
@@ -124,14 +127,16 @@ export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstr
               <div className="flex items-start gap-2">
                 <AgentAvatar agent={personas[i]} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm text-gray-900">
+                  <div className="text-sm text-foreground">
                     <span className="font-medium">{personas[i].name}</span>{' '}
-                    <span className="text-gray-500">· {ws.title}</span>
+                    <span className="text-muted-foreground">· {ws.title}</span>
                   </div>
-                  <div className="text-xs text-gray-500">{after ? `Starts after ${after}` : 'Starts right away'}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {after ? `Starts after ${after}` : 'Starts right away'}
+                  </div>
                 </div>
               </div>
-              <ol className="pl-8 text-xs text-gray-700 space-y-0.5 list-decimal list-inside">
+              <ol className="pl-8 text-xs text-foreground space-y-0.5 list-decimal list-inside">
                 {ws.stepIds.map((id) => (
                   <li key={id}>{stepTitle(id)}</li>
                 ))}
@@ -143,7 +148,7 @@ export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstr
           );
         })}
       </ul>
-    </div>
+    </Card>
   );
 }
 
@@ -296,15 +301,15 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      <div className="flex-shrink-0 rounded-lg border border-gray-200 bg-white shadow-sm p-3 space-y-2.5">
+      <Card className="flex-shrink-0 p-3 space-y-2.5">
         <div className="flex flex-wrap items-center gap-3">
           <TeamFaces personas={personas} />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-gray-500" />
+            <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-muted-foreground" />
               Coding team
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-muted-foreground">
               {TEAM_LEAD_PERSONA.name} (lead) + {lineup.length} engineers · {summary}
             </div>
           </div>
@@ -322,19 +327,19 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
           )}
         </div>
         <div>
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <div className="flex justify-between text-xs text-muted-foreground mb-1">
             <span>
               {doneSteps} of {teamStepIds.length} steps done
             </span>
             {branch && (
               <span className="break-all">
-                merging into <code className="text-gray-700">{branch}</code>
+                merging into <code className="text-foreground">{branch}</code>
               </span>
             )}
           </div>
-          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
             <div
-              className="h-full bg-green-500 transition-all"
+              className="h-full bg-success transition-all"
               style={{
                 width: `${teamStepIds.length ? (doneSteps / teamStepIds.length) * 100 : 0}%`,
               }}
@@ -342,7 +347,7 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
           </div>
         </div>
         {teamFinished && (
-          <div className={`text-xs ${teamStatus === 'done' ? 'text-green-700' : 'text-amber-700'}`}>
+          <div className={`text-xs ${teamStatus === 'done' ? 'text-success' : 'text-warning'}`}>
             {teamStatus === 'done'
               ? `Everyone's work is merged — review the diff, or ask ${TEAM_LEAD_PERSONA.name} for changes.`
               : `Not everything merged — resume the team to retry, or ask ${TEAM_LEAD_PERSONA.name} to finish it.`}
@@ -359,14 +364,14 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
               onClick={() => setPicked(m.id)}
               className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
                 selected === m.id
-                  ? 'border-blue-300 bg-blue-50 text-blue-800'
-                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border bg-card text-card-foreground hover:bg-muted'
               }`}
               title={`${personas[i].name} · ${m.title} — ${STATUS_META[m.status].label}`}
             >
               <AgentAvatar agent={personas[i]} size="xs" />
               <span className="font-medium">{personas[i].name}</span>
-              <StatusIcon status={m.status} className="w-3.5 h-3.5 text-gray-500" />
+              <StatusIcon status={m.status} className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           ))}
           <button
@@ -376,16 +381,16 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             onClick={() => setPicked(LEAD_TAB)}
             className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
               selected === LEAD_TAB
-                ? 'border-blue-300 bg-blue-50 text-blue-800'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border bg-card text-card-foreground hover:bg-muted'
             }`}
           >
             <AgentAvatar agent={TEAM_LEAD_PERSONA} size="xs" />
             <span className="font-medium">{TEAM_LEAD_PERSONA.name}</span>
-            <span className="text-xs text-gray-500">lead</span>
+            <span className="text-xs text-muted-foreground">lead</span>
           </button>
         </div>
-      </div>
+      </Card>
 
       {member ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
@@ -404,7 +409,9 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             <OwnedPaths paths={member.ownedPaths} />
             {member.note &&
               (member.status === 'failed' || member.status === 'blocked' || member.status === 'waiting') && (
-                <div className={`text-xs ${member.status === 'waiting' ? 'text-gray-500' : 'text-red-600'}`}>
+                <div
+                  className={`text-xs ${member.status === 'waiting' ? 'text-muted-foreground' : 'text-destructive'}`}
+                >
                   {member.note}
                 </div>
               )}

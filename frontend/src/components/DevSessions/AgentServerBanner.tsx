@@ -5,7 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { AlertTriangle, Loader2, RotateCw } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { api } from '@/lib/dev-sessions/api';
 
 interface AgentServerStatus {
@@ -39,7 +41,9 @@ export function AgentServerBanner() {
   const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
-    invoke<AgentServerStatus>('get_agent_server_status').then(setStatus).catch(() => {});
+    invoke<AgentServerStatus>('get_agent_server_status')
+      .then(setStatus)
+      .catch(() => {});
     const unlisten = listen<AgentServerStatus>('agent-server-status', (event) => {
       setStatus(event.payload);
       queryClient.invalidateQueries({ queryKey: ['agent-server-health'] });
@@ -76,31 +80,29 @@ export function AgentServerBanner() {
   };
 
   return (
-    <div className="flex-shrink-0 mx-8 mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-3">
-      {starting ? (
-        <Loader2 className="w-4 h-4 mt-0.5 animate-spin flex-shrink-0" />
-      ) : (
-        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-      )}
+    <Alert variant="warning" className="flex-shrink-0 mx-8 mt-4 flex items-start gap-3">
+      {/* Wrapped so Alert's absolute `[&>svg]` icon slot doesn't apply — this
+          banner lays its icon, text and action out in a row instead. */}
+      <span className="mt-0.5 flex-shrink-0 text-warning">
+        {starting ? <Spinner className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+      </span>
       <div className="flex-1 min-w-0">
-        <div className="font-medium">
-          {starting ? 'Starting the agent server…' : "The agent server isn't running"}
-        </div>
-        <div className="text-amber-800 mt-0.5 break-words">
+        <div className="font-medium">{starting ? 'Starting the agent server…' : "The agent server isn't running"}</div>
+        <div className="text-muted-foreground mt-0.5 break-words">
           {starting
             ? 'Requirements, planning, coding and QA agents will be available in a moment.'
-            : status?.message ?? 'Requirements, planning, coding and QA agents are unavailable until it starts.'}
+            : (status?.message ?? 'Requirements, planning, coding and QA agents are unavailable until it starts.')}
         </div>
         {!starting && status?.logPath && (
-          <div className="text-xs text-amber-700 mt-1 font-mono break-all">Log: {status.logPath}</div>
+          <div className="text-xs text-muted-foreground mt-1 font-mono break-all">Log: {status.logPath}</div>
         )}
       </div>
       {!starting && (
-        <Button size="sm" variant="outline" onClick={restart} className="bg-white">
+        <Button size="sm" variant="outline" onClick={restart} className="bg-card">
           <RotateCw />
           Restart
         </Button>
       )}
-    </div>
+    </Alert>
   );
 }

@@ -43,36 +43,38 @@ function splitIntoFiles(diff: string): FileDiff[] {
 }
 
 function lineClass(line: string): string {
-  if (line.startsWith('+++') || line.startsWith('---')) return 'text-gray-500';
-  if (line.startsWith('@@')) return 'text-purple-700 bg-purple-50';
-  if (line.startsWith('+')) return 'text-green-800 bg-green-50';
-  if (line.startsWith('-')) return 'text-red-800 bg-red-50';
-  return 'text-gray-700';
+  if (line.startsWith('+++') || line.startsWith('---')) return 'text-muted-foreground';
+  if (line.startsWith('@@')) return 'text-primary bg-primary/10';
+  if (line.startsWith('+')) return 'text-success bg-success/10';
+  if (line.startsWith('-')) return 'text-destructive bg-destructive/10';
+  return 'text-foreground';
 }
 
 const STATUS_CLASS: Record<FileDiff['status'], string> = {
-  added: 'bg-green-50 text-green-700 border-green-200',
-  deleted: 'bg-red-50 text-red-700 border-red-200',
-  renamed: 'bg-purple-50 text-purple-700 border-purple-200',
-  modified: 'bg-gray-100 text-gray-700 border-gray-200',
+  added: 'bg-success/10 text-success border-success/30',
+  deleted: 'bg-destructive/10 text-destructive border-destructive/30',
+  renamed: 'bg-primary/10 text-primary border-primary/30',
+  modified: 'bg-muted text-muted-foreground border-border',
 };
 
 export function DiffViewer({ diff }: { diff: string | null }) {
   if (!diff || !diff.trim()) {
-    return <div className="py-8 text-center text-sm text-gray-500">No diff yet.</div>;
+    return <div className="py-8 text-center text-sm text-muted-foreground">No diff yet.</div>;
   }
   return (
     <div className="space-y-2">
       {splitIntoFiles(diff).map((file, i) => (
-        <details key={i} className="group rounded-md border border-gray-200 overflow-hidden">
-          <summary className="flex items-center gap-2 px-3 py-2 bg-gray-50 cursor-pointer select-none list-none text-sm">
-            <ChevronRight className="w-3.5 h-3.5 text-gray-500 transition-transform group-open:rotate-90 flex-shrink-0" />
-            <span className="font-mono text-xs text-gray-800 truncate flex-1">{file.path}</span>
-            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${STATUS_CLASS[file.status]}`}>{file.status}</span>
-            {file.additions > 0 && <span className="text-xs font-mono text-green-700">+{file.additions}</span>}
-            {file.deletions > 0 && <span className="text-xs font-mono text-red-700">−{file.deletions}</span>}
+        <details key={i} className="group rounded-md border border-border overflow-hidden">
+          <summary className="flex items-center gap-2 px-3 py-2 bg-muted cursor-pointer select-none list-none text-sm">
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground transition-transform group-open:rotate-90 flex-shrink-0" />
+            <span className="font-mono text-xs text-foreground truncate flex-1">{file.path}</span>
+            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${STATUS_CLASS[file.status]}`}>
+              {file.status}
+            </span>
+            {file.additions > 0 && <span className="text-xs font-mono text-success">+{file.additions}</span>}
+            {file.deletions > 0 && <span className="text-xs font-mono text-destructive">−{file.deletions}</span>}
           </summary>
-          <pre className="text-xs font-mono leading-5 overflow-x-auto bg-white">
+          <pre className="text-xs font-mono leading-5 overflow-x-auto bg-card">
             {file.lines.map((line, j) => (
               <div key={j} className={`px-3 ${lineClass(line)}`}>
                 {line || ' '}

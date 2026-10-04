@@ -37,19 +37,21 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
             <div
               className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
                 completed
-                  ? 'bg-green-100 text-green-700'
+                  ? 'bg-success/15 text-success'
                   : isCurrent
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-primary text-primary-foreground'
                     : reached
-                      ? 'bg-gray-100 text-gray-700'
-                      : 'bg-gray-100 text-gray-400'
+                      ? 'bg-muted text-foreground'
+                      : 'bg-muted text-muted-foreground'
               }`}
             >
               {completed ? <Check className="w-4 h-4" /> : reached ? index + 1 : <Lock className="w-3.5 h-3.5" />}
             </div>
             <div className="min-w-0">
-              <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-blue-700' : 'text-gray-900'}`}>{label}</div>
-              <div className="text-xs text-gray-500 truncate" title={agent.fullName}>
+              <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-primary' : 'text-foreground'}`}>
+                {label}
+              </div>
+              <div className="text-xs text-muted-foreground truncate" title={agent.fullName}>
                 {agent.name} · {statusText}
                 {tokens > 0 && (
                   <span
@@ -60,7 +62,8 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
                         : undefined
                     }
                   >
-                    {' '}· {formatTokens(tokens)} tokens
+                    {' '}
+                    · {formatTokens(tokens)} tokens
                   </span>
                 )}
               </div>
@@ -73,7 +76,7 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
           return (
             <div
               key={group}
-              className={`${base} border-gray-200 bg-gray-50 opacity-70 cursor-not-allowed`}
+              className={`${base} border-border bg-muted opacity-70 cursor-not-allowed`}
               title={`${agent.name} (${label}) isn't reachable yet — finish the earlier stage first.`}
             >
               {content}
@@ -86,7 +89,9 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
             href={sessionHref(session.id, group)}
             replace
             className={`${base} ${
-              isCurrent ? 'border-blue-300 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+              isCurrent
+                ? 'border-primary/40 bg-primary/10'
+                : 'border-border bg-card hover:border-primary/30 hover:bg-accent'
             }`}
           >
             {content}
