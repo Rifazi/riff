@@ -60,7 +60,6 @@ const legacyUnusedVarsFiles = [
   'src/components/AudioLevelMeter.tsx',
   'src/components/BuiltInModelManager.tsx',
   'src/components/ComplianceNotification.tsx',
-  'src/components/CustomDialog.tsx',
   'src/components/DatabaseImport/HomebrewDatabaseDetector.tsx',
   'src/components/DeviceSelection.tsx',
   'src/components/DevSessions/AgentServerBanner.tsx',

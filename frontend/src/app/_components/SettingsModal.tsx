@@ -3,16 +3,24 @@ import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { DeviceSelection } from "@/components/DeviceSelection";
 import { LanguageSelection } from "@/components/LanguageSelection";
 import { TranscriptSettings } from "@/components/TranscriptSettings";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useConfig } from "@/contexts/ConfigContext";
@@ -49,9 +57,6 @@ interface SettingsModalsProps {
   };
   onClose: (name: modalType) => void;
 }
-
-const SELECT_CLASSES =
-  "px-3 py-2 text-sm bg-background border border-input rounded-md shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 export function SettingsModals({
   modals,
@@ -104,12 +109,10 @@ export function SettingsModals({
                     Summarization Model
                   </label>
                   <div className="flex space-x-2">
-                    <select
-                      className={SELECT_CLASSES}
+                    <Select
                       value={modelConfig.provider}
-                      onChange={(e) => {
-                        const provider = e.target
-                          .value as ModelConfig["provider"];
+                      onValueChange={(value) => {
+                        const provider = value as ModelConfig["provider"];
                         setModelConfig({
                           ...modelConfig,
                           provider,
@@ -117,32 +120,47 @@ export function SettingsModals({
                         });
                       }}
                     >
-                      <option value="builtin-ai">Built-in AI</option>
-                      <option value="claude">Claude</option>
-                      <option value="groq">Groq</option>
-                      <option value="ollama">Ollama</option>
-                      <option value="openrouter">OpenRouter</option>
-                      <option value="openai">OpenAI</option>
-                    </select>
+                      <SelectTrigger
+                        className="w-48"
+                        aria-label="Summarization provider"
+                      >
+                        <SelectValue placeholder="Select a provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="builtin-ai">Built-in AI</SelectItem>
+                        <SelectItem value="claude">Claude</SelectItem>
+                        <SelectItem value="groq">Groq</SelectItem>
+                        <SelectItem value="ollama">Ollama</SelectItem>
+                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                        <SelectItem value="openai">OpenAI</SelectItem>
+                      </SelectContent>
+                    </Select>
 
-                    <select
-                      className={`flex-1 ${SELECT_CLASSES}`}
+                    <Select
                       value={modelConfig.model}
-                      onChange={(e) =>
+                      onValueChange={(value) =>
                         setModelConfig((prev: ModelConfig) => ({
                           ...prev,
-                          model: e.target.value,
+                          model: value,
                         }))
                       }
                     >
-                      {modelOptions[modelConfig.provider].map(
-                        (model: string) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ),
-                      )}
-                    </select>
+                      <SelectTrigger
+                        className="flex-1"
+                        aria-label="Summarization model"
+                      >
+                        <SelectValue placeholder="Select a model" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {modelOptions[modelConfig.provider].map(
+                          (model: string) => (
+                            <SelectItem key={model} value={model}>
+                              {model}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 {modelConfig.provider === "ollama" && (
@@ -301,43 +319,52 @@ export function SettingsModals({
       </Dialog>
 
       {/* Error Alert Modal */}
-      {modals.errorAlert && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Alert
-            variant="destructive"
-            className="max-w-md mx-4 bg-background shadow-xl"
-          >
-            <AlertTitle>Recording Stopped</AlertTitle>
-            <AlertDescription>
-              {messages.errorAlert}
-              <button
-                onClick={() => onClose("errorAlert")}
-                className="ml-2 text-destructive hover:text-destructive/80 underline"
-              >
-                Dismiss
-              </button>
-            </AlertDescription>
-          </Alert>
-        </div>
-      )}
+      <Dialog
+        open={modals.errorAlert}
+        onOpenChange={(next) => !next && onClose("errorAlert")}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">
+              Recording Stopped
+            </DialogTitle>
+            <DialogDescription>{messages.errorAlert}</DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              onClick={() => onClose("errorAlert")}
+            >
+              Dismiss
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Chunk Drop Warning Modal */}
-      {modals.chunkDropWarning && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Alert className="max-w-lg mx-4 border-warning/50 text-warning bg-background shadow-xl">
-            <AlertTitle>Transcription Performance Warning</AlertTitle>
-            <AlertDescription className="text-warning">
-              {messages.chunkDropWarning}
-              <button
-                onClick={() => onClose("chunkDropWarning")}
-                className="ml-2 text-warning hover:text-warning/80 underline"
-              >
-                Dismiss
-              </button>
-            </AlertDescription>
-          </Alert>
-        </div>
-      )}
+      <Dialog
+        open={modals.chunkDropWarning}
+        onOpenChange={(next) => !next && onClose("chunkDropWarning")}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-warning">
+              Transcription Performance Warning
+            </DialogTitle>
+            <DialogDescription>{messages.chunkDropWarning}</DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => onClose("chunkDropWarning")}
+            >
+              Dismiss
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
