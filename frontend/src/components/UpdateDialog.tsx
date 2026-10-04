@@ -1,13 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Download, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { updateService, UpdateInfo, UpdateProgress } from '@/services/updateService';
 import { check, Update } from '@tauri-apps/plugin-updater';
@@ -34,16 +27,18 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
       setError(null);
 
       // Get the update object when dialog opens
-      check().then((updateResult) => {
-        if (updateResult?.available) {
-          setUpdate(updateResult);
-        } else {
-          setError('Update no longer available');
-        }
-      }).catch((err) => {
-        console.error('Failed to get update object:', err);
-        setError('Failed to prepare update: ' + (err.message || 'Unknown error'));
-      });
+      check()
+        .then((updateResult) => {
+          if (updateResult?.available) {
+            setUpdate(updateResult);
+          } else {
+            setError('Update no longer available');
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to get update object:', err);
+          setError('Failed to prepare update: ' + (err.message || 'Unknown error'));
+        });
     } else {
       // Reset state when dialog closes
       setIsDownloading(false);
@@ -100,9 +95,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
 
           case 'Progress':
             downloaded += event.data.chunkLength || 0;
-            const percentage = contentLength > 0
-              ? Math.round((downloaded / contentLength) * 100)
-              : 0;
+            const percentage = contentLength > 0 ? Math.round((downloaded / contentLength) * 100) : 0;
             console.log(`[UpdateDialog] Progress: ${downloaded} / ${contentLength} bytes (${percentage}%)`);
             setProgress({
               downloaded,
@@ -189,17 +182,17 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           <DialogTitle className="flex items-center gap-2">
             {isDownloading ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 Downloading Update
               </>
             ) : error ? (
               <>
-                <AlertCircle className="h-5 w-5 text-red-600" />
+                <AlertCircle className="h-5 w-5 text-destructive" />
                 Update Error
               </>
             ) : (
               <>
-                <Download className="h-5 w-5 text-blue-600" />
+                <Download className="h-5 w-5 text-primary" />
                 Update Available
               </>
             )}
@@ -208,8 +201,8 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             {isDownloading
               ? 'Downloading the latest version...'
               : error
-              ? 'An error occurred while updating'
-              : `A new version (${updateInfo.version}) is available`}
+                ? 'An error occurred while updating'
+                : `A new version (${updateInfo.version}) is available`}
           </DialogDescription>
         </DialogHeader>
 
@@ -223,7 +216,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">New Version:</span>
-                  <span className="font-medium text-blue-600">{updateInfo.version}</span>
+                  <span className="font-medium text-primary">{updateInfo.version}</span>
                 </div>
                 {updateInfo.date && (
                   <div className="flex justify-between text-sm">
@@ -234,10 +227,8 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               </div>
 
               {updateInfo.body && (
-                <div className="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto">
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                    {updateInfo.body}
-                  </p>
+                <div className="bg-muted rounded-lg p-3 max-h-40 overflow-y-auto">
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{updateInfo.body}</p>
                 </div>
               )}
             </>
@@ -246,13 +237,13 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           {isDownloading && progress && (
             <div className="space-y-2">
               <div className="relative">
-                <div className="w-full bg-gray-200 rounded-full h-3">
+                <div className="w-full bg-muted rounded-full h-3">
                   <div
-                    className="bg-blue-600 h-3 rounded-full transition-all duration-300 ease-out"
+                    className="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${Math.min(progress.percentage, 100)}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-xs text-gray-600 mt-1">
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
                   <span>{Math.round(progress.percentage)}% complete</span>
                   {progress.total > 0 && (
                     <span>
@@ -268,8 +259,8 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
           )}
 
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="bg-destructive/10 border border-destructive/50 rounded-lg p-3">
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
         </div>
@@ -280,7 +271,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 Later
               </Button>
-              <Button onClick={handleDownloadAndInstall} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleDownloadAndInstall}>
                 <Download className="h-4 w-4 mr-2" />
                 Download & Install
               </Button>
@@ -302,5 +293,5 @@ function formatBytes(bytes: number): string {
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }

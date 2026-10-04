@@ -1,4 +1,4 @@
-"use client";
+'use client';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -19,10 +19,7 @@ interface BluetoothPlaybackWarningProps {
   enabled?: boolean;
 }
 
-export function BluetoothPlaybackWarning({
-  checkInterval = 5000,
-  enabled = true
-}: BluetoothPlaybackWarningProps) {
+export function BluetoothPlaybackWarning({ checkInterval = 5000, enabled = true }: BluetoothPlaybackWarningProps) {
   const [isBluetoothActive, setIsBluetoothActive] = useState(false);
   const [deviceName, setDeviceName] = useState<string>('');
   const [isDismissed, setIsDismissed] = useState(false);
@@ -63,28 +60,21 @@ export function BluetoothPlaybackWarning({
   }
 
   return (
-    <Alert
-      className="mb-4 border-yellow-500 bg-yellow-50 text-yellow-900"
-      role="alert"
-      aria-live="polite"
-    >
-      <Speaker className="h-4 w-4 text-yellow-600" />
+    <Alert variant="warning" className="mb-4" role="alert" aria-live="polite">
+      <Speaker className="h-4 w-4" />
       <div className="flex items-start justify-between w-full">
         <div className="flex-1">
-          <AlertTitle className="text-yellow-900 font-semibold">
-            Bluetooth Playback Detected
-          </AlertTitle>
-          <AlertDescription className="text-yellow-800 mt-1">
-            You're using <strong>{deviceName}</strong> for playback.
-            Recordings may sound distorted or sped up through Bluetooth devices.
-            For accurate review, please use <strong>computer speakers</strong> or{' '}
+          <AlertTitle className="font-semibold">Bluetooth Playback Detected</AlertTitle>
+          <AlertDescription className="mt-1">
+            You're using <strong>{deviceName}</strong> for playback. Recordings may sound distorted or sped up through
+            Bluetooth devices. For accurate review, please use <strong>computer speakers</strong> or{' '}
             <strong>wired headphones</strong>.
             <br />
             <a
               href="https://github.com/your-org/riff/blob/main/BLUETOOTH_PLAYBACK_NOTICE.md"
               target="_blank"
               rel="noopener noreferrer"
-              className="underline hover:text-yellow-900 font-medium mt-2 inline-block"
+              className="underline hover:text-warning font-medium mt-2 inline-block"
             >
               Learn why this happens →
             </a>
@@ -94,7 +84,7 @@ export function BluetoothPlaybackWarning({
           variant="ghost"
           size="icon"
           onClick={() => setIsDismissed(true)}
-          className="ml-4 h-6 w-6 text-yellow-700 hover:text-yellow-900 hover:bg-yellow-100"
+          className="ml-4 h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-warning/20"
           aria-label="Dismiss warning"
         >
           <X className="h-4 w-4" />
