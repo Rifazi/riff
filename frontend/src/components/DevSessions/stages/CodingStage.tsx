@@ -518,7 +518,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               </Button>
             ) : (
               <div className="mt-3 space-y-2">
-                <label className="block text-xs font-medium text-gray-600">
+                <label className="block text-xs font-medium text-muted-foreground">
                   What needs to change in the requirements?
                 </label>
                 <textarea
