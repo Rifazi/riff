@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Mic, Speaker, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { invoke } from '@tauri-apps/api/core';
 import { useIsLinux } from '@/hooks/usePlatform';
 
@@ -15,7 +16,7 @@ export function PermissionWarning({
   hasMicrophone,
   hasSystemAudio,
   onRecheck,
-  isRechecking = false
+  isRechecking = false,
 }: PermissionWarningProps) {
   const isLinux = useIsLinux();
 
@@ -55,45 +56,39 @@ export function PermissionWarning({
     <div className="max-w-md mb-4 space-y-3">
       {/* Combined Permission Warning - Show when either permission is missing */}
       {(!hasMicrophone || !hasSystemAudio) && (
-        <Alert variant="destructive" className="border-amber-400 bg-amber-50">
-          <AlertTriangle className="h-5 w-5 text-amber-600" />
-          <AlertTitle className="text-amber-900 font-semibold">
+        <Alert variant="warning">
+          <AlertTriangle className="h-5 w-5" />
+          <AlertTitle className="font-semibold">
             <div className="flex items-center gap-2">
               {!hasMicrophone && <Mic className="h-4 w-4" />}
               {!hasSystemAudio && <Speaker className="h-4 w-4" />}
-              {!hasMicrophone && !hasSystemAudio ? 'Permissions Required' : !hasMicrophone ? 'Microphone Permission Required' : 'System Audio Permission Required'}
+              {!hasMicrophone && !hasSystemAudio
+                ? 'Permissions Required'
+                : !hasMicrophone
+                  ? 'Microphone Permission Required'
+                  : 'System Audio Permission Required'}
             </div>
           </AlertTitle>
           {/* Action Buttons */}
           <div className="mt-4 flex flex-wrap gap-2">
             {isMacOS && !hasMicrophone && (
-              <button
-                onClick={openMicrophoneSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-md transition-colors"
-              >
+              <Button onClick={openMicrophoneSettings} className="gap-2">
                 <Mic className="h-4 w-4" />
                 Open Microphone Settings
-              </button>
+              </Button>
             )}
             {isMacOS && !hasSystemAudio && (
-              <button
-                onClick={openScreenRecordingSettings}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-              >
+              <Button onClick={openScreenRecordingSettings} className="gap-2">
                 <Speaker className="h-4 w-4" />
                 Open Screen Recording Settings
-              </button>
+              </Button>
             )}
-            <button
-              onClick={onRecheck}
-              disabled={isRechecking}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors disabled:opacity-50"
-            >
+            <Button variant="secondary" onClick={onRecheck} disabled={isRechecking} className="gap-2">
               <RefreshCw className={`h-4 w-4 ${isRechecking ? 'animate-spin' : ''}`} />
               Recheck
-            </button>
+            </Button>
           </div>
-          <AlertDescription className="text-amber-800 mt-2">
+          <AlertDescription className="mt-2">
             {/* Microphone Warning */}
             {!hasMicrophone && (
               <>
@@ -116,7 +111,7 @@ export function PermissionWarning({
               <>
                 <p className="mb-3">
                   {hasMicrophone
-                    ? 'System audio capture is not available. You can still record with your microphone, but computer audio won\'t be captured.'
+                    ? "System audio capture is not available. You can still record with your microphone, but computer audio won't be captured."
                     : 'System audio capture is also not available.'}
                 </p>
                 {isMacOS && (
@@ -131,8 +126,6 @@ export function PermissionWarning({
                 )}
               </>
             )}
-
-
           </AlertDescription>
         </Alert>
       )}

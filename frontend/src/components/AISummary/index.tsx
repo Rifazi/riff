@@ -706,7 +706,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
       {/* <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <span className="text-2xl">✨</span>
-          <h2 className="text-2xl font-semibold bg-gradient-to-r from-purple-600 to-blue-500 bg-clip-text text-transparent">
+          <h2 className="text-2xl font-semibold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             AI Enhanced Summary
           </h2>
         </div>
@@ -714,7 +714,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={handleUndo}
             disabled={currentHistoryIndex === 0}
-            className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
+            className="p-2 hover:bg-accent rounded disabled:opacity-50"
             title="Undo"
           >
             <svg
@@ -735,7 +735,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           <button
             onClick={handleRedo}
             disabled={currentHistoryIndex === history.length - 1}
-            className="p-2 hover:bg-gray-100 rounded disabled:opacity-50"
+            className="p-2 hover:bg-accent rounded disabled:opacity-50"
             title="Redo"
           >
             <svg
@@ -755,7 +755,7 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
           </button>
           <button
             onClick={handleAddSection}
-            className="p-2 hover:bg-gray-100 rounded"
+            className="p-2 hover:bg-accent rounded"
             title="Add new section"
           >
             <svg
@@ -778,14 +778,14 @@ export const AISummary = ({ summary, status, error, onSummaryChange, onRegenerat
               const markdown = convertToMarkdown();
               navigator.clipboard.writeText(markdown);
             }}
-            className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-muted hover:bg-muted/80 rounded-md flex items-center space-x-1"
           >
             <span>📋</span>
             <span>Copy</span>
           </button>
           <button
             onClick={onRegenerateSummary}
-            className="px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-md flex items-center space-x-1"
+            className="px-2 py-1 text-sm bg-muted hover:bg-muted/80 rounded-md flex items-center space-x-1"
             title="Regenerate Summary"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

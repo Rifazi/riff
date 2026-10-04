@@ -15,7 +15,7 @@ export function SearchSnippet({ snippet, className = '' }: { snippet: string; cl
         const [marked, rest = ''] = part.split(SNIPPET_MARK_END);
         return (
           <Fragment key={i}>
-            <mark className="rounded-sm bg-yellow-200/80 px-0.5 text-inherit">{marked}</mark>
+            <mark className="rounded-sm bg-warning/30 px-0.5 text-inherit">{marked}</mark>
             {rest}
           </Fragment>
         );
@@ -46,14 +46,20 @@ export function SearchHitLines({ hit, max = 2 }: { hit: SearchHit; max?: number 
   return (
     <div className="mt-1 space-y-0.5">
       {hits.map((h) => (
-        <div key={`${h.key}:${h.start ?? ''}:${h.heading ?? ''}:${h.snippet.slice(0, 20)}`} className="text-xs text-gray-500 line-clamp-2">
-          <span className="font-medium text-gray-700">{hitLocation(h)}</span>
+        <div
+          key={`${h.key}:${h.start ?? ''}:${h.heading ?? ''}:${h.snippet.slice(0, 20)}`}
+          className="text-xs text-muted-foreground line-clamp-2"
+        >
+          <span className="font-medium text-foreground">{hitLocation(h)}</span>
           {h.semantic && !h.keyword && (
-            <span className="ml-1.5 inline-flex items-center gap-0.5 text-violet-600" title="Matched by meaning, not by the exact words">
+            <span
+              className="ml-1.5 inline-flex items-center gap-0.5 text-primary"
+              title="Matched by meaning, not by the exact words"
+            >
               <Sparkles className="h-3 w-3" /> related
             </span>
           )}
-          <span className="mx-1.5 text-gray-300">—</span>
+          <span className="mx-1.5 text-muted-foreground/50">—</span>
           <SearchSnippet snippet={h.snippet} />
         </div>
       ))}
