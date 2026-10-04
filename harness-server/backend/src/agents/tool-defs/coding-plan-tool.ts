@@ -23,16 +23,17 @@ export const writeCodingPlanDescription =
   "as 'done' and the next as 'in_progress' — and the others keep theirs. A new id is inserted after the step " +
   "listed before it in your call (use that to split the rest of a long step into a new pending one).";
 
-type Step = z.infer<typeof codingPlanStepSchema>;
+type Step = z.infer<typeof codingPlanStepSchema> & { brief?: string };
 
-// Merges `changes` into `current` by id. A new id goes after the step that
-// precedes it in `changes`, or at the end when it's first.
+// Merges `changes` into `current` by id (keeping a step's brief, which this
+// tool doesn't take). A new id goes after the step that precedes it in
+// `changes`, or at the end when it's first.
 export function mergeCodingPlan(current: Step[], changes: Step[]): Step[] {
   const merged = [...current];
   changes.forEach((step, i) => {
     const existing = merged.findIndex((s) => s.id === step.id);
     if (existing >= 0) {
-      merged[existing] = step;
+      merged[existing] = { ...merged[existing], ...step };
       return;
     }
     const after = i > 0 ? merged.findIndex((s) => s.id === changes[i - 1].id) : -1;

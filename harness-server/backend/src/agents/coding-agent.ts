@@ -5,7 +5,7 @@ import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
 import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
-import type { SessionRecord } from '../sessions/session.js';
+import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
 import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
@@ -27,6 +27,7 @@ import { createFileTools } from './tool-defs/file-tools.js';
 import { createGitTools } from './tool-defs/git-tools.js';
 import { createGenerateTools } from './tool-defs/generate-tools.js';
 import { createWriteCodingPlanTool } from './tool-defs/coding-plan-tool.js';
+import { createAssignTeamTool } from './tool-defs/assign-team-tool.js';
 import { createQaTools } from './tool-defs/qa-tools.js';
 import { createRunPrettierTool } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
@@ -37,6 +38,7 @@ import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createGitToolsClaude } from './tool-defs-claude/git-tools.js';
 import { createGenerateToolsClaude } from './tool-defs-claude/generate-tools.js';
 import { createWriteCodingPlanToolClaude } from './tool-defs-claude/coding-plan-tool.js';
+import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.js';
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
@@ -56,10 +58,20 @@ const TOOL_NAMES = [
   'run_generate_paths',
   'run_generate_openapi',
   'write_coding_plan',
+  'assign_team',
   'run_checked_command',
   'run_prettier',
   'run_npm_install',
 ];
+
+// Jack decides whether work runs as a team (tool-defs/assign-team-tool.ts
+// has the criteria). Sent in the turn prompt, not the base prompt, because an
+// app's prompt override replaces the base prompt.
+const QA_FIX_TEAM_NOTE =
+  'You are the lead. Before fixing anything, decide whether these fixes can be split across a coding team: if ' +
+  'they fall into two or more groups that write disjoint files and are each a meaningful chunk, call assign_team ' +
+  'with a step per fix (or group of related fixes), each with a brief the engineer can act on alone, then end your ' +
+  'turn. Otherwise fix them yourself as usual.';
 
 const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
   `A lighter model (${lightModel}) worked on the step "${stepTitle}" just now but didn't finish it cleanly. ` +
@@ -101,6 +113,15 @@ export async function runCodingAgentTurn(
   const { provider, model } = roleConfig;
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
+  const teamKind: CodingTeamKind = options.qaFix
+    ? 'qa-fix'
+    : session.codingTeam || session.codingTeamHistory.length > 0
+      ? 'follow-up'
+      : 'plan';
+  // A team round that finished since this conversation last ran: the lead's
+  // next turn starts over with the team's merged work in its system prompt.
+  const team = session.codingTeam;
+  const teamRoundFinished = Boolean(team?.finishedAt) && (session.codingContext?.teamRound ?? 0) < (team?.round ?? 0);
 
   // A fresh conversation instead of resuming this one (see
   // SessionRecord.codingContext). Never for a reconciliation, which relies
@@ -111,6 +132,8 @@ export async function runCodingAgentTurn(
   if (hasContext && !session.codingReconciliationPending) {
     if (options.qaFix) {
       freshReason = 'QA sent the branch back for fixes, which is a new conversation.';
+    } else if (teamRoundFinished) {
+      freshReason = "The coding team finished and merged its work since this conversation's last turn.";
     } else if (options.stepTurn && targetStepId && ctx?.stepId && targetStepId !== ctx.stepId) {
       freshReason = `The previous conversation covered the step "${ctx.stepId}"; this one starts the next step.`;
     } else if ((ctx?.tokens ?? 0) >= FRESH_CONTEXT_AT_TOKENS) {
@@ -157,6 +180,7 @@ export async function runCodingAgentTurn(
   prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) systemPrompt += await firstTurnSections(session, app.repoRoot, targetStepId);
   if (handoffNote) prompt = `${handoffNote}\n\n---\n\n${prompt}`;
+  if (options.qaFix) prompt = `${QA_FIX_TEAM_NOTE}\n\n---\n\n${prompt}`;
 
   // A mid-coding send-back that's just been reconciled through requirements
   // and plan again also needs the (possibly changed) docs re-injected —
@@ -251,7 +275,8 @@ export async function runCodingAgentTurn(
   // a QA fix or a reconciliation.
   let lightStep: { id: string; title: string; model: string } | null = null;
   const lightModel = lightModelFor(roleConfig);
-  if (options.stepTurn && lightModel && !session.codingTeam && !session.codingReconciliationPending) {
+  // Never the kickoff (no branch yet), where the lead decides team or solo.
+  if (options.stepTurn && lightModel && session.branch && !session.codingTeam && !session.codingReconciliationPending) {
     const stepId = targetStepId;
     if (stepId && efforts.get(stepId) === 'light') {
       const title =
@@ -289,6 +314,7 @@ export async function runCodingAgentTurn(
       stepId: freshReason || !ctx ? targetStepId : ctx.stepId,
       startEntryId: contextStartEntryId,
       tokens: contextTokens,
+      teamRound: team?.finishedAt ? team.round : ctx?.teamRound,
     },
   });
 
@@ -324,6 +350,7 @@ export async function runCodingAgentTurn(
             runGeneratePathsToolClaude,
             runGenerateOpenApiToolClaude,
             createWriteCodingPlanToolClaude(session.id),
+            createAssignTeamToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, kind: teamKind }),
             runCheckedCommandToolClaude,
             createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
@@ -375,6 +402,7 @@ export async function runCodingAgentTurn(
         run_generate_paths: runGeneratePathsTool,
         run_generate_openapi: runGenerateOpenApiTool,
         write_coding_plan: createWriteCodingPlanTool(session.id),
+        assign_team: createAssignTeamTool({ sessionId: session.id, repoRoot: app.repoRoot, kind: teamKind }),
         run_checked_command: runCheckedCommandTool,
         run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
@@ -418,18 +446,7 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
   let text = repoInstructionsNote(repoRoot) + approvedDocs;
 
   if (session.codingTeam) {
-    // The team already built the plan on this branch — this agent is the
-    // lead handling follow-ups (review feedback, QA fixes), not starting
-    // from scratch.
-    const checklist = (session.codingPlan ?? []).map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`).join('\n');
-    const members = session.codingTeam.members
-      .map((m) => `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; owned ${m.ownedPaths.join(', ')}`)
-      .join('\n');
-    text +=
-      `\n\n# The coding team already ran\n\nYou are the lead engineer. A team of agents implemented this plan in ` +
-      `parallel and their work is merged on branch "${session.branch}", which is checked out. Do NOT call ` +
-      `git_create_branch. Review what's there before changing it, handle the human's requests on this branch, and ` +
-      `keep the checklist accurate with write_coding_plan.\n\nTeam members:\n${members}\n\nChecklist:\n${checklist}`;
+    text += teamSection(session);
   } else if (session.branch) {
     text +=
       `\n\n# Continuing on an existing branch\n\nThis feature is already in progress on branch "${session.branch}", ` +
@@ -440,13 +457,43 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
       .map((s: { id: string; title: string }) => `- id: "${s.id}", title: "${s.title}"`)
       .join('\n');
     text +=
-      `\n\n# Seed for write_coding_plan\n\nYour very first tool call, right after git_create_branch, must ` +
-      `be write_coding_plan with replace: true and exactly these steps (same id and title, do not invent your own) — all ` +
+      `\n\n# First: build it yourself, or split it across a team?\n\nYou are the lead engineer. Before writing ` +
+      `any code, decide whether this plan can be built by a team of engineers in parallel (assign_team says when ` +
+      `that's worth it and how to split); read the whole plan with read_doc({ path: "${SESSION_PLAN_DOC}" }) to see ` +
+      `which files each step writes. If it can, call assign_team with no new steps and workstreams covering ` +
+      `every step below, then end your turn: the team builds it and you take follow-ups once their work is merged. ` +
+      `If it can't, build it yourself as below.` +
+      `\n\n# Seed for write_coding_plan\n\nWhen you build it yourself, your first tool calls are git_create_branch, ` +
+      `then write_coding_plan with replace: true and exactly these steps (same id and title, do not invent your own) — all ` +
       `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
   }
 
   if (!session.codingTeam && !session.branch) text += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
   return text;
+}
+
+/** What the lead needs to know about the session's current team round. */
+function teamSection(session: SessionRecord): string {
+  const team = session.codingTeam!;
+  const checklist = (session.codingPlan ?? []).map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`).join('\n');
+  const members = team.members
+    .map((m) => `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; steps ${m.stepIds.join(', ')}; owned ${m.ownedPaths.join(', ')}`)
+    .join('\n');
+  const what = team.kind === 'qa-fix' ? "QA's findings" : team.kind === 'plan' ? 'the plan' : 'the work you split';
+  const where = session.branch ? `on branch "${session.branch}", which is checked out` : 'on the session branch';
+  const state =
+    team.status === 'done'
+      ? `A team of engineers you assigned built ${what} in parallel, and all of their work is merged ${where}.`
+      : team.status === 'assigned'
+        ? `You split ${what} across a team; it hasn't started yet. Calling assign_team again replaces that split.`
+        : `A team of engineers you assigned worked on ${what}, but not everything merged (see below) — their merged ` +
+          `work is ${where}. The human can resume the team, or you can finish what's left yourself.`;
+  return (
+    `\n\n# The coding team (round ${team.round})\n\nYou are the lead engineer. ${state} Do NOT call git_create_branch. ` +
+    `Review what's there before changing it, handle the human's requests on this branch, and keep the checklist ` +
+    `accurate with write_coding_plan. If new work splits cleanly across engineers again, assign_team runs another ` +
+    `round.\n\nTeam members:\n${members}\n\nChecklist:\n${checklist}`
+  );
 }
 
 /**

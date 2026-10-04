@@ -6,8 +6,7 @@ import { baseBranchFor } from '../../apps/apps.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
 import { getRoleModelConfig } from '../../settings/settings-store.js';
 import { lightModelFor, planStepEfforts } from '../model-routing.js';
-import type { CodingTeamMember, SessionRecord, TeamMemberStatus } from '../../sessions/session.js';
-import { readPlanDoc } from '../../sessions/plan-doc.js';
+import type { CodingTeamMember, CodingTeamState, SessionRecord, TeamMemberStatus } from '../../sessions/session.js';
 import {
   addWorktree,
   assertOnBranch,
@@ -43,13 +42,16 @@ export function worktreeDirFor(sessionId: string, memberId?: string): string {
   return memberId ? path.join(dir, memberId) : dir;
 }
 
-export async function planHasTeam(session: SessionRecord): Promise<boolean> {
-  return (await readPlanDoc(session)).workstreams.length >= 2;
+// A member's branch suffix and worktree name. Round 1 keeps the bare id (as
+// before rounds existed); later rounds are prefixed so an earlier round's
+// unmerged branch or worktree never collides with the new one.
+function memberKey(team: CodingTeamState, member: CodingTeamMember): string {
+  return team.round > 1 ? `r${team.round}-${member.id}` : member.id;
 }
 
 /**
- * Runs the approved plan's workstreams as a coding team: one agent per
- * workstream, each in its own git worktree on its own branch off the
+ * Runs the workstreams the coding lead assigned (assign_team) as a coding
+ * team: one agent per workstream, each in its own git worktree on its own branch off the
  * session branch, started as soon as everything it depends on has merged.
  * Each finished member's branch is merged back into the session branch
  * (serialized per repo). Members that haven't merged — failed, or cut off
@@ -71,9 +73,8 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   if (session.requirementsStatus !== 'approved' || session.planStatus !== 'approved') {
     throw new Error('Requirements and plan must both be approved before the coding team can start.');
   }
+  if (!session.codingTeam) throw new Error("The lead hasn't split this work across a team.");
   const app = await getApp(session.appId);
-  const { steps, workstreams } = await readPlanDoc(session);
-  if (workstreams.length < 2) throw new Error("The approved plan doesn't split into workstreams — use the single coding agent.");
 
   // The main checkout stays on the session branch the whole time: every
   // member's branch is merged into it there.
@@ -91,29 +92,20 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   const sessionBranch = session.branch!;
 
   session = await mutateSession(sessionId, (s) => {
-    s.codingPlan ??= steps.map((step) => ({ ...step, status: 'pending' as const }));
-    const previous = new Map((s.codingTeam?.members ?? []).map((m) => [m.id, m]));
-    s.codingTeam = {
-      status: 'running',
-      startedAt: s.codingTeam?.startedAt ?? new Date().toISOString(),
-      finishedAt: null,
-      members: workstreams.map((ws): CodingTeamMember => {
-        const prev = previous.get(ws.id);
-        if (prev?.status === 'merged') return prev;
-        return {
-          ...ws,
-          branch: `${sessionBranch}--${ws.id}`,
-          status: 'waiting',
-          note: null,
-          startedAt: null,
-          finishedAt: null,
-          transcript: prev?.transcript ?? [],
-          history: prev?.history ?? [],
-          claudeSessionId: prev?.claudeSessionId ?? null,
-        };
-      }),
-    };
+    const team = s.codingTeam!;
+    team.status = 'running';
+    team.finishedAt = null;
+    // Everyone who hasn't merged runs (again), keeping their history.
+    for (const m of team.members) {
+      if (m.status === 'merged') continue;
+      m.branch = `${sessionBranch}--${memberKey(team, m)}`;
+      m.status = 'waiting';
+      m.note = null;
+      m.startedAt = null;
+      m.finishedAt = null;
+    }
   });
+  const team = session.codingTeam!;
   emit({ type: 'team_status', status: 'running' });
 
   const setStatus = async (memberId: string, status: TeamMemberStatus, note: string | null = null) => {
@@ -158,7 +150,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   };
 
   const runOne = async (member: CodingTeamMember): Promise<boolean> => {
-    const worktreePath = worktreeDirFor(sessionId, member.id);
+    const worktreePath = worktreeDirFor(sessionId, memberKey(team, member));
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     // Branches off the session branch as it is now — i.e. including every
     // dependency that has already merged.
@@ -271,17 +263,18 @@ export async function recoverInterruptedTeams(): Promise<void> {
 
 /** Removes a session's leftover worktrees and member branches (on session delete). */
 export async function cleanupTeamWorktrees(session: SessionRecord): Promise<void> {
-  if (!session.codingTeam) return;
+  const teams = [...session.codingTeamHistory, ...(session.codingTeam ? [session.codingTeam] : [])];
+  if (teams.length === 0) return;
   let repoRoot: string | null = null;
   try {
     repoRoot = (await getApp(session.appId)).repoRoot;
   } catch {
     // app removed — just delete the directories
   }
-  for (const member of session.codingTeam.members) {
-    if (member.status === 'merged') continue;
-    if (repoRoot) {
-      await withRepoLock(repoRoot, () => removeWorktree(repoRoot!, worktreeDirFor(session.id, member.id)));
+  for (const team of teams) {
+    for (const member of team.members) {
+      if (member.status === 'merged' || !repoRoot) continue;
+      await withRepoLock(repoRoot, () => removeWorktree(repoRoot!, worktreeDirFor(session.id, memberKey(team, member))));
     }
   }
   await fs.rm(worktreeDirFor(session.id), { recursive: true, force: true });

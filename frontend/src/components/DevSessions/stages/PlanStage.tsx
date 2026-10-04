@@ -15,7 +15,6 @@ import { ExternalAnchor } from '../ExternalAnchor';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
-import { TeamPlanPanel } from '../CodingTeam';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
@@ -238,7 +237,6 @@ export function PlanStage({ session }: { session: SessionRecord }) {
           }
           notices={
             <>
-              {doc && doc.workstreams.length >= 2 && <TeamPlanPanel workstreams={doc.workstreams} steps={doc.steps} />}
               {reopenedHere && (
                 <Notice tone="amber">
                   Reopened mid-coding — branch <code>{session.branch}</code> has existing work. Re-approving resumes the

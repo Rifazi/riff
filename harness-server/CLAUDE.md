@@ -605,6 +605,35 @@ below) — never inside the target repo.
    1 and the per-request context in the new SDK transcript, and the
    turn's line in `state/usage-log.jsonl`, against the numbers above.
 
+26. User asked for Jack, the coding lead, to decide whether work splits
+   across a team instead of the plan stage, and for QA send-backs to be
+   parallelized the same way. **Supersedes step 10's planning half.**
+   `write_plan_doc` no longer takes `workstreams` and the plan prompt no
+   longer plans a team (it still lists each step's files, which Jack reads
+   to decide). The coding agent got `assign_team`
+   (`tool-defs/assign-team-tool.ts`): optional new `steps` (id, title,
+   `brief`) plus `workstreams` covering every unfinished checklist step,
+   validated by `agents/team/workstreams.ts` (step 10's rules, moved from
+   `sessions/plan-doc.ts`, which is gone). It only records the split as
+   `session.codingTeam` with status `assigned`, a `round` and a `kind`
+   (`plan` | `qa-fix` | `follow-up`); the previous round moves to
+   `codingTeamHistory`. The Coding tab starts the team once Jack's turn
+   ends, once per round, so the team never runs while Jack is in the main
+   checkout. Jack is asked to decide at kickoff (first-turn section; the
+   kickoff turn is never light-routed) and on a QA fix (`QA_FIX_TEAM_NOTE`
+   in the turn prompt). The criteria live in the tool description, since an
+   app's prompt override replaces the base prompt. QA-fix steps carry a
+   `brief` the engineer gets in its workstream section, because members see
+   the plan but not the QA report. `write_coding_plan` merges keep briefs.
+   Round 1 keeps bare-id branches/worktrees, later rounds use `r<n>-<id>` so
+   an earlier round's unmerged branch can't collide. Once a round has
+   finished, Jack's next turn starts a new conversation (`codingContext.teamRound`)
+   so Jack's system prompt shows what the team merged. The coordinator says
+   "ready" while a team is assigned or running, and after a round until
+   someone talks to Jack again. Verified on a scratch copy with a stub
+   engineer: validation, kickoff split, merge, a QA-fix round with briefs on
+   `r2-` branches, and a failed member. Not run with real agents yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

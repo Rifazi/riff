@@ -4,7 +4,6 @@ import matter from 'gray-matter';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { config } from '../../config.js';
-import { planWorkstreamSchema, validateWorkstreams } from '../../sessions/plan-doc.js';
 
 export const planStepSchema = z.object({
   id: z.string().describe('Short stable slug, e.g. "schema", "primary-adapter", "cdk-stateful"'),
@@ -27,14 +26,6 @@ export const writePlanSchema = z.object({
     .array(planStepSchema)
     .min(1)
     .describe('The same steps as in markdownBody, as a minimal structured list — this seeds the coding agent\'s checklist once approved'),
-  workstreams: z
-    .array(planWorkstreamSchema)
-    .optional()
-    .describe(
-      'Only when the work can genuinely be built in parallel: the steps grouped into 2+ workstreams, each implemented ' +
-        'concurrently by its own coding-team member in an isolated worktree, owning a disjoint set of paths. Omit for ' +
-        'a normal single-agent, one-step-at-a-time plan.'
-    ),
 });
 export const writePlanDescription =
   'Write (or overwrite) the plan document for this session. Pass the full markdown BODY (rationale, and for ' +
@@ -42,15 +33,10 @@ export const writePlanDescription =
   '(id + title only — one per affected layer, not one per file, sized so each is completable in roughly a ' +
   "dozen tool calls; split a layer into multiple steps if it'd need more than that). Call this once you and " +
   'the human have converged; it can be called again to revise. The document always starts in draft status; ' +
-  'only the human can approve it. Pass `workstreams` only if the steps split into groups that write disjoint files and ' +
-  'could be coded at the same time by separate agents (see its description); the call is rejected if their owned ' +
-  'paths overlap, a step is unassigned, or nothing could actually run in parallel.';
+  'only the human can approve it.';
 
 export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessionId: string; requirementsPath: string }) {
-  return async ({ markdownBody, steps, workstreams }: z.infer<typeof writePlanSchema>): Promise<string> => {
-    // Thrown before anything is written, so the model sees why and retries.
-    const validWorkstreams = workstreams?.length ? validateWorkstreams(steps.map((s) => s.id), workstreams) : null;
-
+  return async ({ markdownBody, steps }: z.infer<typeof writePlanSchema>): Promise<string> => {
     await fs.mkdir(config.plansDir, { recursive: true });
     const filePath = path.join(config.plansDir, `${sessionInfo.sessionKey}.md`);
 
@@ -78,17 +64,13 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessio
       session: sessionInfo.sessionId,
       'requirements-doc': sessionInfo.requirementsPath,
       steps,
-      ...(validWorkstreams ? { workstreams: validWorkstreams } : {}),
       ...(existingJira ? { jira: existingJira } : {}),
     };
 
     const fileContents = matter.stringify(`\n${markdownBody.trim()}\n`, frontmatter);
     await fs.writeFile(filePath, fileContents, 'utf8');
 
-    const team = validWorkstreams
-      ? ` Coding will run as a team of ${validWorkstreams.length} agents in parallel (${validWorkstreams.map((w) => w.id).join(', ')}).`
-      : '';
-    return `Wrote ${path.relative(config.harnessRoot, filePath)} (status: draft).${team} Awaiting human approval.`;
+    return `Wrote ${path.relative(config.harnessRoot, filePath)} (status: draft). Awaiting human approval.`;
   };
 }
 

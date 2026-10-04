@@ -48,6 +48,8 @@ export interface CodingPlanStep {
   id: string;
   title: string;
   status: CodingStepStatus;
+  /** What to do, on a step the lead added after the plan (e.g. a QA fix). */
+  brief?: string;
 }
 
 export interface CheckCommands {
@@ -217,8 +219,8 @@ export interface SessionSplitOrigin {
   dependsOnSessionIds: string[];
 }
 
-/** A group of plan steps one coding-team member builds in parallel with the others. */
-export interface PlanWorkstream {
+/** A group of checklist steps one coding-team member builds in parallel with the others. */
+export interface Workstream {
   id: string;
   title: string;
   stepIds: string[];
@@ -228,7 +230,7 @@ export interface PlanWorkstream {
 
 export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
 
-export interface CodingTeamMember extends PlanWorkstream {
+export interface CodingTeamMember extends Workstream {
   branch: string;
   status: TeamMemberStatus;
   note: string | null;
@@ -238,7 +240,11 @@ export interface CodingTeamMember extends PlanWorkstream {
 }
 
 export interface CodingTeamState {
-  status: 'running' | 'done' | 'needs_attention' | 'interrupted';
+  /** "assigned": the lead split the work and the team hasn't started yet. */
+  status: 'assigned' | 'running' | 'done' | 'needs_attention' | 'interrupted';
+  /** 1 for the first team; each later split by the lead is the next round. */
+  round: number;
+  kind: 'plan' | 'qa-fix' | 'follow-up';
   members: CodingTeamMember[];
   startedAt: string;
   finishedAt: string | null;
@@ -291,6 +297,7 @@ export interface SessionRecord {
   codingApprovedAt: string | null;
   codingPlan: CodingPlanStep[] | null;
   codingTeam: CodingTeamState | null;
+  codingTeamHistory: CodingTeamState[];
 
   qaReportPath: string | null;
   delivery: SessionDelivery | null;

@@ -20,10 +20,10 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import type {
   CodingPlanStep,
   CodingTeamMember,
-  PlanStepSummary,
-  PlanWorkstream,
+  CodingTeamState,
   TeamMemberStatus,
   TranscriptEntry,
+  Workstream,
 } from '@/lib/dev-sessions/types';
 import { TEAM_LEAD_PERSONA, teamMemberPersona, type TeamPersona } from '@/lib/dev-sessions/agents';
 import { AgentAvatar, ChatPane } from './ChatPane';
@@ -58,7 +58,7 @@ function StatusPill({ status }: { status: TeamMemberStatus }) {
   );
 }
 
-/** Jack followed by the engineers — the one "this is a team" visual, used on both tabs. */
+/** Jack followed by the engineers — the one "this is a team" visual. */
 function TeamFaces({ personas }: { personas: TeamPersona[] }) {
   return (
     <div className="flex items-center flex-shrink-0">
@@ -88,68 +88,13 @@ function OwnedPaths({ paths }: { paths: string[] }) {
   );
 }
 
-function nameOf(id: string, all: PlanWorkstream[]): string {
+function nameOf(id: string, all: Workstream[]): string {
   const i = all.findIndex((w) => w.id === id);
   return i >= 0 ? teamMemberPersona(i, all[i].title).name : id;
 }
 
-function waitsFor(ws: PlanWorkstream, all: PlanWorkstream[]): string | null {
+function waitsFor(ws: Workstream, all: Workstream[]): string | null {
   return ws.dependsOn.length ? ws.dependsOn.map((id) => nameOf(id, all)).join(' & ') : null;
-}
-
-// ---------------------------------------------------------------- Plan tab
-
-/** Plan tab: who will build what once the plan is approved. */
-export function TeamPlanPanel({ workstreams, steps }: { workstreams: PlanWorkstream[]; steps: PlanStepSummary[] }) {
-  const personas = workstreams.map((w, i) => teamMemberPersona(i, w.title));
-  const startNow = workstreams.filter((w) => w.dependsOn.length === 0).length;
-  const stepTitle = (id: string) => steps.find((s) => s.id === id)?.title ?? id;
-
-  return (
-    <Card>
-      <div className="flex items-center gap-3 px-3 py-2.5 border-b border-border">
-        <TeamFaces personas={personas} />
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground">
-            Coded by a team of {workstreams.length + 1} agents
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {TEAM_LEAD_PERSONA.name} leads · {workstreams.length} engineers, {startNow} starting at once · each owns its
-            own files
-          </div>
-        </div>
-      </div>
-      <ul className="divide-y divide-border">
-        {workstreams.map((ws, i) => {
-          const after = waitsFor(ws, workstreams);
-          return (
-            <li key={ws.id} className="px-3 py-2.5 space-y-1.5">
-              <div className="flex items-start gap-2">
-                <AgentAvatar agent={personas[i]} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-foreground">
-                    <span className="font-medium">{personas[i].name}</span>{' '}
-                    <span className="text-muted-foreground">· {ws.title}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {after ? `Starts after ${after}` : 'Starts right away'}
-                  </div>
-                </div>
-              </div>
-              <ol className="pl-8 text-xs text-foreground space-y-0.5 list-decimal list-inside">
-                {ws.stepIds.map((id) => (
-                  <li key={id}>{stepTitle(id)}</li>
-                ))}
-              </ol>
-              <div className="pl-8">
-                <OwnedPaths paths={ws.ownedPaths} />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </Card>
-  );
 }
 
 // ---------------------------------------------------------------- Coding tab
@@ -225,9 +170,10 @@ function MemberLog({
 }
 
 export interface CodingTeamPanelProps {
-  /** Before the team starts, the lineup comes from the approved plan. */
-  workstreams: PlanWorkstream[];
-  members: CodingTeamMember[] | null;
+  /** The lead's split: what this round builds, and who builds it. */
+  round: number;
+  kind: CodingTeamState['kind'];
+  members: CodingTeamMember[];
   teamStatus: TeamStatus;
   teamFinished: boolean;
   steps: CodingPlanStep[];
@@ -239,6 +185,8 @@ export interface CodingTeamPanelProps {
   onStart: () => void;
   /** The lead's chat (the same ChatPane the single-agent Coding tab uses). */
   leadChat: React.ReactNode;
+  /** The lead is mid-turn — e.g. still explaining the split it just made. */
+  leadActive: boolean;
 }
 
 const LEAD_TAB = '__lead__';
@@ -250,7 +198,8 @@ const LEAD_TAB = '__lead__';
  */
 export function CodingTeamPanel(props: CodingTeamPanelProps) {
   const {
-    workstreams,
+    round,
+    kind,
     members,
     teamStatus,
     teamFinished,
@@ -262,18 +211,9 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
     starting,
     onStart,
     leadChat,
+    leadActive,
   } = props;
-  const lineup: CodingTeamMember[] =
-    members ??
-    workstreams.map((ws) => ({
-      ...ws,
-      branch: '',
-      status: 'waiting',
-      note: null,
-      startedAt: null,
-      finishedAt: null,
-      transcript: [],
-    }));
+  const lineup = members;
   // Keyed on the titles so each persona keeps its identity across refetches:
   // the member logs' ChatPane rows are memoized on it.
   const titlesKey = JSON.stringify(lineup.map((m) => m.title));
@@ -283,9 +223,10 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
   );
 
   const [picked, setPicked] = useState<string | null>(null);
-  const defaultTab = teamFinished
-    ? LEAD_TAB
-    : ((lineup.find((m) => m.status === 'running') ?? lineup[0])?.id ?? LEAD_TAB);
+  const defaultTab =
+    teamFinished || leadActive
+      ? LEAD_TAB
+      : ((lineup.find((m) => m.status === 'running') ?? lineup[0])?.id ?? LEAD_TAB);
   const selected = picked ?? defaultTab;
   const selectedIndex = lineup.findIndex((m) => m.id === selected);
   const member = selectedIndex >= 0 ? lineup[selectedIndex] : null;
@@ -314,6 +255,12 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
               <Users className="w-4 h-4 text-muted-foreground" />
               Coding team
+              {round > 1 && (
+                <span className="font-normal text-muted-foreground">
+                  · round {round}
+                  {kind === 'qa-fix' ? ', QA fixes' : kind === 'follow-up' ? ', follow-ups' : ''}
+                </span>
+              )}
             </div>
             <div className="text-xs text-muted-foreground">
               {TEAM_LEAD_PERSONA.name} (lead) + {lineup.length} engineers · {summary}

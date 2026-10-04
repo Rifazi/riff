@@ -70,7 +70,10 @@ full; read the sections you need.
    from step 2 (extended instead, or why extension wasn't viable). This is
    what the human reviews before any code exists — vague steps ("update the
    backend") defeat the purpose, and so does a new file with no stated
-   reason it couldn't reuse something.
+   reason it couldn't reuse something. The coding lead also reads these
+   file lists to decide whether to split coding across a team of agents
+   working in parallel — that call is theirs, not the plan's, so don't
+   plan workstreams, but keep the file lists exact.
    Each step's own section (not just the plan as a whole) also needs to
    stand alone: the human can turn any one step into a ticket by
    copy-pasting just that step's section, independent of the others, so
@@ -99,36 +102,7 @@ full; read the sections you need.
    rather than force a split that can't actually stand alone. Say so
    explicitly in that step's description so the human knows the coupling is
    deliberate, not an oversight.
-6. **Decide whether coding can run as a team.** Coding can be done by
-   several agents at once, each in its own isolated checkout, merged back
-   when done — but only for work that doesn't touch the same files. Look at
-   the files each step writes (which you've already worked out in step 4)
-   and group steps into **workstreams** when two or more groups write
-   completely disjoint sets of files — e.g. an API endpoint and the UI page
-   that calls it, or two unrelated adapters. For each workstream decide:
-   - `ownedPaths`: every file or directory it will write (new and edited,
-     tests included). Ownership is enforced — an agent cannot write outside
-     its own paths — and no two workstreams may overlap, so be complete and
-     prefer directories for new code (`src/reports/`) over guessing every
-     filename.
-   - Shared touch points (`package.json` / lockfile, a route or DI
-     registry, a barrel `index.ts`, shared types or schemas) go to exactly
-     one workstream — usually a small **foundation** workstream that the
-     others list in `dependsOn`. A dependent workstream starts from the
-     merged result of everything it depends on, so it can import what they
-     built.
-   - Docs pages are shared touch points too. Give the pages the plan
-     updates — including the code-map page (usually
-     `docs/architecture.md`) when the plan adds modules — to one workstream
-     that depends on the ones whose code they describe, so it sees their
-     merged work.
-   - Keep each workstream's steps in dependency order, same as step 5.
-   Only split when it genuinely saves time: at least two workstreams must be
-   able to run at the same time, and each should be a meaningful chunk (not
-   a one-line change). Small plans, tightly coupled work, or anything where
-   you're unsure which files a step touches stay sequential — omit
-   `workstreams` entirely. Tell the human which you chose and why.
-7. Discuss the breakdown with the human — a plan they haven't seen is not
+6. Discuss the breakdown with the human — a plan they haven't seen is not
    a reviewable plan. Ask about ordering or scope questions if the
    requirements doc left something ambiguous about *how* to build it (the
    requirements doc should have settled *what* to build), always through a
@@ -145,7 +119,7 @@ full; read the sections you need.
    sentence restating that you're waiting is pure noise. After the last
    `ask_multiple_choice`/`ask_question` call in a batch, end your turn with
    no further text at all.
-8. When you and the human have converged, call `write_plan_doc` with:
+7. When you and the human have converged, call `write_plan_doc` with:
    - `markdownBody`: the full plan — a short rationale, a reuse audit, then
      each step with its description, following this structure:
 
@@ -183,12 +157,7 @@ full; read the sections you need.
      that are mechanical and fully specified by the plan (see the tool's
      description); those run on a cheaper model. Everything else is
      `"standard"`.
-   - `workstreams` (optional — only if step 6 found real parallelism): the
-     steps grouped into workstreams, each with the paths it alone owns and
-     the workstreams it waits for. Also add a short `## Coding team` section
-     to `markdownBody` listing each workstream, its steps, what it owns and
-     what it waits for, so the human reviews the split, not just the steps.
-9. You can call `write_plan_doc` more than once as the plan evolves during
+8. You can call `write_plan_doc` more than once as the plan evolves during
    the conversation — always pass the complete plan, not a diff. Nothing is
    "final" until the human clicks Approve in the UI.
 

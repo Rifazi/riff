@@ -10,7 +10,6 @@ import type {
   AttachmentInput,
   MeetingSourceInput,
   PlanStepSummary,
-  PlanWorkstream,
   Provider,
   ReferenceDoc,
   Role,
@@ -183,7 +182,6 @@ export const api = {
         markdown: string | null;
         body: string | null;
         steps: PlanStepSummary[];
-        workstreams: PlanWorkstream[];
         jira: { epicKey: string; issues: CreateJiraTicketsResult['issues'] } | null;
       }>(
         r

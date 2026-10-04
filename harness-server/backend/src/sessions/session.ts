@@ -26,6 +26,10 @@ export interface CodingPlanStep {
   id: string;
   title: string;
   status: CodingStepStatus;
+  // What to do, for a step that isn't in the approved plan: the lead writes
+  // one per step it adds when it splits follow-up work (e.g. QA's findings)
+  // across a team (tool-defs/assign-team-tool.ts).
+  brief?: string;
 }
 
 export interface TranscriptEntry {
@@ -91,11 +95,11 @@ export interface SessionSplitOrigin {
   dependsOnSessionIds: string[];
 }
 
-// A group of plan steps one coding-team member implements, concurrently
-// with the others, in its own git worktree (see agents/team/). Declared by
-// the plan agent in write_plan_doc; validated by sessions/plan-doc.ts so no
-// two workstreams can write the same path.
-export interface PlanWorkstream {
+// A group of checklist steps one coding-team member implements,
+// concurrently with the others, in its own git worktree (see agents/team/).
+// Declared by the coding lead with assign_team; validated by
+// agents/team/workstreams.ts so no two workstreams can write the same path.
+export interface Workstream {
   id: string;
   title: string;
   stepIds: string[];
@@ -108,7 +112,7 @@ export interface PlanWorkstream {
 
 export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
 
-export interface CodingTeamMember extends PlanWorkstream {
+export interface CodingTeamMember extends Workstream {
   branch: string;
   status: TeamMemberStatus;
   // Why it failed or is blocked, or a note about the merge.
@@ -127,12 +131,24 @@ export interface CodingContext {
   stepId: string | null;
   startEntryId: string | null;
   tokens: number;
+  // The last team round this conversation saw finish; a round finishing
+  // after it starts the lead's next turn in a new conversation.
+  teamRound?: number;
 }
 
+// Why the lead split work across a team: the approved plan at kickoff, QA's
+// findings after a send-back, or anything else the human asked for.
+export type CodingTeamKind = 'plan' | 'qa-fix' | 'follow-up';
+
 export interface CodingTeamState {
-  // "interrupted" = the server stopped mid-run (set at boot); the run
-  // endpoint resumes every member that hasn't merged yet.
-  status: 'running' | 'done' | 'needs_attention' | 'interrupted';
+  // "assigned" = the lead has split the work and the team hasn't started
+  // (the Coding tab starts it once the lead's turn ends). "interrupted" =
+  // the server stopped mid-run (set at boot); the run endpoint resumes
+  // every member that hasn't merged yet.
+  status: 'assigned' | 'running' | 'done' | 'needs_attention' | 'interrupted';
+  // 1 for the session's first team; each later split is the next round.
+  round: number;
+  kind: CodingTeamKind;
   members: CodingTeamMember[];
   startedAt: string;
   finishedAt: string | null;
@@ -168,10 +184,13 @@ export interface SessionRecord {
   // steps, then updated as each step is completed. Null until the agent
   // calls write_coding_plan.
   codingPlan: CodingPlanStep[] | null;
-  // Set when the approved plan had 2+ workstreams and the team was started
-  // — the members' own transcripts live here, not in transcripts.coding
-  // (which stays the lead's single-agent chat for follow-ups after merge).
+  // Set when the coding lead split the work into 2+ workstreams — the
+  // members' own transcripts live here, not in transcripts.coding (which is
+  // the lead's own chat: the split, follow-ups after merge, QA fixes).
   codingTeam: CodingTeamState | null;
+  // Earlier rounds, oldest first, kept for their logs when the lead splits
+  // work again (e.g. QA fixes after the plan's team).
+  codingTeamHistory: CodingTeamState[];
   // The single coding agent's current conversation: the plan step it was
   // started for, the transcript entry it started after (null = the start),
   // and its size after its last turn. coding-agent.ts starts a fresh

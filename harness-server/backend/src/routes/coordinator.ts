@@ -9,7 +9,7 @@ import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { runCodingAgentTurn } from '../agents/coding-agent.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
-import { isTeamRunning, planHasTeam } from '../agents/team/coding-team.js';
+import { isTeamRunning } from '../agents/team/coding-team.js';
 
 // Hard cap so a stuck/looping coordinator can't run away unattended — it
 // always stops and hands back to a human rather than looping forever.
@@ -95,13 +95,16 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
         const group = stageGroupFor(session);
         const transcript = transcriptFor(session, group);
 
-        // The team drives itself from the Coding tab; the coordinator only
-        // takes over follow-ups with the lead once it has finished.
-        if (group === 'coding' && (isTeamRunning(session.id) || (!session.codingTeam && (await planHasTeam(session))))) {
+        // The team drives itself from the Coding tab once the lead has
+        // split the work; the coordinator only takes over follow-ups with
+        // the lead after a human has looked at what the team merged.
+        const team = session.codingTeam;
+        if (group === 'coding' && (isTeamRunning(session.id) || team?.status === 'assigned' || team?.status === 'running')) {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team runs on its own — start or watch it on the Coding tab.' });
           break;
         }
-        if (group === 'coding' && session.codingTeam && transcript.length === 0) {
+        const lastEntryAt = transcript[transcript.length - 1]?.timestamp;
+        if (group === 'coding' && team?.finishedAt && (!lastEntryAt || lastEntryAt < team.finishedAt)) {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team has finished — review the merged diff.' });
           break;
         }

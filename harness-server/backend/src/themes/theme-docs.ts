@@ -193,8 +193,7 @@ export function themeBriefing(role: ThemeBriefingRole, themeName: string | null)
     plan:
       `Run audit_theme before planning UI work. If ${THEME_DIR}/index.css isn't imported yet, or the audit shows the app's ` +
       `own tokens or hard-coded colors in the areas the work touches, include the migration steps the work needs. ` +
-      `When the requirements are a migration onto the theme, plan it in this order. ${MIGRATION_STEPS} With workstreams, ` +
-      `put the root entry and the shared components in one workstream that the view workstreams depend on.`,
+      `When the requirements are a migration onto the theme, plan it in this order. ${MIGRATION_STEPS}`,
     coding:
       `Run audit_theme before you start UI work and again before you finish. Anything you add must pass it: no new ` +
       `hard-coded colors, and the theme imported once. When the work (or a UI change in an area not yet on the theme) ` +

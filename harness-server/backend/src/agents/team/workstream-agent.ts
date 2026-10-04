@@ -83,14 +83,24 @@ export async function runWorkstreamAgent({
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
 
-  const stepTitle = (id: string) => planSteps.find((s) => s.id === id)?.title ?? id;
+  // Steps the lead added after the plan (e.g. QA fixes) carry a brief.
+  const stepLine = (id: string) => {
+    const step = session.codingPlan?.find((s) => s.id === id);
+    const title = step?.title ?? planSteps.find((s) => s.id === id)?.title ?? id;
+    return `- id: "${id}", title: "${title}"${step?.brief ? `\n  ${step.brief.replace(/\n/g, '\n  ')}` : ''}`;
+  };
+  const kind = session.codingTeam?.kind ?? 'plan';
+  const roundNote =
+    kind === 'plan'
+      ? ''
+      : `This round isn't building the approved plan: ${kind === 'qa-fix' ? 'QA reviewed the merged branch and sent it back' : 'the human asked for more work on the branch'}, and the lead split it across the team. Your steps' briefs say what to change. The plan above is context for what the feature is.\n\n`;
   const others = teammates
     .filter((t) => t.id !== member.id)
     .map((t) => `- ${t.title} (${t.id}) owns ${t.ownedPaths.join(', ')}${member.dependsOn.includes(t.id) ? ' — already merged into your branch' : ''}`)
     .join('\n');
   const brief =
-    `\n\n${teamRules}\n\n# Your workstream: ${member.title} (${member.id})\n\n` +
-    `Your branch: ${member.branch}\n\nYour steps, in order:\n${member.stepIds.map((id) => `- id: "${id}", title: "${stepTitle(id)}"`).join('\n')}\n\n` +
+    `\n\n${teamRules}\n\n# Your workstream: ${member.title} (${member.id})\n\n${roundNote}` +
+    `Your branch: ${member.branch}\n\nYour steps, in order:\n${member.stepIds.map(stepLine).join('\n')}\n\n` +
     `Your owned paths (the only places you can write):\n${member.ownedPaths.map((p) => `- ${p}`).join('\n')}\n\n` +
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));

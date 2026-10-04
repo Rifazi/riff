@@ -44,7 +44,7 @@ export function CodingPlanChecklist({
             ) : (
               <Circle className="w-4 h-4 mt-0.5 text-muted-foreground/50 flex-shrink-0" />
             )}
-            <span>{step.title}</span>
+            <span title={step.brief}>{step.title}</span>
           </li>
         ))}
       </ul>

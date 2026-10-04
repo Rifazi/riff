@@ -89,15 +89,10 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['team-status', sessionId] });
   };
 
-  // Team mode: the approved plan split the work into 2+ workstreams, so a
-  // team of agents codes it in parallel (see harness-server agents/team/).
-  // Wait for the plan to load before deciding, so the single-agent kickoff
-  // below can't fire for a team plan.
-  const { data: planDoc } = useQuery({
-    queryKey: ['plan-doc', sessionId, session.planPath],
-    queryFn: () => api.getPlanDoc(sessionId),
-  });
-  const teamMode = Boolean(session.codingTeam) || (planDoc?.workstreams.length ?? 0) >= 2;
+  // Team mode: the lead (Jack) split the work into 2+ workstreams — at
+  // kickoff, or when QA sent the branch back — so a team of agents codes it
+  // in parallel (see harness-server agents/team/).
+  const teamMode = Boolean(session.codingTeam);
   const team = useTeamRun();
   const codingTeam = session.codingTeam;
   // A run keeps going server-side if this page is closed; the persisted
@@ -108,11 +103,12 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     enabled: teamMode,
   });
   const teamActive = team.running || (codingTeam?.status === 'running' && teamServer?.running !== false);
-  const teamStatus = !codingTeam
-    ? ('not_started' as const)
-    : codingTeam.status === 'running' && !teamActive
-      ? ('interrupted' as const)
-      : codingTeam.status;
+  const teamStatus =
+    !codingTeam || codingTeam.status === 'assigned'
+      ? ('not_started' as const)
+      : codingTeam.status === 'running' && !teamActive
+        ? ('interrupted' as const)
+        : codingTeam.status;
   const teamFinished =
     Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
 
@@ -127,14 +123,15 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   const startTeam = () => void team.start(sessionId, refresh);
 
-  const kickedOffTeam = useRef(false);
+  // Jack assigned a team: start it once Jack's turn has ended, once per round.
+  const startedRound = useRef<number | null>(null);
   useEffect(() => {
-    if (!teamMode || codingTeam || session.branch || team.running) return;
-    if (kickedOffTeam.current) return;
-    kickedOffTeam.current = true;
+    if (codingTeam?.status !== 'assigned' || team.running || streaming) return;
+    if (startedRound.current === codingTeam.round) return;
+    startedRound.current = codingTeam.round;
     startTeam();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamMode, codingTeam, session.branch, team.running]);
+  }, [codingTeam?.status, codingTeam?.round, team.running, streaming]);
 
   const entriesFor = (member: CodingTeamMember) =>
     team.running && team.startedAt
@@ -202,10 +199,11 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     );
   };
 
-  // Kick off automatically when reached with no branch and nothing said.
+  // Kick off automatically when reached with no branch and nothing said —
+  // Jack's first turn decides whether to build it solo or split it across a team.
   const kickedOff = useRef(false);
   useEffect(() => {
-    if (planDoc === undefined || teamMode) return;
+    if (teamMode) return;
     if (session.branch) return;
     if (session.transcripts.coding.length > 0) return;
     if (streaming) return;
@@ -214,15 +212,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     if (session.coordinatorEnabled) return;
     void handleSend(CODING_KICKOFF_MESSAGE, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    session.id,
-    session.branch,
-    session.coordinatorEnabled,
-    session.transcripts.coding.length,
-    streaming,
-    planDoc,
-    teamMode,
-  ]);
+  }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming, teamMode]);
 
   // QA sent this back for fixes — relay the report as the next message.
   const kickedOffQaFix = useRef(false);
@@ -388,8 +378,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         teamMode ? (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
             <CodingTeamPanel
-              workstreams={planDoc?.workstreams ?? []}
-              members={codingTeam?.members ?? null}
+              round={codingTeam?.round ?? 1}
+              kind={codingTeam?.kind ?? 'plan'}
+              members={codingTeam?.members ?? []}
               teamStatus={teamStatus}
               teamFinished={teamFinished}
               steps={plan ?? []}
@@ -400,6 +391,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               starting={team.running}
               onStart={startTeam}
               leadChat={leadChat}
+              leadActive={streaming}
             />
             <ErrorText>{team.error ?? error}</ErrorText>
           </div>
@@ -451,7 +443,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               streaming={streaming}
               runningTool={runningTool}
               agent={AGENT}
-              emptyHint={`${AGENT.name} implements the approved plan on a new branch.`}
+              emptyHint={`${AGENT.name} reads the approved plan, splits it across a team when the work can run in parallel, and otherwise builds it on a new branch.`}
               placeholder={
                 approved
                   ? 'Coding approved — read only.'

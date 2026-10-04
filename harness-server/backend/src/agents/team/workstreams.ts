@@ -1,14 +1,11 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import matter from 'gray-matter';
 import { z } from 'zod';
-import { config } from '../config.js';
-import type { PlanWorkstream, SessionRecord } from './session.js';
+import type { Workstream } from '../../sessions/session.js';
 
-export const planWorkstreamSchema = z.object({
+export const workstreamSchema = z.object({
   id: z.string().describe('Short stable slug, e.g. "api", "ui", "foundation"'),
   title: z.string().describe('What this team member builds, e.g. "Report API endpoint"'),
-  stepIds: z.array(z.string()).min(1).describe('Ids of the plan steps this member implements, in order'),
+  stepIds: z.array(z.string()).min(1).describe('Ids of the checklist steps this member implements, in order'),
   ownedPaths: z
     .array(z.string())
     .min(1)
@@ -42,7 +39,7 @@ function overlaps(a: string, b: string): boolean {
 }
 
 /**
- * Checks a plan's workstreams are safe to run as a concurrent team: every
+ * Checks the lead's workstreams are safe to run as a concurrent team: every
  * step assigned exactly once, owned paths disjoint across workstreams (the
  * file tools enforce ownership, so disjoint paths mean merges can't
  * conflict), dependencies known and acyclic, and at least two workstreams
@@ -50,9 +47,9 @@ function overlaps(a: string, b: string): boolean {
  * sequential mode with extra overhead. Returns them with owned paths
  * normalized.
  */
-export function validateWorkstreams(stepIds: string[], workstreams: PlanWorkstream[]): PlanWorkstream[] {
+export function validateWorkstreams(stepIds: string[], workstreams: Workstream[]): Workstream[] {
   if (workstreams.length < 2) {
-    throw new InvalidWorkstreamsError('A team plan needs at least two workstreams — omit `workstreams` for a single coding agent.');
+    throw new InvalidWorkstreamsError('A team needs at least two workstreams — if the work doesn\'t split, build it yourself instead of calling assign_team.');
   }
   const ids = new Set<string>();
   for (const ws of workstreams) {
@@ -63,14 +60,14 @@ export function validateWorkstreams(stepIds: string[], workstreams: PlanWorkstre
   const owner = new Map<string, string>();
   for (const ws of workstreams) {
     for (const stepId of ws.stepIds) {
-      if (!stepIds.includes(stepId)) throw new InvalidWorkstreamsError(`Workstream "${ws.id}" lists unknown step "${stepId}".`);
+      if (!stepIds.includes(stepId)) throw new InvalidWorkstreamsError(`Workstream "${ws.id}" lists "${stepId}", which isn't an unfinished checklist step.`);
       const prev = owner.get(stepId);
       if (prev) throw new InvalidWorkstreamsError(`Step "${stepId}" is in both "${prev}" and "${ws.id}" — each step belongs to one workstream.`);
       owner.set(stepId, ws.id);
     }
   }
   const unassigned = stepIds.filter((id) => !owner.has(id));
-  if (unassigned.length) throw new InvalidWorkstreamsError(`Steps not in any workstream: ${unassigned.join(', ')}.`);
+  if (unassigned.length) throw new InvalidWorkstreamsError(`Unfinished steps not in any workstream: ${unassigned.join(', ')}. Every unfinished checklist step goes to exactly one workstream.`);
 
   const normalized = workstreams.map((ws) => ({
     ...ws,
@@ -121,26 +118,9 @@ export function validateWorkstreams(stepIds: string[], workstreams: PlanWorkstre
   );
   if (!parallelPair) {
     throw new InvalidWorkstreamsError(
-      'Every workstream waits on another, so nothing would run in parallel — omit `workstreams` and keep the plan sequential.'
+      'Every workstream waits on another, so nothing would run in parallel — build it yourself, one step at a time, instead.'
     );
   }
 
   return normalized;
-}
-
-export interface PlanDocData {
-  steps: { id: string; title: string }[];
-  workstreams: PlanWorkstream[];
-}
-
-export async function readPlanDoc(session: SessionRecord): Promise<PlanDocData> {
-  if (!session.planPath) return { steps: [], workstreams: [] };
-  try {
-    const parsed = matter(await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8'));
-    const steps = Array.isArray(parsed.data.steps) ? (parsed.data.steps as PlanDocData['steps']) : [];
-    const workstreams = Array.isArray(parsed.data.workstreams) ? (parsed.data.workstreams as PlanWorkstream[]) : [];
-    return { steps, workstreams };
-  } catch {
-    return { steps: [], workstreams: [] };
-  }
 }

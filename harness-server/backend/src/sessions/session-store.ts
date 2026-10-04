@@ -57,6 +57,11 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.sourceMeeting ??= null;
   session.meetingKickoffPending ??= false;
   session.codingTeam ??= null;
+  if (session.codingTeam) {
+    session.codingTeam.round ??= 1;
+    session.codingTeam.kind ??= 'plan';
+  }
+  session.codingTeamHistory ??= [];
   session.codingContext ??= null;
   session.delivery ??= null;
   session.splitProposal ??= null;
@@ -152,6 +157,7 @@ export async function createSession(input: {
     codingApprovedAt: null,
     codingPlan: null,
     codingTeam: null,
+    codingTeamHistory: [],
     codingContext: null,
     qaReportPath: null,
     delivery: null,
