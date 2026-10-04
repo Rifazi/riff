@@ -21,6 +21,7 @@ import {
 import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 import { Badge } from '@/components/ui/badge';
 import { AgentServerBanner } from './AgentServerBanner';
+import { ClassificationToolSettings } from './ClassificationToolSettings/ClassificationToolSettings';
 import { ExternalAnchor } from './ExternalAnchor';
 import { LoadingState } from './PageShell';
 import { TokenUsagePanel } from './TokenUsagePanel';
@@ -571,6 +572,13 @@ export function DevAgentSettings() {
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />
+            </Section>
+
+            <Section
+              title="On-device classification"
+              description="Agents can offload label-matching subtasks (which of these labels fits this text?) to a small model that runs on this machine instead of a paid cloud model. Weights are cached under harness-server/state/."
+            >
+              <ClassificationToolSettings settings={settings} />
             </Section>
 
             <TokenUsagePanel />
