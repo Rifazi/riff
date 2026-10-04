@@ -1,18 +1,12 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  LibraryBig,
-  Mic,
-  MessageCircleQuestion,
-  Plus,
-  Search,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { LibraryBig, Mic, MessageCircleQuestion, Plus, Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -20,28 +14,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  journalApi,
-  journalKeys,
-  notebookHref,
-  type NotebookOverview,
-} from "@/lib/journal/api";
-import { JOURNAL_KINDS, useSearch, type SearchHit } from "@/lib/search/api";
-import { SearchHitLines } from "@/components/Search/SearchHitText";
-import { Card } from "@/components/ui/card";
-import { JournalShell } from "@/components/Journal/JournalShell";
-import { NotebookCover } from "@/components/Journal/NotebookCover";
-import { FilingStatus } from "@/components/Journal/FilingStatus";
-import { AskPanel } from "@/components/Journal/AskPanel";
-import { ReviewInbox } from "@/components/Journal/ReviewCard";
+} from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { journalApi, journalKeys, notebookHref, type NotebookOverview } from '@/lib/journal/api';
+import { JOURNAL_KINDS, useSearch, type SearchHit } from '@/lib/search/api';
+import { SearchHitLines } from '@/components/Search/SearchHitText';
+import { Card } from '@/components/ui/card';
+import { JournalShell } from '@/components/Journal/JournalShell';
+import { NotebookCover } from '@/components/Journal/NotebookCover';
+import { FilingStatus } from '@/components/Journal/FilingStatus';
+import { AskPanel } from '@/components/Journal/AskPanel';
+import { ReviewInbox } from '@/components/Journal/ReviewCard';
 
 export default function JournalPage() {
   const router = useRouter();
@@ -55,20 +38,19 @@ export default function JournalPage() {
     queryFn: journalApi.listNotebooks,
   });
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const [askOpen, setAskOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDescription, setNewDescription] = useState("");
+  const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      journalApi.createNotebook(newTitle, newDescription || undefined),
+    mutationFn: () => journalApi.createNotebook(newTitle, newDescription || undefined),
     onSuccess: (notebook) => {
       queryClient.invalidateQueries({ queryKey: journalKeys.all });
       setCreating(false);
-      setNewTitle("");
-      setNewDescription("");
+      setNewTitle('');
+      setNewDescription('');
       router.push(notebookHref(notebook.id));
     },
   });
@@ -94,19 +76,15 @@ export default function JournalPage() {
       title="Journals"
       subtitle={
         notebooks.length > 0
-          ? `${notebooks.length} ${notebooks.length === 1 ? "journal" : "journals"} · ${totalNotes} notes compiled from your meeting summaries`
-          : "Every meeting is summarized and each topic is filed into its journal"
+          ? `${notebooks.length} ${notebooks.length === 1 ? 'journal' : 'journals'} · ${totalNotes} notes compiled from your meeting summaries`
+          : 'Every meeting is summarized and each topic is filed into its journal'
       }
       actions={
         <>
           <Button variant="outline" onClick={() => setCreating(true)}>
             <Plus /> New journal
           </Button>
-          <Button
-            variant="default"
-            onClick={() => setAskOpen(true)}
-            disabled={notebooks.length === 0}
-          >
+          <Button variant="default" onClick={() => setAskOpen(true)} disabled={notebooks.length === 0}>
             <MessageCircleQuestion /> Ask your journals
           </Button>
         </>
@@ -117,38 +95,28 @@ export default function JournalPage() {
 
       {notebooks.length > 0 && (
         <div className="relative mb-6 max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search journals and notes…"
-            className="bg-white pl-9"
+            className="bg-background pl-9"
           />
         </div>
       )}
 
-      {isLoading && (
-        <div className="py-10 text-center text-sm text-gray-500">Loading…</div>
-      )}
+      {isLoading && <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>}
       {error && <div className="text-sm text-destructive">{String(error)}</div>}
 
       {!isLoading && notebooks.length === 0 && (
         <Card className="border-dashed py-16 text-center shadow-none">
           <LibraryBig className="mx-auto h-10 w-10 text-muted-foreground" />
-          <h2 className="mt-3 font-semibold text-foreground">
-            No journals yet
-          </h2>
+          <h2 className="mt-3 font-semibold text-foreground">No journals yet</h2>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-            Record a meeting and Riff summarizes it, splits it into topics and
-            files each one into its journal. Each journal grows with every
-            meeting that touches its topic, and Riff asks you when it isn’t
-            sure.
+            Record a meeting and Riff summarizes it, splits it into topics and files each one into its journal. Each
+            journal grows with every meeting that touches its topic, and Riff asks you when it isn’t sure.
           </p>
-          <Button
-            className="mt-5"
-            variant="default"
-            onClick={() => router.push("/")}
-          >
+          <Button className="mt-5" variant="default" onClick={() => router.push('/')}>
             <Mic /> Start recording
           </Button>
         </Card>
@@ -165,9 +133,7 @@ export default function JournalPage() {
         </div>
       )}
       {notebooks.length > 0 && visible.length === 0 && !isSearching && (
-        <div className="py-10 text-center text-sm text-gray-500">
-          No journals match “{query}”.
-        </div>
+        <div className="py-10 text-center text-sm text-muted-foreground">No journals match “{query}”.</div>
       )}
 
       <Sheet open={askOpen} onOpenChange={setAskOpen}>
@@ -175,8 +141,7 @@ export default function JournalPage() {
           <SheetHeader>
             <SheetTitle>Ask your journals</SheetTitle>
             <SheetDescription>
-              Answers draw on every journal, with the meetings and moments they
-              came from.
+              Answers draw on every journal, with the meetings and moments they came from.
             </SheetDescription>
           </SheetHeader>
           <div className="mt-4 min-h-0 flex-1">
@@ -190,8 +155,7 @@ export default function JournalPage() {
           <DialogHeader>
             <DialogTitle>New journal</DialogTitle>
             <DialogDescription>
-              Riff files parts of future meetings into it when they discuss this
-              topic. The description helps it decide.
+              Riff files parts of future meetings into it when they discuss this topic. The description helps it decide.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -207,11 +171,7 @@ export default function JournalPage() {
               placeholder="What belongs in this journal?"
               rows={3}
             />
-            {createMutation.error && (
-              <p className="text-sm text-destructive">
-                {String(createMutation.error)}
-              </p>
-            )}
+            {createMutation.error && <p className="text-sm text-destructive">{String(createMutation.error)}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreating(false)}>
