@@ -30,6 +30,7 @@ import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-t
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
+import { repoInstructionsNote } from './repo-instructions.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
 const TOOL_NAMES = [
@@ -67,6 +68,7 @@ export async function runRequirementsAgentTurn(
 
   let systemPrompt = override ?? promptTemplate;
   if (isFirstTurn) {
+    systemPrompt += repoInstructionsNote(app.repoRoot);
     try {
       const manifest = await fs.readFile(path.join(docsDirFor(app), 'README.md'), 'utf8');
       systemPrompt += `\n\n# Docs manifest (docs/README.md)\n\n${manifest}`;

@@ -39,31 +39,32 @@ export const readFileSchema = z.object({
   limit: z.number().int().min(1).optional().describe(`Max lines to read starting at offset (default ${DEFAULT_LINE_LIMIT})`),
 });
 export const readFileDescription =
-  'Read a file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own runtime ' +
-  `state). Files over ${DEFAULT_LINE_LIMIT} lines are truncated to the first ${DEFAULT_LINE_LIMIT} unless you pass ` +
-  `offset and/or limit — use those to page through the rest (e.g. offset: ${DEFAULT_LINE_LIMIT + 1}). Every read stays ` +
-  'in your context for the rest of the conversation, so read only what you need: for a large file, outline_file or ' +
-  "search_code for the part you need first, then read just that range. Don't re-read a file you just wrote or edited to check it — " +
-  'write_file and edit_file report the lines they changed.';
+  `Read a repo file (not .env, .git/, node_modules/). Returns up to ${DEFAULT_LINE_LIMIT} lines; page with offset/limit. ` +
+  'Every read stays in your context, so for a large file find the part you need with outline_file or search_code ' +
+  "and read just that range. Don't re-read a file you just wrote or edited — those tools report what changed.";
 
 export const writeFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/schemas/acme-inventory.schema.json'),
   content: z.string(),
 });
 export const writeFileDescription =
-  'Create a new file anywhere in the repo (except .env, .git/, node_modules/, cdk.out/, and the harness\'s own ' +
-  'runtime state), or replace most of an existing one. To change part of an existing file, use edit_file ' +
-  'instead — rewriting the whole file costs far more.';
+  'Create a repo file, or replace most of an existing one. To change part of a file, use edit_file — rewriting ' +
+  'a whole file costs far more.';
 
 export const editFileSchema = z.object({
   path: z.string(),
-  oldText: z.string(),
-  newText: z.string(),
+  oldText: z.string().optional(),
+  newText: z.string().optional(),
+  edits: z
+    .array(z.object({ oldText: z.string(), newText: z.string() }))
+    .optional()
+    .describe('Several replacements in this file, applied in order in one call, instead of oldText/newText'),
 });
 export const editFileDescription =
   'Replace an exact, unique occurrence of oldText with newText in an existing file anywhere in the repo (same ' +
-  'scope as write_file). Fails if oldText is not found or occurs more than once — read the file first. On success it ' +
-  "returns the line range newText now occupies; the file then matches what you sent, so don't re-read it to check.";
+  'scope as write_file). To make several changes to one file, pass them all as `edits` in one call — applied in ' +
+  'order, all or nothing. Fails if an oldText is not found or occurs more than once. On success it returns the ' +
+  "line ranges the new text occupies; the file then matches what you sent, so don't re-read it to check.";
 
 /**
  * For a coding-team member: `writablePaths` are the paths its workstream
@@ -161,22 +162,30 @@ export function createFileExecutors(deps: FileToolDeps) {
       : `Wrote ${requestedPath} (${lineCount} lines)`;
   };
 
-  const editFileExecute = async ({ path: requestedPath, oldText, newText }: z.infer<typeof editFileSchema>): Promise<string> => {
+  const editFileExecute = async ({ path: requestedPath, oldText, newText, edits }: z.infer<typeof editFileSchema>): Promise<string> => {
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
-    const content = await fs.readFile(absolute, 'utf8');
-    const occurrences = content.split(oldText).length - 1;
-    if (occurrences === 0) {
-      throw new Error(`oldText not found in ${requestedPath}.`);
+    const replacements = [...(oldText !== undefined ? [{ oldText, newText: newText ?? '' }] : []), ...(edits ?? [])];
+    if (replacements.length === 0) throw new Error('Pass oldText and newText, or edits.');
+    // All or nothing: every replacement is checked against the text as the
+    // earlier ones left it, and the file is only written if they all apply.
+    let content = await fs.readFile(absolute, 'utf8');
+    const ranges: string[] = [];
+    for (const [i, edit] of replacements.entries()) {
+      const label = replacements.length > 1 ? `edit ${i + 1}: ` : '';
+      const occurrences = content.split(edit.oldText).length - 1;
+      if (occurrences === 0) {
+        throw new Error(`${label}oldText not found in ${requestedPath}. Nothing was changed.`);
+      }
+      if (occurrences > 1) {
+        throw new Error(`${label}oldText occurs ${occurrences} times in ${requestedPath} — must be unique. Nothing was changed.`);
+      }
+      const firstLine = content.slice(0, content.indexOf(edit.oldText)).split('\n').length;
+      content = content.replace(edit.oldText, () => edit.newText);
+      const lastLine = firstLine + edit.newText.split('\n').length - 1;
+      ranges.push(edit.newText ? `lines ${firstLine}-${lastLine}` : `removed at line ${firstLine}`);
     }
-    if (occurrences > 1) {
-      throw new Error(`oldText occurs ${occurrences} times in ${requestedPath} — must be unique.`);
-    }
-    const updated = content.replace(oldText, newText);
-    await fs.writeFile(absolute, updated, 'utf8');
-    const firstLine = content.slice(0, content.indexOf(oldText)).split('\n').length;
-    const lastLine = firstLine + newText.split('\n').length - 1;
-    const range = newText ? `lines ${firstLine}-${lastLine}` : `removed at line ${firstLine}`;
-    return `Edited ${requestedPath} (${range} of ${updated.split('\n').length})`;
+    await fs.writeFile(absolute, content, 'utf8');
+    return `Edited ${requestedPath} (${ranges.join(', ')} of ${content.split('\n').length})`;
   };
 
   return { readFileExecute, writeFileExecute, editFileExecute };

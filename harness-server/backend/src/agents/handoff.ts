@@ -164,12 +164,18 @@ export async function buildHandoff(params: HandoffParams): Promise<string> {
       'for the parts you need now.',
   ];
   if (checklist && checklist.length > 0) {
-    parts.push(`## Checklist\n\n${checklist.map((s) => `- [${s.status}] ${s.title} (id: "${s.id}")`).join('\n')}`);
+    // Finished steps by id only: write_coding_plan merges by id, so the
+    // agent never needs to repeat them.
+    const done = checklist.filter((s) => s.status === 'done');
+    const open = checklist.filter((s) => s.status !== 'done');
+    const lines = open.map((s) => `- [${s.status}] ${s.title} (id: "${s.id}")`);
+    if (done.length > 0) lines.unshift(`- [done] ${done.length} of ${checklist.length}: ${done.map((s) => s.id).join(', ')}`);
+    parts.push(`## Checklist\n\n${lines.join('\n')}`);
   }
   if (commits.length > 0) {
-    parts.push(`## Commits so far\n\n${commits.slice(0, 30).map((c) => `- ${c.message.split('\n')[0]}`).join('\n')}`);
+    parts.push(`## Commits so far\n\n${commits.slice(0, 15).map((c) => `- ${c.message.split('\n')[0]}`).join('\n')}`);
   }
-  if (stat.trim()) parts.push(`## Files changed on the branch\n\n\`\`\`\n${clip(stat.trim(), 4000)}\n\`\`\``);
+  if (stat.trim()) parts.push(`## Files changed on the branch\n\n\`\`\`\n${clip(stat.trim(), 2500)}\n\`\`\``);
   parts.push(`## Uncommitted changes\n\n${status.trim() ? `\`\`\`\n${clip(status.trim(), 2000)}\n\`\`\`` : 'None.'}`);
 
   if (notes) {

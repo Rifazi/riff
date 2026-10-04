@@ -44,7 +44,9 @@ stopping between them. For each step:
 5. `update_my_steps` → mark it `done`, and move on.
 
 Find code from the docs down, as above: `search_docs` for where it lives,
-then `search_code`, `outline_file`, and only then a ranged `read_file`. If
+then `search_code`, `outline_file`, and only then a ranged `read_file`. Put
+independent calls in one message, and all of a file's changes in one
+`edit_file` call (`edits`). If
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
 

@@ -31,6 +31,7 @@ import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createWriteQaReportToolClaude } from './tool-defs-claude/write-qa-report-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
+import { repoInstructionsNote } from './repo-instructions.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/qa-agent.md');
 const TOOL_NAMES = [
@@ -97,6 +98,7 @@ export async function runQaAgentTurn(
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) {
+    systemPrompt += repoInstructionsNote(app.repoRoot);
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
     systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
     systemPrompt += `\n\n# Session\n\nBranch to review: ${session.branch}`;

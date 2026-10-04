@@ -18,6 +18,8 @@ import { listSessionReferenceDocs, referenceDocsManifest, referenceDocsTurnNote 
 import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from './sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from './handoff.js';
+import { planExcerpt, SESSION_PLAN_DOC } from './plan-excerpt.js';
+import { repoInstructionsNote } from './repo-instructions.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from './tool-defs/outline-tool.js';
@@ -67,9 +69,15 @@ const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
 
 // See SessionRecord.codingContext: a turn starts a fresh conversation when
 // the last one ended at or above FRESH_CONTEXT_AT_TOKENS, and a continuation
-// hop inside a turn compacts at COMPACT_AT_TOKENS (sdk-client.ts).
-const FRESH_CONTEXT_AT_TOKENS = 90_000;
-const COMPACT_AT_TOKENS = 110_000;
+// hop inside a turn compacts at COMPACT_AT_TOKENS (sdk-client.ts). Every
+// request re-reads the whole context, so a turn's cache reads are its
+// request count times its average size: hops of HOP_STEPS tool-call steps
+// let compaction act every 10 steps instead of every 20, and HOP_COUNT of
+// them keep the per-turn ceiling where it was (3 continuations of 20).
+const FRESH_CONTEXT_AT_TOKENS = 60_000;
+export const COMPACT_AT_TOKENS = 70_000;
+export const HOP_STEPS = 10;
+export const HOP_COUNT = 7;
 
 export interface CodingTurnOptions {
   // An automatic "do the next checklist step" turn (kickoff, Continue,
@@ -147,7 +155,7 @@ export async function runCodingAgentTurn(
   const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
-  if (isFirstTurn) systemPrompt += await firstTurnSections(session, app.repoRoot);
+  if (isFirstTurn) systemPrompt += await firstTurnSections(session, app.repoRoot, targetStepId);
   if (handoffNote) prompt = `${handoffNote}\n\n---\n\n${prompt}`;
 
   // A mid-coding send-back that's just been reconciled through requirements
@@ -178,7 +186,7 @@ export async function runCodingAgentTurn(
       `# Requirements/plan were just revised\n\nYou are resuming on the EXISTING branch "${session.branch}" — ` +
       `do NOT call git_create_branch again. The requirements and/or plan above may have changed since your ` +
       `earlier turns in this conversation; treat any assumption from your prior work that now conflicts with ` +
-      `them as superseded. Your next tool call should be write_coding_plan with a *reconciled* checklist: keep ` +
+      `them as superseded. Your next tool call should be write_coding_plan with replace: true and a *reconciled* checklist: keep ` +
       `the id and status of steps that are still valid, and only add/drop/reword what the change actually ` +
       `affects — do not reset everything to "pending".\n\nExisting checklist:\n${existingChecklist}`;
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
@@ -207,6 +215,8 @@ export async function runCodingAgentTurn(
 
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
+    stepsPerHop: HOP_STEPS,
+    maxHops: HOP_COUNT,
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
@@ -230,7 +240,7 @@ export async function runCodingAgentTurn(
         systemPrompt:
           basePrompt +
           themeBriefingFor(app.repoRoot, 'coding') +
-          (await firstTurnSections(fresh, app.repoRoot)) +
+          (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
       };
     },
@@ -397,15 +407,15 @@ export async function runCodingAgentTurn(
  * conversation partway through, see SessionRecord.codingContext), or a
  * brand-new start seeded from the plan's steps.
  */
-async function firstTurnSections(session: SessionRecord, repoRoot: string): Promise<string> {
+async function firstTurnSections(session: SessionRecord, repoRoot: string, stepId: string | null): Promise<string> {
   if (!session.requirementsPath) {
     throw new Error('Cannot start the coding stage without an approved requirements document.');
   }
   if (!session.planPath) {
     throw new Error('Cannot start the coding stage without an approved plan document.');
   }
-  const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, repoRoot);
-  let text = approvedDocs;
+  const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, repoRoot, stepId ? [stepId] : []);
+  let text = repoInstructionsNote(repoRoot) + approvedDocs;
 
   if (session.codingTeam) {
     // The team already built the plan on this branch — this agent is the
@@ -424,14 +434,14 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string): Prom
     text +=
       `\n\n# Continuing on an existing branch\n\nThis feature is already in progress on branch "${session.branch}", ` +
       `which is checked out. Do NOT call git_create_branch. The checklist already exists (it's in the message); keep ` +
-      `it accurate with write_coding_plan, always passing every step with the same ids.`;
+      `it accurate with write_coding_plan, passing just the steps whose status changes, with the same ids.`;
   } else if (planSteps.length > 0) {
     const stepsList = planSteps
       .map((s: { id: string; title: string }) => `- id: "${s.id}", title: "${s.title}"`)
       .join('\n');
     text +=
       `\n\n# Seed for write_coding_plan\n\nYour very first tool call, right after git_create_branch, must ` +
-      `be write_coding_plan using exactly these steps (same id and title, do not invent your own) — all ` +
+      `be write_coding_plan with replace: true and exactly these steps (same id and title, do not invent your own) — all ` +
       `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
   }
 
@@ -446,7 +456,8 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string): Prom
  */
 export async function loadApprovedDocsForCoding(
   session: SessionRecord,
-  repoRoot: string
+  repoRoot: string,
+  focusStepIds?: string[]
 ): Promise<{ text: string; planSteps: { id: string; title: string }[] }> {
   if (!session.requirementsPath || !session.planPath) {
     throw new Error('Coding needs an approved requirements document and plan.');
@@ -474,10 +485,19 @@ export async function loadApprovedDocsForCoding(
       `with read_file (search_docs finds sections within them):\n\n${relatedLines.join('\n')}`;
   }
 
+  // Only the steps this conversation works on in full (agents/plan-excerpt.ts);
+  // read_doc serves the rest. Unset focusStepIds keeps the whole plan.
   const planRaw = await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8');
-  text += `\n\n# Approved plan (${session.planPath})\n\n${planRaw}`;
   const steps: unknown = matter(planRaw).data.steps;
-  return { text, planSteps: Array.isArray(steps) ? (steps as { id: string; title: string }[]) : [] };
+  const planSteps = Array.isArray(steps) ? (steps as { id: string; title: string }[]) : [];
+  const planText = focusStepIds ? planExcerpt(planRaw, planSteps, focusStepIds) : planRaw;
+  text += `\n\n# Approved plan (${session.planPath}, also readable as ${SESSION_PLAN_DOC})\n\n${planText}`;
+  return { text, planSteps };
+}
+
+// The step the checklist says is being worked on, if any.
+function currentStepId(session: SessionRecord): string | null {
+  return session.codingPlan?.find((s) => s.status === 'in_progress')?.id ?? null;
 }
 
 export function suggestedBranchName(session: SessionRecord): string {

@@ -112,6 +112,12 @@ const CONTINUATION_AFTER_COMPACTION_PROMPT =
 export interface CompactionOptions {
   atTokens: number;
   handoff: () => Promise<{ prompt: string; systemPrompt?: string }>;
+  // Tool-call steps per hop and the number of hops, in place of the
+  // defaults (20 and MAX_CONTINUATION_HOPS). Compaction is only checked
+  // between hops, so shorter hops let it act before the context gets
+  // large; the coding agents use 10 × 6, which keeps the same total.
+  stepsPerHop?: number;
+  maxHops?: number;
 }
 
 export interface RunAgentTurnParams {
@@ -137,12 +143,23 @@ export interface RunAgentTurnResult {
   contextTokens: number;
 }
 
+// Compaction only pays off when the conversation has grown well past where
+// it started: a context that begins near atTokens (long approved docs)
+// would otherwise be compacted, at the cost of a handoff, after every hop.
+const MIN_GROWTH_TO_COMPACT = 20_000;
+
+function shouldCompact(compaction: CompactionOptions | undefined, contextTokens: number, startTokens: number): boolean {
+  return Boolean(compaction) && contextTokens >= compaction!.atTokens && contextTokens - startTokens >= MIN_GROWTH_TO_COMPACT;
+}
+
 interface RunAgentTurnOnceResult extends RunAgentTurnResult {
   // 'tool-calls' means stopWhen cut the step loop off while the model still
   // wanted to act — as opposed to 'stop', a genuine finish — which is the
   // signal the wrapper below uses to decide whether to auto-continue. Null
   // if the call threw before a finish reason was ever produced.
   finishReason: string | null;
+  // The prompt size of this call's first model request.
+  startTokens: number;
 }
 
 /**
@@ -154,6 +171,7 @@ interface RunAgentTurnOnceResult extends RunAgentTurnResult {
  */
 async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTurnOnceResult> {
   const { systemPrompt, tools, provider, model, apiKey, history, prompt, onEvent } = params;
+  const steps = params.compaction?.stepsPerHop ?? 20;
 
   let fullText = '';
   let sawError = false;
@@ -178,7 +196,7 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
       instructions: cache ? { role: 'system', content: systemPrompt, providerOptions: cache } : systemPrompt,
       tools,
       messages,
-      stopWhen: stepCountIs(20),
+      stopWhen: stepCountIs(steps),
     });
 
     for await (const part of result.stream) {
@@ -224,8 +242,9 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     const responseMessages = await result.responseMessages;
     const updatedHistory: ModelMessage[] = [...history, { role: 'user', content: prompt }, ...responseMessages];
     const finishReason = await result.finishReason;
-    const steps = await result.steps;
-    const contextTokens = steps.at(-1)?.usage.inputTokens ?? 0;
+    const allSteps = await result.steps;
+    const contextTokens = allSteps.at(-1)?.usage.inputTokens ?? 0;
+    const startTokens = allSteps[0]?.usage.inputTokens ?? 0;
     const total = await result.totalUsage;
     const cacheRead = total.inputTokenDetails?.cacheReadTokens ?? 0;
     const cacheWrite = total.inputTokenDetails?.cacheWriteTokens ?? 0;
@@ -237,11 +256,11 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     };
 
     onEvent({ type: 'done', text: fullText, isError: sawError });
-    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage, contextTokens };
+    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage, contextTokens, startTokens };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE, contextTokens: 0 };
+    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE, contextTokens: 0, startTokens: 0 };
   }
 }
 
@@ -261,12 +280,15 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   let systemPrompt = params.systemPrompt;
   let result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
   let usage = result.usage;
+  let conversationStart = result.startTokens;
+  const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
 
-  while (result.finishReason === 'tool-calls' && hop < MAX_CONTINUATION_HOPS) {
+  while (result.finishReason === 'tool-calls' && hop < maxHops) {
     hop += 1;
-    onEvent({ type: 'continuation', hop, maxHops: MAX_CONTINUATION_HOPS });
-    if (params.compaction && result.contextTokens >= params.compaction.atTokens) {
-      const handoff = await params.compaction.handoff();
+    onEvent({ type: 'continuation', hop, maxHops });
+    const compacting = shouldCompact(params.compaction, result.contextTokens, conversationStart);
+    if (compacting) {
+      const handoff = await params.compaction!.handoff();
       onEvent({ type: 'compacted', contextTokens: result.contextTokens });
       systemPrompt = handoff.systemPrompt ?? systemPrompt;
       currentHistory = [];
@@ -277,13 +299,14 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
     }
     result = await runAgentTurnOnce({ ...params, systemPrompt, history: currentHistory, prompt: currentPrompt });
     usage = addUsage(usage, result.usage);
+    if (compacting) conversationStart = result.startTokens;
   }
   onEvent({ type: 'usage', usage, toolOutput });
 
-  if (result.finishReason === 'tool-calls' && hop >= MAX_CONTINUATION_HOPS) {
+  if (result.finishReason === 'tool-calls' && hop >= maxHops) {
     return {
       updatedHistory: result.updatedHistory,
-      resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
+      resultText: `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
       usage,
       contextTokens: result.contextTokens,
@@ -317,10 +340,11 @@ const CLAUDE_MCP_SERVER_NAME = 'harness-tools';
 // machine's whole setup — ~/.claude settings and plugins, skills, user and
 // claude.ai MCP connectors — none of which an agent here can call (tools
 // are [] and allowedTools names only harness-tools), but all of which can
-// ride along in context on every call. 'project' stays: the target repo's
-// own CLAUDE.md is real guidance for the agents working in it.
+// ride along in context on every call. 'project' is off too: it loaded the
+// target repo's whole CLAUDE.md into every request; agents get its headings
+// instead and read sections with read_doc (agents/repo-instructions.ts).
 const CLAUDE_ISOLATION = {
-  settingSources: ['project'] as ('user' | 'project' | 'local')[],
+  settingSources: [] as ('user' | 'project' | 'local')[],
   strictMcpConfig: true,
   skills: [] as string[],
 };
@@ -352,6 +376,8 @@ export interface RunClaudeAgentTurnResult {
 }
 
 interface RunClaudeAgentTurnOnceResult extends RunClaudeAgentTurnResult {
+  // Same as RunAgentTurnOnceResult.startTokens.
+  startTokens: number;
   // The raw `result` message's subtype ('success' | 'error_max_turns' |
   // 'error_during_execution' | ...) — null if the stream threw before any
   // `result` message arrived. The wrapper below only auto-continues on
@@ -377,6 +403,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   let gotResult = false;
   let usage: TokenUsage = ZERO_USAGE;
   let contextTokens = 0;
+  let startTokens = 0;
 
   const stream = query({
     prompt,
@@ -386,7 +413,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
       tools: [], // disable every built-in tool — only the MCP tools below are available
       mcpServers: { [CLAUDE_MCP_SERVER_NAME]: createMcpServer() },
       allowedTools,
-      maxTurns: MAX_TURNS_PER_STEP,
+      maxTurns: params.compaction?.stepsPerHop ?? MAX_TURNS_PER_STEP,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       permissionPrompts: 'none',
@@ -415,7 +442,10 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
         }
         case 'assistant': {
           const u = message.message.usage;
-          if (u) contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+          if (u) {
+            contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+            if (!startTokens) startTokens = contextTokens;
+          }
           for (const block of message.message.content) {
             if (block.type === 'text') {
               onEvent({ type: 'assistant_text', text: block.text });
@@ -472,14 +502,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
     // turn into a raw, unretried error the human would see instead of the
     // continuation loop below picking it up).
     if (gotResult) {
-      return { sdkSessionId, resultText, isError, subtype, usage, contextTokens };
+      return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens };
     }
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens };
+    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens, startTokens };
   }
 
-  return { sdkSessionId, resultText, isError, subtype, usage, contextTokens };
+  return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens };
 }
 
 /**
@@ -498,12 +528,14 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   let systemPrompt = params.systemPrompt;
   let result = await runClaudeAgentTurnOnce(params);
   let usage = result.usage;
+  let conversationStart = result.startTokens;
+  const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
 
-  while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < MAX_CONTINUATION_HOPS) {
+  while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < maxHops) {
     hop += 1;
-    onEvent({ type: 'continuation', hop, maxHops: MAX_CONTINUATION_HOPS });
-    if (params.compaction && result.contextTokens >= params.compaction.atTokens) {
-      const handoff = await params.compaction.handoff();
+    onEvent({ type: 'continuation', hop, maxHops });
+    if (shouldCompact(params.compaction, result.contextTokens, conversationStart)) {
+      const handoff = await params.compaction!.handoff();
       onEvent({ type: 'compacted', contextTokens: result.contextTokens });
       systemPrompt = handoff.systemPrompt ?? systemPrompt;
       result = await runClaudeAgentTurnOnce({
@@ -512,6 +544,7 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
         resumeSessionId: null,
         prompt: `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`,
       });
+      conversationStart = result.startTokens;
     } else {
       result = await runClaudeAgentTurnOnce({ ...params, systemPrompt, resumeSessionId: result.sdkSessionId, prompt: CONTINUATION_PROMPT });
     }
@@ -519,10 +552,10 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   }
   onEvent({ type: 'usage', usage, toolOutput });
 
-  if (result.subtype === 'error_max_turns' && hop >= MAX_CONTINUATION_HOPS) {
+  if (result.subtype === 'error_max_turns' && hop >= maxHops) {
     return {
       sdkSessionId: result.sdkSessionId,
-      resultText: `This step needed more tool calls than ${MAX_CONTINUATION_HOPS} continuation rounds could cover — consider splitting the plan/checklist step further.`,
+      resultText: `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
       usage,
       contextTokens: result.contextTokens,

@@ -30,6 +30,7 @@ import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js'
 import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createWritePlanToolClaude } from './tool-defs-claude/write-plan-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
+import { repoInstructionsNote } from './repo-instructions.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/plan-agent.md');
 const TOOL_NAMES = [
@@ -65,6 +66,7 @@ export async function runPlanAgentTurn(
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
   if (isFirstTurn) {
+    systemPrompt += repoInstructionsNote(app.repoRoot);
     if (!session.requirementsPath) {
       throw new Error('Cannot start the plan stage without an approved requirements document.');
     }

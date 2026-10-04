@@ -73,12 +73,8 @@ function parseJunitSummary(xml: string): string {
 
 export const runCheckedCommandSchema = z.object({ command: z.enum(['lint', 'test', 'test:integration']) });
 export const runCheckedCommandDescription =
-  'Run one of this repo\'s own checks: "lint", "test" (the unit suite, with a structured pass/fail summary ' +
-  'parsed from a junit.xml report if the run produces one), or "test:integration" (the integration suite — ' +
-  'slow, may need credentials the local environment might not have; only run this if the diff clearly touches ' +
-  'integration-sensitive code and you have reason to believe it will run). Each runs `npm run <script>` at the ' +
-  'repo root, where <script> is this app\'s configured script name for that check (defaults: "lint", "test:ci", ' +
-  '"test:integration").';
+  'Run one of the repo\'s checks via its configured npm script: "lint", "test" (unit suite, pass/fail summary), ' +
+  'or "test:integration" (slow, may need credentials — only when the diff touches integration-sensitive code).';
 
 export const getDiffSchema = z.object({
   branchName: z.string(),

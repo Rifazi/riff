@@ -562,6 +562,49 @@ below) — never inside the target repo.
    reference doc, a keyword match, and nonsense returning nothing, at
    4-13 ms per search.
 
+25. User said cache reads were still high after steps 20 and 22. The usage
+   log showed coding at 86% of cache reads, with 4-6.5M per coding turn.
+   The Claude SDK's own transcripts (`~/.claude/projects/<repo>/<id>.jsonl`,
+   one usage record per request) showed why. Request 1 of a coding
+   conversation was already ~52k tokens. That was the system prompt (73k
+   chars, half of it the whole plan doc), the target repo's CLAUDE.md (30k,
+   loaded by `settingSources: ['project']`), tool schemas (21k) and the
+   handoff (13k). Context then grew to ~117k over ~70 requests. Compaction
+   only ran between 20-step hops at 110k, so it rarely ran. That came to
+   about 70 × 88k ≈ 6.2M, and 59% of it was the starting context. Now:
+   - **Plan excerpt** (`agents/plan-excerpt.ts`): the coding system prompt
+     has the plan without frontmatter, everything outside `## Steps`, the
+     current step (team members: their steps) in full, and the other steps
+     one line each. Steps are matched to their `### ` sections by title,
+     else by position, else the whole plan is kept. `read_doc` serves
+     `session/plan.md` and `session/requirements.md` from artifacts/.
+     consolidate-ui's approved docs went from 45.5k to 20k chars.
+   - **No auto-loaded CLAUDE.md**: `CLAUDE_ISOLATION.settingSources` is
+     `[]`. Every role's first-turn prompt gets `repoInstructionsNote` (its
+     top-level headings, <1k chars), and `read_doc` serves `CLAUDE.md` by
+     heading (a bare heading works). `splitIntoSections` now skips fenced
+     code blocks. A `# comment` in a shell snippet had been read as a
+     heading, which scrambled heading paths for docs search as well.
+   - **Shorter hops**: `CompactionOptions` takes `stepsPerHop`/`maxHops`.
+     The single agent and team members run 10 × 8 hops (same 80-step
+     ceiling) and compact at 70k (`COMPACT_AT_TOKENS`). A new turn starts a
+     fresh conversation at 60k. A hop only compacts once the conversation
+     has grown 20k past where it started, so long approved docs can't make
+     every hop compact.
+   - **Fewer requests**: `edit_file` takes `edits: [{oldText, newText}]`
+     for one file, all or nothing, and `$` in newText is now literal.
+     `write_coding_plan` merges by id: pass just the steps that changed,
+     with `replace: true` for the seed and reconciliation. A new id goes
+     after the step listed before it. Its result is a one-line count, not
+     the whole list echoed back. The prompts say to batch independent calls
+     into one message.
+   - Smaller: the handoff lists finished steps by id only and keeps 15
+     commits. The read_file, write_file, run_npm_install,
+     run_checked_command and run_prettier descriptions were trimmed.
+   Not live-verified with a real coding run yet. To check, compare request
+   1 and the per-request context in the new SDK transcript, and the
+   turn's line in `state/usage-log.jsonl`, against the numbers above.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

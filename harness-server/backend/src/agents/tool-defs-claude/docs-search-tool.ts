@@ -8,7 +8,7 @@ import {
 } from '../tool-defs/docs-search-tool.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createDocsSearchToolsClaude(deps: { appId: string; sessionId?: string }) {
+export function createDocsSearchToolsClaude(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
   const { searchDocsExecute, readDocExecute } = createDocsSearchExecutors(deps);
   return {
     searchDocsToolClaude: tool(

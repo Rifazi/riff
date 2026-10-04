@@ -1,8 +1,15 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { docsSearchScope, readDocSection, syncDocsSearch } from '../../repo/docs-index.js';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
+import { docsSearchScope, readDocSection, selectSections, splitIntoSections, syncDocsSearch } from '../../repo/docs-index.js';
 import { readReferenceDoc, syncReferenceDocsSearch } from '../../sessions/reference-docs.js';
+import { getSession } from '../../sessions/session-store.js';
 import { searchIndex } from '../../search/search-engine.js';
+import { SESSION_PLAN_DOC, SESSION_REQUIREMENTS_DOC } from '../plan-excerpt.js';
+import { readRepoInstructions, REPO_INSTRUCTIONS_FILE } from '../repo-instructions.js';
+import { getApp } from '../../apps/apps-store.js';
 
 export const searchDocsSchema = z.object({
   query: z.string().describe('Keywords or a question, e.g. "square d cash sale format" or "how are invoices retried?"'),
@@ -16,7 +23,11 @@ export const searchDocsDescription =
   'in detail.';
 
 export const readDocSchema = z.object({
-  path: z.string().describe('Repo-relative path under docs/ (e.g. docs/development.md), or a reference document path (reference/…)'),
+  path: z
+    .string()
+    .describe(
+      `Repo-relative path under docs/ (e.g. docs/development.md), the repo's ${REPO_INSTRUCTIONS_FILE}, a reference document path (reference/…), or this session's approved ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}`
+    ),
   heading: z
     .string()
     .optional()
@@ -25,10 +36,11 @@ export const readDocSchema = z.object({
 export const readDocDescription =
   'Read one docs/*.md file by its repo-relative path (e.g. "docs/ingestion/invoices.md") — the whole file, or ' +
   'with `heading` just the section a search_docs result pointed at, including its subsections. Also reads the ' +
-  'reference documents the human attached (reference/… paths). Only paths under docs/ or reference/ are allowed.';
+  `reference documents the human attached (reference/… paths), the repo's ${REPO_INSTRUCTIONS_FILE}, and this session's approved plan and requirements ` +
+  `(${SESSION_PLAN_DOC}, ${SESSION_REQUIREMENTS_DOC}). Only those paths are allowed.`;
 
 // sessionId adds that session's own reference documents to the app's.
-export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string }) {
+export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
     const [referenceScopes] = await Promise.all([
       syncReferenceDocsSearch(deps.appId, deps.sessionId),
@@ -55,8 +67,14 @@ export function createDocsSearchExecutors(deps: { appId: string; sessionId?: str
       if (content === null) throw new Error(`No reference document at ${requestedPath}.`);
       return content;
     }
+    if (requestedPath === REPO_INSTRUCTIONS_FILE) {
+      return readRepoInstructions(deps.repoRoot ?? (await getApp(deps.appId)).repoRoot, heading);
+    }
+    if (requestedPath === SESSION_PLAN_DOC || requestedPath === SESSION_REQUIREMENTS_DOC) {
+      return readSessionDoc(deps.sessionId, requestedPath, heading);
+    }
     if (!requestedPath.startsWith('docs/')) {
-      throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/.`);
+      throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/, nor ${REPO_INSTRUCTIONS_FILE}, ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}.`);
     }
     const content = readDocSection(deps.appId, requestedPath, heading);
     if (content === null) {
@@ -68,7 +86,20 @@ export function createDocsSearchExecutors(deps: { appId: string; sessionId?: str
   return { searchDocsExecute, readDocExecute };
 }
 
-export function createDocsSearchTools(deps: { appId: string; sessionId?: string }) {
+// The approved plan/requirements live in this project's artifacts/, not the
+// target repo. Coding conversations get only their own plan step inline
+// (agents/plan-excerpt.ts) and read the rest here.
+async function readSessionDoc(sessionId: string | undefined, requestedPath: string, heading?: string): Promise<string> {
+  const session = sessionId ? await getSession(sessionId) : null;
+  const relPath = requestedPath === SESSION_PLAN_DOC ? session?.planPath : session?.requirementsPath;
+  if (!relPath) throw new Error(`This session has no approved ${requestedPath.replace(/^session\/|\.md$/g, '')} yet.`);
+  const markdown = await fs.readFile(path.join(config.harnessRoot, relPath), 'utf8');
+  if (!heading) return markdown;
+  const matches = selectSections(splitIntoSections(requestedPath, markdown), requestedPath, heading) ?? [];
+  return matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
+}
+
+export function createDocsSearchTools(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
   const { searchDocsExecute, readDocExecute } = createDocsSearchExecutors(deps);
   return {
     searchDocsTool: tool({ description: searchDocsDescription, inputSchema: searchDocsSchema, execute: searchDocsExecute }),

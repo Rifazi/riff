@@ -34,8 +34,15 @@ export function splitIntoSections(relPath: string, markdown: string): DocSection
     currentContent = [];
   };
 
+  // A `# comment` inside a fenced code block (shell snippets) isn't a heading.
+  let fence: string | null = null;
   for (const line of lines) {
-    const match = /^(#{1,6})\s+(.*)$/.exec(line);
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      if (!fence) fence = fenceMatch[1];
+      else if (fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) fence = null;
+    }
+    const match = fence || fenceMatch ? null : /^(#{1,6})\s+(.*)$/.exec(line);
     if (match) {
       flush();
       const level = match[1].length;

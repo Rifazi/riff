@@ -13,7 +13,8 @@ import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
-import { loadApprovedDocsForCoding } from '../coding-agent.js';
+import { COMPACT_AT_TOKENS, HOP_COUNT, HOP_STEPS, loadApprovedDocsForCoding } from '../coding-agent.js';
+import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from '../tool-defs/code-search-tool.js';
@@ -37,8 +38,6 @@ import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-to
 const CODING_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TEAM_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-team-member.md');
 
-// Same threshold as the single coding agent (coding-agent.ts).
-const COMPACT_AT_TOKENS = 110_000;
 
 const noBranchCreation = async () => {
   throw new Error('Team members work on a branch created for them — there is no branch to create.');
@@ -82,7 +81,7 @@ export async function runWorkstreamAgent({
   const model = modelOverride ?? roleModel;
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
-  const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath);
+  const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
 
   const stepTitle = (id: string) => planSteps.find((s) => s.id === id)?.title ?? id;
   const others = teammates
@@ -95,7 +94,8 @@ export async function runWorkstreamAgent({
     `Your owned paths (the only places you can write):\n${member.ownedPaths.map((p) => `- ${p}`).join('\n')}\n\n` +
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
-  const systemPrompt = base + themeBriefingFor(worktreePath, 'coding') + approvedDocs + brief + (referenceDocs ? `\n\n${referenceDocs}` : '');
+  const systemPrompt =
+    base + themeBriefingFor(worktreePath, 'coding') + repoInstructionsNote(worktreePath) + approvedDocs + brief + (referenceDocs ? `\n\n${referenceDocs}` : '');
 
   const resuming = member.transcript.length > 0;
   const prompt = promptOverride ?? (resuming
@@ -114,6 +114,8 @@ export async function runWorkstreamAgent({
   ]);
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
+    stepsPerHop: HOP_STEPS,
+    maxHops: HOP_COUNT,
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
@@ -147,7 +149,7 @@ export async function runWorkstreamAgent({
   const steps = { sessionId: session.id, stepIds: member.stepIds };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id, repoRoot: worktreePath });
     const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude(scoped);
     const { gitCommitTool } = createGitToolsClaude({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
     const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: worktreePath, checkCommands: app.checkCommands });
@@ -203,7 +205,7 @@ export async function runWorkstreamAgent({
   const apiKey = await getCredential(provider);
   if (!apiKey) throw new Error(`No API key configured for ${provider} — add one in Settings.`);
 
-  const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
+  const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, repoRoot: worktreePath });
   const { readFileTool, writeFileTool, editFileTool } = createFileTools(scoped);
   const { gitCommitTool } = createGitTools({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
   const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands });

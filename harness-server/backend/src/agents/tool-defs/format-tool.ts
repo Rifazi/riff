@@ -14,10 +14,8 @@ export const runPrettierSchema = z.object({
     .describe('Repo-relative paths to format — only the files you just wrote or edited this step, e.g. ["src/global/schemas/acme.schema.json"]'),
 });
 export const runPrettierDescription =
-  "Run prettier --write on exactly the files you list, formatting them in place. Only ever pass the files you " +
-  "just wrote or edited this step — never the whole repo or files from other steps, which would pull unrelated " +
-  "formatting changes into your diff. Call this before git_commit so the commit already contains clean output, " +
-  "in addition to (not instead of) run_checked_command \"lint\".";
+  "prettier --write the files you list — only the ones you wrote or edited this step, so unrelated formatting " +
+  "stays out of the diff. Run it before git_commit.";
 
 /**
  * Deliberately narrower than the repo's own `npm run prettier:write` (which

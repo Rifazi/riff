@@ -27,21 +27,12 @@ export const runNpmInstallSchema = z.object({
   workspace: z
     .string()
     .optional()
-    .describe(
-      'For an npm-workspaces repo (a root package.json with a "workspaces" field), the workspace to install ' +
-        'into — its directory name (e.g. "frontend") or its own package.json "name" — so the dependency lands ' +
-        "in that workspace's package.json instead of the repo root's. Omit for a single-package repo, or when " +
-        'the dependency genuinely belongs at the root.'
-    ),
+    .describe('npm-workspaces repo only: the workspace (directory or package name) the dependency belongs to. Omit for the root.'),
 });
 export const runNpmInstallDescription =
-  'Add and install one or more npm packages via `npm install`, which updates package.json and ' +
-  'package-lock.json together and downloads them into node_modules. This is the only way to change ' +
-  "package.json — write_file/edit_file can't touch it. Only call this for a package you've confirmed is " +
-  'genuinely needed (nothing already in package.json or already used elsewhere in the repo covers it — check ' +
-  "with search_code first). In an npm-workspaces repo, pass workspace to target the package that actually " +
-  'needs the dependency instead of the root. Include package.json and package-lock.json (and the workspace\'s ' +
-  'own package.json, if targeted) in your next git_commit.';
+  '`npm install` packages — the only way to change package.json. Only for a package nothing already in the ' +
+  'repo covers (check with search_code first). Commit package.json and package-lock.json (and the ' +
+  "workspace's package.json) in your next git_commit.";
 
 /**
  * The only tool allowed to modify package.json — it goes through npm itself
