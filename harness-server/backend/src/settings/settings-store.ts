@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import {
   DEFAULT_SETTINGS,
   PROVIDERS,
+  type ClassificationSettings,
   type HarnessSettings,
   type JiraSettings,
   type Provider,
@@ -23,6 +24,7 @@ export async function getSettings(): Promise<HarnessSettings> {
       credentials: { ...parsed.credentials },
       models: { ...DEFAULT_SETTINGS.models, ...parsed.models },
       jira: { ...DEFAULT_SETTINGS.jira, ...parsed.jira },
+      classification: { ...DEFAULT_SETTINGS.classification, ...parsed.classification },
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -35,6 +37,9 @@ export interface SettingsPatch {
   // apiToken: null clears it, a non-empty string replaces it, undefined/''
   // leaves the stored value untouched — same convention as `credentials`.
   jira?: Partial<Omit<JiraSettings, 'apiToken'>> & { apiToken?: string | null };
+  // Takes effect on the next classify_text call — agents/classification.ts
+  // re-reads this and hot-swaps its in-memory pipeline, no restart needed.
+  classification?: Partial<ClassificationSettings>;
 }
 
 export async function updateSettings(patch: SettingsPatch): Promise<HarnessSettings> {
@@ -66,6 +71,10 @@ export async function updateSettings(patch: SettingsPatch): Promise<HarnessSetti
     }
   }
 
+  if (patch.classification) {
+    current.classification = { ...current.classification, ...patch.classification };
+  }
+
   await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(current, null, 2), 'utf8');
   return current;
@@ -84,4 +93,9 @@ export async function getRoleModelConfig(role: Role): Promise<RoleModelConfig> {
 export async function getJiraSettings(): Promise<JiraSettings> {
   const settings = await getSettings();
   return settings.jira;
+}
+
+export async function getClassificationSettings(): Promise<ClassificationSettings> {
+  const settings = await getSettings();
+  return settings.classification;
 }

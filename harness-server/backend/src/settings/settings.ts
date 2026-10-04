@@ -61,10 +61,56 @@ export const DEFAULT_JIRA_SETTINGS: JiraSettings = {
   epicLinkFieldId: '',
 };
 
+// The on-device classification tool (agents/classification.ts) runs
+// transformers.js's zero-shot-classification pipeline, which needs an ONNX
+// sequence-classification model trained for NLI/MNLI. These three Xenova
+// conversions are the curated choices offered in Settings → Dev Agents; the
+// trade-off between them is download size and inference speed versus accuracy
+// on subtle label distinctions. Sizes are the quantized ONNX weights actually
+// downloaded, so they're approximate.
+export interface ClassificationModelOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export const CLASSIFICATION_MODELS: ClassificationModelOption[] = [
+  {
+    id: 'Xenova/distilbert-base-uncased-mnli',
+    label: 'DistilBERT MNLI',
+    description: 'Smallest and fastest (~70 MB). Good for clear-cut label sets. Recommended default.',
+  },
+  {
+    id: 'Xenova/nli-deberta-v3-xsmall',
+    label: 'DeBERTa v3 XSmall NLI',
+    description: 'Balanced (~90 MB). Noticeably better on nuanced or overlapping labels, still fast.',
+  },
+  {
+    id: 'Xenova/bart-large-mnli',
+    label: 'BART Large MNLI',
+    description: 'Most accurate (~400 MB). Slowest to download and to run — for subtle distinctions.',
+  },
+];
+
+export const DEFAULT_CLASSIFICATION_MODEL = CLASSIFICATION_MODELS[0].id;
+
+export function isClassificationModel(value: string): boolean {
+  return CLASSIFICATION_MODELS.some((option) => option.id === value);
+}
+
+export interface ClassificationSettings {
+  model: string;
+}
+
+export const DEFAULT_CLASSIFICATION_SETTINGS: ClassificationSettings = {
+  model: DEFAULT_CLASSIFICATION_MODEL,
+};
+
 export interface HarnessSettings {
   credentials: Partial<Record<Provider, string>>;
   models: Record<Role, RoleModelConfig>;
   jira: JiraSettings;
+  classification: ClassificationSettings;
 }
 
 export const DEFAULT_SETTINGS: HarnessSettings = {
@@ -77,6 +123,7 @@ export const DEFAULT_SETTINGS: HarnessSettings = {
     coordinator: { provider: 'claude', model: 'claude-haiku-4-5' },
   },
   jira: DEFAULT_JIRA_SETTINGS,
+  classification: DEFAULT_CLASSIFICATION_SETTINGS,
 };
 
 // What a light plan step runs on when the coding role's lightModel is unset
@@ -117,18 +164,26 @@ export interface RedactedSettings {
   defaultLightModels: Record<Provider, string>;
   localModel: LocalModelStatus;
   jira: RedactedJiraSettings;
+  classification: ClassificationSettings;
+  // The picker's options travel with the settings, same as knownModels above,
+  // so the UI never hard-codes the model list. On-disk cache status is *not*
+  // here — it's read separately via GET /api/settings/classification-cache,
+  // since it hits the filesystem and changes independently of settings.
+  classificationModels: ClassificationModelOption[];
 }
 
 export function redactSettings(settings: HarnessSettings): RedactedSettings {
   const { apiToken, ...jiraRest } = settings.jira;
   return {
     credentials: Object.fromEntries(
-      PROVIDERS.map((p) => [p, { hasKey: providerNeedsApiKey(p) ? Boolean(settings.credentials[p]?.trim()) : true }])
+      PROVIDERS.map((p) => [p, { hasKey: providerNeedsApiKey(p) ? Boolean(settings.credentials[p]?.trim()) : true }]),
     ) as Record<Provider, { hasKey: boolean }>,
     models: settings.models,
     knownModels: KNOWN_MODELS,
     defaultLightModels: DEFAULT_LIGHT_MODEL,
     localModel: localModelStatus(),
     jira: { ...jiraRest, hasToken: Boolean(apiToken.trim()) },
+    classification: settings.classification,
+    classificationModels: CLASSIFICATION_MODELS,
   };
 }
