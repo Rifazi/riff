@@ -35,7 +35,7 @@ export function BackButton({ fallbackHref, preferFallback = false, className = '
     <button
       type="button"
       onClick={handleClick}
-      className={`inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors ${className}`}
+      className={`inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors ${className}`}
     >
       <ArrowLeft className="h-4 w-4" /> Back
     </button>

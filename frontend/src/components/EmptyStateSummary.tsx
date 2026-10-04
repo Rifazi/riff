@@ -3,12 +3,7 @@
 import { motion } from 'framer-motion';
 import { FileQuestion, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface EmptyStateSummaryProps {
   onGenerate: () => void;
@@ -30,16 +25,14 @@ export function EmptyStateSummary({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col items-center justify-center h-full p-8 text-center"
     >
-      <FileQuestion className="w-16 h-16 text-gray-300 mb-4" />
-      <h3 className="text-lg font-semibold text-gray-900 mb-2">
-        No Summary Generated Yet
-      </h3>
-      <p className="text-sm text-gray-500 mb-6 max-w-md">
+      <FileQuestion className="w-16 h-16 text-muted-foreground/50 mb-4" />
+      <h3 className="text-lg font-semibold text-foreground mb-2">No Summary Generated Yet</h3>
+      <p className="text-sm text-muted-foreground mb-6 max-w-md">
         Generate an AI-powered summary of your meeting transcript to get key points, action items, and decisions.
       </p>
 
       {error && (
-        <p role="alert" className="mb-4 max-w-md rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p role="alert" className="mb-4 max-w-md rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </p>
       )}
@@ -48,11 +41,7 @@ export function EmptyStateSummary({
         <Tooltip>
           <TooltipTrigger asChild>
             <div>
-              <Button
-                onClick={onGenerate}
-                disabled={!hasModel || isGenerating}
-                className="gap-2"
-              >
+              <Button onClick={onGenerate} disabled={!hasModel || isGenerating} className="gap-2">
                 <Sparkles className="w-4 h-4" />
                 {isGenerating ? 'Generating...' : error ? 'Retry summary' : 'Generate Summary'}
               </Button>
@@ -66,11 +55,7 @@ export function EmptyStateSummary({
         </Tooltip>
       </TooltipProvider>
 
-      {!hasModel && (
-        <p className="text-xs text-amber-600 mt-3">
-          Please select a model in Settings first
-        </p>
-      )}
+      {!hasModel && <p className="text-xs text-warning mt-3">Please select a model in Settings first</p>}
     </motion.div>
   );
 }
