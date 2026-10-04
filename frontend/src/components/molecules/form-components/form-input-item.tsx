@@ -1,10 +1,4 @@
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormMessage,
-  FormLabel,
-} from '@/components/ui/form';
+import { FormControl, FormField, FormItem, FormMessage, FormLabel } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Eye, EyeOff } from 'lucide-react';
 import { Control } from 'react-hook-form'; // Import Control type
@@ -91,35 +85,18 @@ export const FormInputItem = ({
                       accept={accept}
                       className={inputStyle}
                     />
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 cursor-pointer">
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center text-muted-foreground cursor-pointer">
                       {showPassword ? (
-                        <EyeOff
-                          className="h-6 w-6"
-                          onClick={togglePasswordVisibility}
-                        />
+                        <EyeOff className="h-6 w-6" onClick={togglePasswordVisibility} />
                       ) : (
-                        <Eye
-                          className="h-6 w-6"
-                          onClick={togglePasswordVisibility}
-                        />
+                        <Eye className="h-6 w-6" onClick={togglePasswordVisibility} />
                       )}
                     </div>
                   </div>
                 ) : type === 'textarea' ? (
-                  <Textarea
-                    placeholder={placeholder}
-                    {...field}
-                    className={inputStyle}
-                    rows={4}
-                  />
+                  <Textarea placeholder={placeholder} {...field} className={inputStyle} rows={4} />
                 ) : (
-                  <Input
-                    placeholder={placeholder}
-                    {...field}
-                    type={type}
-                    accept={accept}
-                    className={inputStyle}
-                  />
+                  <Input placeholder={placeholder} {...field} type={type} accept={accept} className={inputStyle} />
                 )}
               </FormControl>
             </div>
