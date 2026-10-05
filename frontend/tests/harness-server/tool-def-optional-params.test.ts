@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { normalizeMode } from '../../../harness-server/backend/src/agents/classification-core';
-import { classifyTextSchema } from '../../../harness-server/backend/src/agents/tool-defs/classify-text-schema';
+import { normalizeMode } from '../../../harness-server/backend/src/agents/helpers/classifier/core';
+import { classifyTextSchema } from '../../../harness-server/backend/src/agents/helpers/classifier/schema';
 
 // Guards a defect that shipped once: classify_text declared
 // `mode: z.enum([...]).default('single')`, and a zod default makes the

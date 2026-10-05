@@ -1,10 +1,10 @@
 import { z } from 'zod';
 
-import { DEFAULT_MULTI_LABEL_THRESHOLD } from '../classification-core.js';
+import { DEFAULT_MULTI_LABEL_THRESHOLD } from './core.js';
 
-// Schema + description only, split out of classify-text-tool.ts so a test can
-// import and exercise the real schema without pulling in `ai` or the
-// transformers.js pipeline behind classification.ts.
+// Schema + description only, split out of tool.ts so a test can import and
+// exercise the real schema without pulling in `ai` or the transformers.js
+// pipeline behind classifier.ts.
 export const classifyTextSchema = z.object({
   text: z.string().describe('The text to classify, e.g. a requirement sentence, a commit message, or a log line'),
   labels: z
@@ -17,7 +17,7 @@ export const classifyTextSchema = z.object({
   // required argument (the Claude/MCP path rejects a call that omits it with
   // "expected nonoptional, received undefined"), so the default lives in
   // classifyText()'s `params.mode ?? 'single'` instead — same as every other
-  // optional tool parameter in tool-defs/.
+  // optional tool parameter.
   mode: z
     .enum(['single', 'multi'])
     .optional()

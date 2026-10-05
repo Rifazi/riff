@@ -1,23 +1,25 @@
 import { tool, type ToolSet } from 'ai';
-import { OUT_OF_STEPS, runAgentTurn } from '../sdk-client.js';
+import { OUT_OF_STEPS, runAgentTurn } from '../../sdk-client.js';
 import {
-  DELEGATE_SYSTEM_PROMPT,
   delegateDescription,
   delegateSchema,
+  delegateStatsLine,
+  DELEGATE_SYSTEM_PROMPT,
   runDelegation,
   type DelegateInput,
-  type DelegateReport,
   type HelperRun,
-} from '../delegate-core.js';
-import { createDocsSearchTools } from './docs-search-tool.js';
-import { createSearchCodeTool } from './code-search-tool.js';
-import { createOutlineFileTool } from './outline-tool.js';
-import { createFileExecutors, readFileDescription, readFileSchema } from './file-tools.js';
+} from './core.js';
+import { reportHelperRun, type HelperContext } from '../helper.js';
+import { createDocsSearchTools } from '../../tool-defs/docs-search-tool.js';
+import { createSearchCodeTool } from '../../tool-defs/code-search-tool.js';
+import { createOutlineFileTool } from '../../tool-defs/outline-tool.js';
+import { createFileExecutors, readFileDescription, readFileSchema } from '../../tool-defs/file-tools.js';
 
-export { delegateSchema, delegateDescription } from '../delegate-core.js';
+export { delegateSchema, delegateDescription, DELEGATE_NOTE } from './core.js';
 
-// Each helper is a short, read-only tool loop on the coding role's
-// `delegateModel` in the system Ollama (settings/ollama.ts).
+// The research helper: each `delegate` task is a short, read-only tool loop
+// on the coding role's `delegateModel` in the system Ollama
+// (settings/ollama.ts).
 const HELPER_STEPS = 12;
 const HELPER_TIMEOUT_MS = 180_000;
 // Local models often run with a small context window: a helper reads in
@@ -29,20 +31,31 @@ export interface DelegateDeps {
   appId: string;
   sessionId?: string;
   model: string;
-  onReport?: (report: DelegateReport) => void;
+  // Where each run is reported (helpers/helper.ts).
+  context?: HelperContext;
   // Defaults to a real helper on Ollama.
   runHelper?: (prompt: string) => Promise<HelperRun>;
+}
+
+/** The delegate tool's deps, or null when no helper model is set. */
+export function delegateDeps(params: {
+  model: string | null | undefined;
+  repoRoot: string;
+  appId: string;
+  context: HelperContext;
+}): DelegateDeps | null {
+  const model = params.model?.trim();
+  if (!model) return null;
+  return { repoRoot: params.repoRoot, appId: params.appId, sessionId: params.context.sessionId, model, context: params.context };
 }
 
 export function createDelegateExecute(deps: DelegateDeps) {
   const runHelper = deps.runHelper ?? ((prompt: string) => runOllamaHelper(deps, prompt));
   return async (input: DelegateInput): Promise<string> => {
     const { text, report } = await runDelegation(input, runHelper);
-    console.log(
-      `[delegate] ${report.useful}/${report.tasks} useful, ≈${report.savedTokens} paid tokens saved, ` +
-        `${report.usage.input + report.usage.output} local tokens on ${deps.model}`,
-    );
-    deps.onReport?.(report);
+    const { usage, ...rest } = report;
+    const stats = { helper: 'research' as const, model: deps.model, ...rest, localTokens: usage.input + usage.output };
+    await reportHelperRun(deps.context, stats, delegateStatsLine(stats), usage);
     return text;
   };
 }
@@ -92,4 +105,24 @@ async function runOllamaHelper(deps: DelegateDeps, prompt: string): Promise<Help
 
 export function createDelegateTool(deps: DelegateDeps) {
   return tool({ description: delegateDescription, inputSchema: delegateSchema, execute: createDelegateExecute(deps) });
+}
+
+/**
+ * The AI-SDK `delegate` entry for a tool set. Also kept, refusing, while a
+ * replayed history still has calls to it after it was turned off, so that
+ * history stays valid.
+ */
+export function delegateToolEntry(deps: DelegateDeps | null, history: unknown[]): ToolSet {
+  if (deps) return { delegate: createDelegateTool(deps) };
+  if (!JSON.stringify(history).includes('"toolName":"delegate"')) return {};
+  return {
+    delegate: createDelegateTool({
+      repoRoot: '',
+      appId: '',
+      model: '',
+      runHelper: async () => {
+        throw new Error('the local helpers are turned off in Settings');
+      },
+    }),
+  };
 }

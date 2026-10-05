@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 // The agent server has no bun suite of its own, and the repo's only test
 // command is `cd frontend && bun test`, so backend logic that is worth
-// guarding is tested from here. classification-core.ts is deliberately
+// guarding is tested from here. helpers/classifier/core.ts is deliberately
 // dependency-free (no transformers.js, no settings store, no fs) precisely so
 // it can be imported from this suite without downloading a model.
 import {
@@ -13,7 +13,7 @@ import {
   normalizeThreshold,
   rankScores,
   selectLabels,
-} from '../../../harness-server/backend/src/agents/classification-core';
+} from '../../../harness-server/backend/src/agents/helpers/classifier/core';
 
 describe('normalizeText', () => {
   test('trims the text it is given', () => {

@@ -664,8 +664,8 @@ below) — never inside the target repo.
    subagents that do small tasks in parallel and return only what the main
    coding agent needs. The goal is saving tokens: if a helper finds nothing
    useful, the paid agent should pay almost nothing for it. The coding agent
-   and team members got `delegate` (`tool-defs/delegate-tool.ts`, Claude
-   wrapper in `tool-defs-claude/`). It's only registered when
+   and team members got `delegate` (now `helpers/research/`, see step
+   29). It's only registered when
    `models.coding.delegateModel` names an Ollama model and the turn isn't
    already on Ollama. An AI-SDK history that still has delegate calls keeps a
    refusing stub so replays stay valid (`delegateToolEntry`, like
@@ -677,8 +677,8 @@ below) — never inside the target repo.
      a 3-minute `abortSignal` (new optional `RunAgentTurnParams.abortSignal`).
      Two run at a time (`DELEGATE_PARALLEL`), since one GPU serves them all.
      Their events never reach the paid agent's stream.
-   - **Returning less** (`agents/delegate-core.ts`, pure, tested by
-     `frontend/tests/harness-server/delegate-core.test.ts`): the helper
+   - **Returning less** (`helpers/research/core.ts`, pure, tested by
+     `frontend/tests/harness-server/research-core.test.ts`): the helper
      prompt asks for path:line facts, under 150 words, and `NOTHING_FOUND`
      instead of a guess. `cleanAnswer` drops `<think>` blocks, preamble and
      sign-off lines, treats NOTHING_FOUND (bare, in markdown, or explained)
@@ -713,6 +713,36 @@ below) — never inside the target repo.
      after a real answer is stripped. It hasn't run inside a real coding
      session yet.
 
+29. User asked for the classification code to be a form of helper agent.
+   The two local-model tools became one family under `agents/helpers/`,
+   with no change to what agents see: tool names, schemas and prompts are
+   the same.
+   - `helper.ts` is the contract. A `HelperContext` (session, stage, how to
+     add a chat entry) is passed to each helper's tool factory, and every
+     run goes through `reportHelperRun`. That writes one usage-log line,
+     `helper: { name, tasks, useful, savedTokens }`, replacing step 28's
+     `delegate` field (none had been logged), and one system chat entry,
+     `helper: HelperRunStats`, replacing `delegate`. Reporting never fails
+     the tool call.
+   - `helpers/research/` is step 28's `delegate`. `delegateDeps` and
+     `delegateToolEntry` moved there from coding-agent.ts.
+   - `helpers/classifier/` is the old `classification*.ts`,
+     `pipeline-cache.ts` and `tool-defs/classify-text-*`, plus the Claude
+     wrapper. `classifyTextTool` (a constant) became
+     `createClassifyTextTool(context)`, and every agent builds it with
+     `stageHelperContext(session.id, stage)`. Team members use their own
+     transcript.
+   - A classifier run has no tokens and no measurable saving
+     (`savedTokens: null`), so it's counted, not estimated.
+   - Requirements, plan and QA now also store `toolName` on `tool_result`
+     entries, like coding did in step 28.
+   - UI: `components/DevSessions/HelperBubbles.tsx` maps tool → helper and
+     renders the call and result cards. The classifier result shows each
+     label's score bar, with the picked ones highlighted. `ChatPane` only
+     dispatches. `GET /api/usage`'s `local` is `{ calls, savedTokens,
+     usage, byHelper }`. Settings → Dev Agents has one "Local helpers"
+     section (Research helper + Classifier helper).
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -743,11 +773,10 @@ backend/src/
     prompts.ts                — readBasePrompt(role): the checked-in file for a role, or coordinator-agent.ts's DECISION_INSTRUCTIONS constant for "coordinator" (which has no file) — used by the Apps page's "view base prompt"
     prompts/*.md             — app-generic base system prompts (no target-repo specifics)
     prompts/customer-edi-legacy/*.md — verbatim archive of the original Customer-EDI-specific prompt content, seeded as that app's prompt overrides (see prompts-store.ts above)
-    classification.ts         — on-device zero-shot classification behind the `classify_text` tool (all four roles + team members): transformers.js pipeline over a small ONNX NLI model, one in-process singleton hot-swapped when Settings → Dev Agents picks another of the three curated models, weights cached under state/classification-models/ (not transformers.js's own OS cache), plus the cache status/clear helpers routes/settings.ts exposes. Deliberately NOT local-llm.ts's Qwen/llama.cpp stack (causal chat model, different runtime) — see docs/classification-tool.md in the Riff repo
-    classification-cache.ts    — the on-disk half: recursive size walk, per-model cache status from the nested "<org>/<model>" path transformers.js downloads into, and clear-all. Takes the cache dir as an argument (classification.ts passes the real one), so frontend/tests/harness-server/ tests it against a temp dir
-    pipeline-cache.ts         — the in-memory half: single-slot createPipelineCache({load, dispose}) keyed by model id — shares one in-flight load between concurrent callers, swaps + disposes on a new id, keeps the working value when a load fails. Loader is injected, so the hot-swap is unit-tested with no download
-    classification-core.ts     — the pure half of it (text/labels/mode/threshold normalization, ranking, single-vs-multi selection), dependency-free so frontend/tests/harness-server/ can unit-test it without downloading a model. Optional tool params are `.optional()`, never zod `.default()` — a default makes the argument required on the Claude/MCP path
-    tool-defs/*.ts            — one file per tool group (classify-text-tool.ts keeps its zod schema + description in classify-text-schema.ts, importable by frontend/tests/harness-server/ without `ai` or the pipeline); each exports schema + description + a factory (createXExecute(s)/createXTool(s)) that closes over a repoRoot/appId, built fresh per turn by the *-agent.ts files
+    helpers/                  — local helpers: work an agent hands to a model on this machine instead of its paid context (step 29). helper.ts is the shared contract (HelperContext, reportHelperRun → one usage-log line + one chat entry per run, stageHelperContext). Each helper folder: core.ts (pure, tested from frontend/tests/harness-server/), the runtime, tool.ts (AI SDK) + tool-claude.ts (Claude engine)
+    helpers/research/         — `delegate` (step 28): core.ts (schema, answer cleanup, formatting, savings, runDelegation), tool.ts (Ollama helper loops, delegateDeps, delegateToolEntry)
+    helpers/classifier/       — `classify_text`: classifier.ts is on-device zero-shot classification (all four roles + team members), a transformers.js pipeline over a small ONNX NLI model. It's one in-process singleton, hot-swapped when Settings → Dev Agents picks another of the three curated models, with weights cached under state/classification-models/ (not transformers.js's own OS cache). It also has the cache status/clear helpers routes/settings.ts exposes. It is deliberately NOT local-llm.ts's Qwen/llama.cpp stack, which is a causal chat model on a different runtime (see docs/classification-tool.md in the Riff repo). cache.ts is the on-disk half: recursive size walk, per-model cache status, clear-all; it takes the cache dir as an argument so it's tested against a temp dir. pipeline-cache.ts is the in-memory half: a single slot keyed by model id with an injected loader. core.ts holds the pure normalization/ranking/selection, and schema.ts the zod schema + description, importable by tests without `ai`. Optional tool params are `.optional()`, never zod `.default()`: a default makes the argument required on the Claude/MCP path
+    tool-defs/*.ts            — one file per tool group (the local helpers' tools live in helpers/ instead); each exports schema + description + a factory (createXExecute(s)/createXTool(s)) that closes over a repoRoot/appId, built fresh per turn by the *-agent.ts files
     tool-defs-claude/*.ts     — same tool groups, Claude-Agent-SDK tool() wrappers around the SAME factory-produced execute functions from tool-defs/ via wrap.ts's wrapForClaudeSdk() — no logic duplicated, only the SDK-format glue
   repo/
     guardrails.ts             — assertPathAllowed(path, allowedRoots, repoRoot), shared path-allowlist used by every general-purpose file tool (not by the dedicated requirements/QA-report writers, which write directly via fs and bypass this)

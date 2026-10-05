@@ -105,7 +105,7 @@ passing `"mode": "single"` explicitly is equivalent.)
 
 ## Model Selection
 
-Three curated ONNX models are available, all trained on NLI/MNLI datasets and compatible with the zero-shot-classification pipeline. You can switch between them in **Settings → Dev Agents → Classification Model**.
+Three curated ONNX models are available, all trained on NLI/MNLI datasets and compatible with the zero-shot-classification pipeline. You can switch between them in **Settings → Dev Agents → Local helpers → Classifier helper**.
 
 | Model                         | Size    | Speed     | Accuracy | Best for                                                                                                                                                            |
 | ----------------------------- | ------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -181,15 +181,16 @@ For example, "The app crashed when I tried to upload a large file" entails "bug 
 Model and cache configuration is defined in:
 
 - **Backend settings schema**: `harness-server/backend/src/settings/settings.ts` (`CLASSIFICATION_MODELS`, `DEFAULT_CLASSIFICATION_MODEL`, `ClassificationSettings`)
-- **Pipeline module**: `harness-server/backend/src/agents/classification.ts` (cache location `CLASSIFICATION_CACHE_DIR`, default threshold `DEFAULT_MULTI_LABEL_THRESHOLD`)
-- **Tool definition**: `harness-server/backend/src/agents/tool-defs/classify-text-tool.ts` (input schema, description, execution)
+- **Pipeline module**: `harness-server/backend/src/agents/helpers/classifier/classifier.ts` (cache location `CLASSIFICATION_CACHE_DIR`, default threshold `DEFAULT_MULTI_LABEL_THRESHOLD`)
+- **Tool definition**: `harness-server/backend/src/agents/helpers/classifier/tool.ts` (execution and helper reporting; schema and description in `schema.ts`)
 
 Changes to model options, cache location, or the default threshold require updates to the settings schema and/or the classification module — the tool definition and API routes do not need changes.
 
 ## See Also
 
-- [`classifyTextTool` definition](../harness-server/backend/src/agents/tool-defs/classify-text-tool.ts)
-- [Classification module](../harness-server/backend/src/agents/classification.ts)
+- [`classify_text` tool](../harness-server/backend/src/agents/helpers/classifier/tool.ts)
+- [Classification module](../harness-server/backend/src/agents/helpers/classifier/classifier.ts)
+- [Local helpers contract](../harness-server/backend/src/agents/helpers/helper.ts) — the classifier is one of the agents' local helpers; each run is reported to the usage log and shown as a card in the chat
 - [Settings configuration](../harness-server/backend/src/settings/settings.ts)
 - [Settings API routes](../harness-server/backend/src/routes/settings.ts)
 - [`CLAUDE.md` → Dev Sessions](../CLAUDE.md#dev-sessions-meeting--requirements--plan--code--qa)

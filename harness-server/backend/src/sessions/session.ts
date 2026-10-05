@@ -41,19 +41,27 @@ export interface TranscriptEntry {
   toolResult?: unknown;
   isError?: boolean;
   timestamp: string;
-  // A system entry recording one `delegate` call: what its local helpers
-  // read, handed back and saved (agents/tool-defs/delegate-tool.ts).
-  delegate?: DelegateRunStats;
+  // A system entry recording one local helper run (agents/helpers/): what
+  // it did and saved. The chat shows it inside that tool call's result card.
+  helper?: HelperRunStats;
 }
 
-export interface DelegateRunStats {
+export type HelperName = 'research' | 'classifier';
+
+export interface HelperRunStats {
+  helper: HelperName;
   model: string;
+  // Questions asked / texts classified, and how many came back with something.
   tasks: number;
   useful: number;
-  readChars: number;
-  returnedChars: number;
-  savedTokens: number;
-  localTokens: number;
+  // Research only: characters the helper's tools returned, and handed back.
+  readChars?: number;
+  returnedChars?: number;
+  // Paid-context tokens avoided; null where there's no honest estimate
+  // (the classifier saves the agent's reasoning, which can't be measured).
+  savedTokens: number | null;
+  // Local model tokens (research only; the classifier has no tokens).
+  localTokens?: number;
 }
 
 // The Riff meeting a session was started from, when it was created from a

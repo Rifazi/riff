@@ -3,15 +3,15 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// The filesystem half of the classification model cache. classification-cache.ts
-// takes the cache directory as an argument (classification.ts supplies the real
+// The filesystem half of the classifier helper's model cache. helpers/classifier/cache.ts
+// takes the cache directory as an argument (classifier.ts supplies the real
 // one under harness-server/state/), so this runs against a temp dir and never
 // touches a real download.
 import {
   clearModelCache,
   directorySize,
   modelCacheStatus,
-} from '../../../harness-server/backend/src/agents/classification-cache';
+} from '../../../harness-server/backend/src/agents/helpers/classifier/cache';
 
 const MODELS = ['Xenova/distilbert-base-uncased-mnli', 'Xenova/nli-deberta-v3-xsmall', 'Xenova/bart-large-mnli'];
 

@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import type { TokenUsage, ToolOutputStats } from '../agents/sdk-client.js';
+import type { HelperName } from './session.js';
 
 // One line per agent turn's token usage, so usage can be shown over time
 // (Settings → Dev Agents → Token usage, routes/usage.ts). A session's own
@@ -18,13 +19,14 @@ export interface UsageLogEntry {
   usage: TokenUsage;
   // Absent on entries from before tool output was tracked.
   toolOutput?: ToolOutputStats;
-  // Set on a `delegate` call's entry (agents/tool-defs/delegate-tool.ts):
-  // `usage` is then the local helpers' tokens, which cost nothing and are
-  // kept out of the paid totals and of the session's own `usage`.
-  delegate?: {
+  // Set on a local helper run's entry (agents/helpers/helper.ts): `usage`
+  // is then the helper's local tokens, which cost nothing and are kept out
+  // of the paid totals and of the session's own `usage`.
+  helper?: {
+    name: HelperName;
     tasks: number;
     useful: number;
-    // Paid-context tokens the call avoided.
+    // Paid-context tokens the run avoided (0 where not estimated).
     savedTokens: number;
   };
 }

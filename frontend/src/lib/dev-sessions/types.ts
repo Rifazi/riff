@@ -22,19 +22,24 @@ export interface TranscriptEntry {
   toolResult?: unknown;
   isError?: boolean;
   timestamp: string;
-  // A system entry recording one `delegate` call: what its local helpers
-  // read, handed back and saved (agents/tool-defs/delegate-tool.ts).
-  delegate?: DelegateRunStats;
+  // A system entry recording one local helper run (harness-server
+  // agents/helpers/), shown inside that tool call's result card.
+  helper?: HelperRunStats;
 }
 
-export interface DelegateRunStats {
+export type HelperName = 'research' | 'classifier';
+
+export interface HelperRunStats {
+  helper: HelperName;
   model: string;
   tasks: number;
   useful: number;
-  readChars: number;
-  returnedChars: number;
-  savedTokens: number;
-  localTokens: number;
+  // Research only.
+  readChars?: number;
+  returnedChars?: number;
+  // Paid-context tokens avoided; null where not estimated (the classifier).
+  savedTokens: number | null;
+  localTokens?: number;
 }
 
 /** A file staged in the chat composer, ready to send — base64, no `data:` prefix. */
@@ -508,14 +513,16 @@ export interface UsageReport {
     sessions: number;
   };
   daily: { date: string; byStage: Record<UsageStage, number>; estimated: number }[];
-  // The delegate tool's local helpers: free tokens, kept out of `totals`,
-  // and the paid-context tokens they saved. Absent from older servers.
+  // The agents' local helpers (harness-server agents/helpers/): free, kept
+  // out of `totals`, with the paid-context tokens they saved. Absent from
+  // older servers.
   local?: {
     calls: number;
-    tasks: number;
-    useful: number;
-    usage: TokenUsage;
     savedTokens: number;
+    usage: TokenUsage;
+    byHelper: Partial<
+      Record<HelperName, { calls: number; tasks: number; useful: number; usage: TokenUsage; savedTokens: number }>
+    >;
   };
   // Size of the tool results agents got back, per tool, for turns logged
   // since this was tracked. Absent from older servers.

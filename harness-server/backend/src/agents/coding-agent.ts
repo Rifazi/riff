@@ -11,16 +11,15 @@ import {
   setHistory,
   updateSession,
   addStageUsage,
-  addDelegateUsage,
 } from '../sessions/session-store.js';
-import type { CodingTeamKind, DelegateRunStats, SessionRecord, TranscriptEntry } from '../sessions/session.js';
+import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
-import { classifyTextTool } from './tool-defs/classify-text-tool.js';
-import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
+import { createClassifyTextTool } from './helpers/classifier/tool.js';
+import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -52,9 +51,9 @@ import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
-import { createDelegateTool, type DelegateDeps } from './tool-defs/delegate-tool.js';
-import { createDelegateToolClaude } from './tool-defs-claude/delegate-tool.js';
-import { DELEGATE_NOTE, delegateStatsLine } from './delegate-core.js';
+import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry } from './helpers/research/tool.js';
+import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
+import { stageHelperContext } from './helpers/helper.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TOOL_NAMES = [
@@ -133,11 +132,15 @@ export async function runCodingAgentTurn(
   );
   const provider = usingLocalSolo ? 'ollama' : roleConfig.provider;
   const model = usingLocalSolo ? localTeamModel! : roleConfig.model;
-  // The delegate tool's local helpers (tool-defs/delegate-tool.ts); pointless
-  // when this turn already runs on Ollama.
-  const delegateDeps = delegateDepsFor(session, app, provider === 'ollama' ? null : roleConfig.delegateModel, (entry) =>
-    appendTranscriptEntry(session.id, 'coding', entry),
-  );
+  // Local helpers (helpers/): runs are reported into this chat. The research
+  // helper is pointless when this turn already runs on Ollama.
+  const helperContext = stageHelperContext(session.id, 'coding');
+  const delegateDeps = researchDeps({
+    model: provider === 'ollama' ? null : roleConfig.delegateModel,
+    repoRoot: app.repoRoot,
+    appId: app.id,
+    context: helperContext,
+  });
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
   const teamKind: CodingTeamKind = options.qaFix
@@ -389,7 +392,7 @@ export async function runCodingAgentTurn(
             createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
             createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-            classifyTextToolClaude,
+            createClassifyTextToolClaude(helperContext),
             readFileToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
@@ -455,7 +458,7 @@ export async function runCodingAgentTurn(
         search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-        classify_text: classifyTextTool,
+        classify_text: createClassifyTextTool(helperContext),
         read_file: readFileTool,
         write_file: writeFileTool,
         edit_file: editFileTool,
@@ -493,53 +496,6 @@ export async function runCodingAgentTurn(
       return { isError };
     }
   }
-}
-
-/**
- * The delegate tool's deps, or null when no helper model is set. Each run
- * is logged for the Token usage panel and recorded in the chat (`record`)
- * so the human sees what the helpers did and saved.
- */
-export function delegateDepsFor(
-  session: SessionRecord,
-  app: { id: string; repoRoot: string },
-  model: string | null | undefined,
-  record: (entry: Omit<TranscriptEntry, 'id' | 'timestamp'>) => Promise<unknown>,
-  repoRoot = app.repoRoot,
-): DelegateDeps | null {
-  const trimmed = model?.trim();
-  if (!trimmed) return null;
-  return {
-    repoRoot,
-    appId: app.id,
-    sessionId: session.id,
-    model: trimmed,
-    onReport: (report) => {
-      void addDelegateUsage(session.id, 'coding', report);
-      const { usage, ...rest } = report;
-      const stats: DelegateRunStats = { model: trimmed, ...rest, localTokens: usage.input + usage.output };
-      void record({ role: 'system', text: delegateStatsLine(stats), delegate: stats });
-    },
-  };
-}
-
-/**
- * The AI-SDK `delegate` entry. Also kept, refusing, while a replayed history
- * still has calls to it after it was turned off, so that history stays valid.
- */
-export function delegateToolEntry(deps: DelegateDeps | null, history: unknown[]): ToolSet {
-  if (deps) return { delegate: createDelegateTool(deps) };
-  if (!JSON.stringify(history).includes('"toolName":"delegate"')) return {};
-  return {
-    delegate: createDelegateTool({
-      repoRoot: '',
-      appId: '',
-      model: '',
-      runHelper: async () => {
-        throw new Error('the local helpers are turned off in Settings');
-      },
-    }),
-  };
 }
 
 /**

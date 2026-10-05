@@ -664,7 +664,7 @@ function DelegateModelRow({
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
-        <div className="font-medium text-foreground">Local helpers for exploration</div>
+        <div className="font-medium text-foreground">Research helper</div>
         <div className="text-xs text-muted-foreground">
           The coding agent hands read-only questions (where is X, who calls Y) to helpers on this Ollama model, which
           read the files for free and return only the answer. Needs a model that can call tools, e.g. qwen3:8b or
@@ -829,18 +829,18 @@ export function DevAgentSettings() {
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />
+            </Section>
+
+            <Section
+              title="Local helpers"
+              description="Work the agents hand to models on this machine instead of doing it in their paid context. Each run shows as a card in the chat, and what it saved shows under Token usage."
+            >
               <DelegateModelRow
                 value={settings.models.coding}
                 ollamaModels={ollamaModels?.models.filter((m) => m.tools).map((m) => m.name) ?? []}
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />
-            </Section>
-
-            <Section
-              title="On-device classification"
-              description="Agents can offload label-matching subtasks (which of these labels fits this text?) to a small model that runs on this machine instead of a paid cloud model. Weights are cached under harness-server/state/."
-            >
               <ClassificationToolSettings settings={settings} />
             </Section>
 

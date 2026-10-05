@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 // The in-memory singleton behind classify_text: loaded once per process, and
 // hot-swapped when the model selected in Settings → Dev Agents changes. The
 // loader is injected, so this exercises the swap without a model download.
-import { createPipelineCache } from '../../../harness-server/backend/src/agents/pipeline-cache';
+import { createPipelineCache } from '../../../harness-server/backend/src/agents/helpers/classifier/pipeline-cache';
 
 interface FakePipeline {
   model: string;

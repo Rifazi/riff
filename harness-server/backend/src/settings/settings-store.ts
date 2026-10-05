@@ -48,7 +48,7 @@ export interface SettingsPatch {
   // apiToken: null clears it, a non-empty string replaces it, undefined/''
   // leaves the stored value untouched — same convention as `credentials`.
   jira?: Partial<Omit<JiraSettings, 'apiToken'>> & { apiToken?: string | null };
-  // Takes effect on the next classify_text call — agents/classification.ts
+  // Takes effect on the next classify_text call — agents/helpers/classifier/classifier.ts
   // re-reads this and hot-swaps its in-memory pipeline, no restart needed.
   classification?: Partial<ClassificationSettings>;
 }

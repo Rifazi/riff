@@ -3,7 +3,7 @@
 // or the filesystem. Kept in its own module so the rules that decide what the
 // tool accepts and what it returns can be unit-tested without downloading a
 // model (see frontend/tests/harness-server/classification-core.test.ts) —
-// agents/classification.ts owns everything that actually touches the pipeline.
+// classifier.ts owns everything that actually touches the pipeline.
 //
 // Every failure in here is a plain `throw`: both agent engines turn a thrown
 // Error into a tool-level error for the model to read and retry, rather than

@@ -34,8 +34,9 @@ import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-
 import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-tool.js';
 import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
-import { classifyTextTool } from './tool-defs/classify-text-tool.js';
-import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
+import { createClassifyTextTool } from './helpers/classifier/tool.js';
+import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { stageHelperContext } from './helpers/helper.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
@@ -133,9 +134,12 @@ export async function runRequirementsAgentTurn(
   const referenceNote = await referenceDocsTurnNote(session, 'requirements', isFirstTurn);
   if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
 
+  // Each result's tool, so the chat can show a helper's result as its own card.
+  const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
-    void persistEvent(session.id, event);
+    if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
+    void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
   if (provider === 'claude') {
@@ -156,7 +160,7 @@ export async function runRequirementsAgentTurn(
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
           createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          classifyTextToolClaude,
+          createClassifyTextToolClaude(stageHelperContext(session.id, 'requirements')),
           createFetchUrlToolClaude({ enabled: webAccess }),
         ],
       });
@@ -192,7 +196,7 @@ export async function runRequirementsAgentTurn(
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
       propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: classifyTextTool,
+      classify_text: createClassifyTextTool(stageHelperContext(session.id, 'requirements')),
       fetch_url: createFetchUrlTool({ enabled: webAccess }),
     };
 
@@ -241,7 +245,7 @@ export async function runRequirementsAgentTurn(
   return updateSession(session.id, patch);
 }
 
-async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
   if (event.type === 'usage') return addStageUsage(sessionId, 'requirements', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'requirements', { role: 'assistant', text: event.text });
@@ -254,6 +258,7 @@ async function persistEvent(sessionId: string, event: AgentEvent): Promise<void>
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'requirements', {
       role: 'tool_result',
+      toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,
     });

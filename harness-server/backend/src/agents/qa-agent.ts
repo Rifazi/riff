@@ -17,8 +17,9 @@ import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
-import { classifyTextTool } from './tool-defs/classify-text-tool.js';
-import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
+import { createClassifyTextTool } from './helpers/classifier/tool.js';
+import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { stageHelperContext } from './helpers/helper.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -126,9 +127,12 @@ export async function runQaAgentTurn(
   const referenceNote = await referenceDocsTurnNote(session, 'qa', isFirstTurn);
   if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
 
+  // Each result's tool, so the chat can show a helper's result as its own card.
+  const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
-    void persistEvent(session.id, event);
+    if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
+    void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
   if (provider === 'claude') {
@@ -152,7 +156,7 @@ export async function runQaAgentTurn(
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          classifyTextToolClaude,
+          createClassifyTextToolClaude(stageHelperContext(session.id, 'qa')),
           readFileToolClaude,
           getDiffToolClaude,
           runCheckedCommandToolClaude,
@@ -201,7 +205,7 @@ export async function runQaAgentTurn(
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: classifyTextTool,
+      classify_text: createClassifyTextTool(stageHelperContext(session.id, 'qa')),
       read_file: readFileTool,
       get_diff: getDiffTool,
       run_checked_command: runCheckedCommandTool,
@@ -240,7 +244,7 @@ export async function runQaAgentTurn(
   });
 }
 
-async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
   if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'qa', { role: 'assistant', text: event.text });
@@ -249,6 +253,7 @@ async function persistEvent(sessionId: string, event: AgentEvent): Promise<void>
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'qa', {
       role: 'tool_result',
+      toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,
     });

@@ -1,9 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { env, pipeline } from '@xenova/transformers';
-import { config } from '../config.js';
-import { CLASSIFICATION_MODELS, DEFAULT_CLASSIFICATION_MODEL } from '../settings/settings.js';
-import { getSettings } from '../settings/settings-store.js';
+import { config } from '../../../config.js';
+import { CLASSIFICATION_MODELS, DEFAULT_CLASSIFICATION_MODEL } from '../../../settings/settings.js';
+import { getSettings } from '../../../settings/settings-store.js';
 import {
   normalizeLabels,
   normalizeMode,
@@ -13,15 +13,16 @@ import {
   selectLabels,
   type ClassificationMode,
   type LabelScore,
-} from './classification-core.js';
-import { clearModelCache, modelCacheStatus, type ModelCacheStatus } from './classification-cache.js';
+} from './core.js';
+import { clearModelCache, modelCacheStatus, type ModelCacheStatus } from './cache.js';
 import { createPipelineCache } from './pipeline-cache.js';
 
-export { DEFAULT_MULTI_LABEL_THRESHOLD, type ClassificationMode, type LabelScore } from './classification-core.js';
+export { DEFAULT_MULTI_LABEL_THRESHOLD, type ClassificationMode, type LabelScore } from './core.js';
 
 // On-device zero-shot text classification for the Dev Sessions agents.
 //
-// This is deliberately *not* built on agents/local-llm.ts (Qwen via
+// The classifier helper (agents/helpers/helper.ts has the family). This is
+// deliberately *not* built on agents/local-llm.ts (Qwen via
 // llama-helper/llama.cpp/GGUF): that's a causal chat model on a different
 // runtime, while transformers.js's zero-shot-classification pipeline needs an
 // ONNX sequence-classification model trained for NLI/MNLI. The two stacks
@@ -142,7 +143,7 @@ async function selectedModel(): Promise<string> {
 }
 
 export async function classifyText(params: ClassifyTextParams): Promise<ClassifyTextResult> {
-  // Input normalization and result selection live in classification-core.js,
+  // Input normalization and result selection live in core.ts,
   // which is unit-tested without a model; this function is the part that
   // actually loads and runs the pipeline.
   const text = normalizeText(params.text);

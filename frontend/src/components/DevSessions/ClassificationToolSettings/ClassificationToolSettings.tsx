@@ -53,9 +53,10 @@ export function ClassificationToolSettings({ settings }: { settings: SettingsRes
     <div className="py-4 space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
         <div>
-          <div className="font-medium text-foreground">Classification model</div>
+          <div className="font-medium text-foreground">Classifier helper</div>
           <div className="text-xs text-muted-foreground">
-            Runs on this machine, free after the first download. Takes effect on the agents&apos; next classification
+            Every agent can ask it which of a set of labels fits a text (classify_text). Runs on this machine, free
+            after the first download. Weights are cached under harness-server/state/. Takes effect on the agents&apos; next classification
             call — no restart.
           </div>
         </div>

@@ -10,7 +10,7 @@ import {
 } from '../settings/settings.js';
 import { listOllamaModels, testOllama } from '../settings/ollama.js';
 import { testClaudeLogin, testProviderCredential } from '../agents/sdk-client.js';
-import { classificationCacheStatus, clearClassificationCache } from '../agents/classification.js';
+import { classificationCacheStatus, clearClassificationCache } from '../agents/helpers/classifier/classifier.js';
 import { testJiraConnection } from '../jira/jira-client.js';
 
 export async function registerSettingsRoutes(app: FastifyInstance): Promise<void> {

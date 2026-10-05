@@ -10,9 +10,9 @@ import {
   savedTokens,
   type DelegateTaskResult,
   type HelperRun,
-} from '../../../harness-server/backend/src/agents/delegate-core';
+} from '../../../harness-server/backend/src/agents/helpers/research/core';
 
-// The delegate tool exists to save the paid coding agent's context, so these
+// The research helper (the delegate tool) exists to save the paid coding agent's context, so these
 // pin down that it hands back as little as possible: only the answer, and
 // next to nothing when a helper found nothing.
 

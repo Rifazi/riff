@@ -3,12 +3,21 @@ import { listSessions } from '../sessions/session-store.js';
 import { listApps } from '../apps/apps-store.js';
 import { readUsageLog, type UsageLogEntry, type UsageStage } from '../sessions/usage-log.js';
 import { addUsage, ZERO_USAGE, type TokenUsage, type ToolOutputStats } from '../agents/sdk-client.js';
-import type { SessionRecord } from '../sessions/session.js';
+import type { HelperName, SessionRecord } from '../sessions/session.js';
 
 // Token usage for Settings → Dev Agents. Built from the per-turn usage log
 // (sessions/usage-log.ts). Sessions older than the log only have running
 // totals, so whatever their totals exceed the log by is dated to the
 // stage's last activity before logging began and flagged `estimated`.
+
+// One local helper's runs in the range (agents/helpers/).
+interface LocalHelperTotals {
+  calls: number;
+  tasks: number;
+  useful: number;
+  usage: TokenUsage;
+  savedTokens: number;
+}
 
 const STAGES: UsageStage[] = ['requirements', 'plan', 'coding', 'qa'];
 const RANGES = [7, 30, 90] as const;
@@ -76,10 +85,10 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
     const days = (RANGES as readonly number[]).includes(requested) ? requested : 30;
 
     const [sessions, apps, log] = await Promise.all([listSessions(), listApps(), readUsageLog()]);
-    // Delegate entries are the local helpers' free tokens: reported on their
+    // Local helper runs (agents/helpers/) cost nothing: reported on their
     // own, never in the paid totals (or the estimate, which compares the log
     // with each session's paid running totals).
-    const records = await usageRecords(sessions, log.filter((e) => !e.delegate));
+    const records = await usageRecords(sessions, log.filter((e) => !e.helper));
 
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -120,13 +129,22 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
       bySession.set(r.sessionId, s);
     }
 
-    const delegated = log.filter((e) => e.delegate && new Date(e.at) >= start);
+    const byHelper: Partial<Record<HelperName, LocalHelperTotals>> = {};
+    for (const e of log) {
+      if (!e.helper || new Date(e.at) < start) continue;
+      const h = (byHelper[e.helper.name] ??= { calls: 0, tasks: 0, useful: 0, usage: ZERO_USAGE, savedTokens: 0 });
+      h.calls += 1;
+      h.tasks += e.helper.tasks;
+      h.useful += e.helper.useful;
+      h.usage = addUsage(h.usage, e.usage);
+      h.savedTokens += e.helper.savedTokens;
+    }
+    const helpers = Object.values(byHelper);
     const local = {
-      calls: delegated.length,
-      tasks: delegated.reduce((acc, e) => acc + e.delegate!.tasks, 0),
-      useful: delegated.reduce((acc, e) => acc + e.delegate!.useful, 0),
-      usage: delegated.reduce((acc, e) => addUsage(acc, e.usage), ZERO_USAGE),
-      savedTokens: delegated.reduce((acc, e) => acc + e.delegate!.savedTokens, 0),
+      calls: helpers.reduce((acc, h) => acc + h.calls, 0),
+      savedTokens: helpers.reduce((acc, h) => acc + h.savedTokens, 0),
+      usage: helpers.reduce((acc, h) => addUsage(acc, h.usage), ZERO_USAGE),
+      byHelper,
     };
 
     const sessionById = new Map(sessions.map((s) => [s.id, s]));

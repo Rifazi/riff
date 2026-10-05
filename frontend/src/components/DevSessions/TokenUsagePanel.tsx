@@ -628,10 +628,12 @@ function ToolOutput({
   );
 }
 
-// The delegate tool's helpers run on this machine's Ollama: what they read
-// never entered the paid agents' context. Saved = what they read minus what
-// they handed back, so it's a lower bound (a read the paid agent did itself
-// would also have been re-read on each later step).
+// The agents' local helpers (harness-server agents/helpers/) run on this
+// machine, so what they did never entered the paid agents' context. The
+// research helper's saving is what it read minus what it handed back: a
+// lower bound, since a read the paid agent did itself would also have been
+// re-read on each later step. The classifier's saving (the agent's own
+// reasoning) can't be measured, so it's shown as a count.
 function LocalSavings({
   local,
   paidTotal,
@@ -639,7 +641,8 @@ function LocalSavings({
   local: NonNullable<UsageReport["local"]>;
   paidTotal: number;
 }) {
-  const localTotal = sum(local.usage);
+  const research = local.byHelper.research;
+  const classifier = local.byHelper.classifier;
   return (
     <div className="rounded-lg border border-success/40 bg-success/10 p-4">
       <div className="text-xs font-medium text-muted-foreground">
@@ -649,18 +652,33 @@ function LocalSavings({
         <span className="text-2xl font-semibold text-foreground tabular-nums">
           ≈{compact(local.savedTokens)} paid tokens
         </span>
-        {paidTotal > 0 && (
+        {paidTotal > 0 && local.savedTokens > 0 && (
           <span className="text-sm text-muted-foreground">
             {percent(local.savedTokens, paidTotal + local.savedTokens)} less
             than without them
           </span>
         )}
       </div>
-      <div className="text-xs text-muted-foreground mt-1">
-        {full(local.useful)} of {full(local.tasks)} delegated{" "}
-        {local.tasks === 1 ? "question" : "questions"} answered ·{" "}
-        {compact(localTotal)} local tokens, free · at least this much, since
-        files the coding agent reads itself are re-read on every later step
+      <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
+        {research && (
+          <div>
+            Research: {full(research.useful)} of {full(research.tasks)}{" "}
+            {research.tasks === 1 ? "question" : "questions"} answered · saved
+            ≈{compact(research.savedTokens)} · {compact(sum(research.usage))}{" "}
+            local tokens, free
+          </div>
+        )}
+        {classifier && (
+          <div>
+            Classifier: {full(classifier.calls)}{" "}
+            {classifier.calls === 1 ? "text" : "texts"} labelled on this
+            machine (its saving isn&apos;t measured)
+          </div>
+        )}
+        <div>
+          At least this much: files the coding agent reads itself are re-read
+          on every later step.
+        </div>
       </div>
     </div>
   );

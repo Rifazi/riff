@@ -3,8 +3,8 @@ import path from 'node:path';
 
 // The on-disk half of the classification model cache, kept free of
 // transformers.js, config and settings imports (same reason as
-// classification-core.ts) so it can be unit-tested against a temp directory
-// without downloading a model. classification.ts owns where the cache lives;
+// core.ts) so it can be unit-tested against a temp directory
+// without downloading a model. classifier.ts owns where the cache lives;
 // this module only ever touches the directory it is handed.
 
 /** On-disk state of one curated model inside the classification cache dir. */

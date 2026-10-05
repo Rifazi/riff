@@ -37,7 +37,7 @@ export interface RoleModelConfig {
   // up locally. '' = off.
   localTeamModel?: string;
   // Coding only: the Ollama model the `delegate` tool's read-only helpers run
-  // on (agents/tool-defs/delegate-tool.ts). Unset or '' = no delegate tool.
+  // on (agents/helpers/research/tool.ts). Unset or '' = no delegate tool.
   delegateModel?: string;
 }
 
@@ -79,7 +79,7 @@ export function normalizeOllamaEndpoint(endpoint: string): string {
   return endpoint.trim().replace(/\/+$/, '');
 }
 
-// The on-device classification tool (agents/classification.ts) runs
+// The on-device classification tool (agents/helpers/classifier/classifier.ts) runs
 // transformers.js's zero-shot-classification pipeline, which needs an ONNX
 // sequence-classification model trained for NLI/MNLI. These three Xenova
 // conversions are the curated choices offered in Settings → Dev Agents; the

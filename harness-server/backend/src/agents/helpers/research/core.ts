@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// The pure half of the `delegate` tool (tool-defs/delegate-tool.ts): its
+// The research helper's pure half (the `delegate` tool, see tool.ts): its
 // schema, the subagent's instructions, cleaning up what a local model says,
 // and packing the answers into as few tokens as possible for the paid agent.
 // No `ai` import, so frontend/tests/harness-server/ can test it without a

@@ -1,6 +1,6 @@
 // A single-slot, lazily-loaded cache keyed by a model id: at most one loaded
 // value is held per process, and asking for a different key swaps it. Pulled
-// out of classification.ts so the hot-swap, concurrent-load and failure
+// out of classifier.ts so the hot-swap, concurrent-load and failure
 // behavior can be unit-tested with a fake loader, instead of needing an actual
 // transformers.js pipeline (and a model download) to exercise it.
 

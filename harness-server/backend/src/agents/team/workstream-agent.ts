@@ -11,20 +11,14 @@ import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
 import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
-import { classifyTextTool } from '../tool-defs/classify-text-tool.js';
-import { classifyTextToolClaude } from '../tool-defs-claude/classify-text-tool.js';
+import { createClassifyTextTool } from '../helpers/classifier/tool.js';
+import { createClassifyTextToolClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
-import {
-  COMPACT_AT_TOKENS,
-  delegateDepsFor,
-  delegateToolEntry,
-  HOP_COUNT,
-  HOP_STEPS,
-  loadApprovedDocsForCoding,
-} from '../coding-agent.js';
-import { createDelegateToolClaude } from '../tool-defs-claude/delegate-tool.js';
-import { DELEGATE_NOTE } from '../delegate-core.js';
+import { COMPACT_AT_TOKENS, HOP_COUNT, HOP_STEPS, loadApprovedDocsForCoding } from '../coding-agent.js';
+import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry } from '../helpers/research/tool.js';
+import { createDelegateToolClaude } from '../helpers/research/tool-claude.js';
+import type { HelperContext } from '../helpers/helper.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
@@ -93,13 +87,18 @@ export async function runWorkstreamAgent({
   // settings.ts localTeamModel setting.
   const provider = member.localModel ? 'ollama' : roleProvider;
   const model = member.localModel ?? modelOverride ?? roleModel;
-  const delegateDeps = delegateDepsFor(
-    session,
-    app,
-    provider === 'ollama' ? null : delegateModel,
-    (entry) => appendTeamTranscriptEntry(session.id, member.id, entry),
-    worktreePath,
-  );
+  // Local helpers (helpers/) report into this member's own chat.
+  const helperContext: HelperContext = {
+    sessionId: session.id,
+    stage: 'coding',
+    record: (entry) => appendTeamTranscriptEntry(session.id, member.id, entry),
+  };
+  const delegateDeps = researchDeps({
+    model: provider === 'ollama' ? null : delegateModel,
+    repoRoot: worktreePath,
+    appId: app.id,
+    context: helperContext,
+  });
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
@@ -211,7 +210,7 @@ export async function runWorkstreamAgent({
       createSearchCodeToolClaude({ repoRoot: worktreePath }),
       createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
-      classifyTextToolClaude,
+      createClassifyTextToolClaude(helperContext),
       readFileToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
@@ -275,7 +274,7 @@ export async function runWorkstreamAgent({
     search_code: createSearchCodeTool({ repoRoot: worktreePath }),
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
-    classify_text: classifyTextTool,
+    classify_text: createClassifyTextTool(helperContext),
     read_file: readFileTool,
     write_file: writeFileTool,
     edit_file: editFileTool,
