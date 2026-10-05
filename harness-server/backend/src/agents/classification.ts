@@ -14,6 +14,8 @@ import {
   type ClassificationMode,
   type LabelScore,
 } from './classification-core.js';
+import { clearModelCache, modelCacheStatus, type ModelCacheStatus } from './classification-cache.js';
+import { createPipelineCache } from './pipeline-cache.js';
 
 export { DEFAULT_MULTI_LABEL_THRESHOLD, type ClassificationMode, type LabelScore } from './classification-core.js';
 
@@ -99,16 +101,7 @@ function errorText(err: unknown): string {
 // and session. Changing the model in Settings → Dev Agents doesn't restart
 // anything: the next call sees a different id here and swaps lazily.
 
-interface LoadedPipeline {
-  model: string;
-  pipe: ZeroShotPipeline;
-}
-
-let loaded: LoadedPipeline | null = null;
-/** In-flight load, so concurrent first calls share one download instead of racing. */
-let loading: { model: string; promise: Promise<LoadedPipeline> } | null = null;
-
-async function loadPipeline(model: string): Promise<LoadedPipeline> {
+async function loadPipeline(model: string): Promise<ZeroShotPipeline> {
   applyCacheEnv();
   try {
     await fs.mkdir(CLASSIFICATION_CACHE_DIR, { recursive: true });
@@ -118,8 +111,7 @@ async function loadPipeline(model: string): Promise<LoadedPipeline> {
     );
   }
   try {
-    const pipe = (await pipeline('zero-shot-classification', model)) as unknown as ZeroShotPipeline;
-    return { model, pipe };
+    return (await pipeline('zero-shot-classification', model)) as unknown as ZeroShotPipeline;
   } catch (err) {
     throw new Error(
       `Could not load the on-device classification model "${model}". ` +
@@ -130,31 +122,13 @@ async function loadPipeline(model: string): Promise<LoadedPipeline> {
   }
 }
 
-async function disposePipeline(entry: LoadedPipeline): Promise<void> {
-  try {
-    await entry.pipe.dispose?.();
-  } catch {
-    // Freeing the ONNX session is best-effort — a failure here must not break
-    // the call that triggered the swap.
-  }
-}
-
-async function getPipeline(model: string): Promise<ZeroShotPipeline> {
-  if (loaded?.model === model) return loaded.pipe;
-  if (loading?.model === model) return (await loading.promise).pipe;
-
-  const promise = loadPipeline(model);
-  loading = { model, promise };
-  try {
-    const next = await promise;
-    const previous = loaded;
-    loaded = next;
-    if (previous && previous.model !== next.model) await disposePipeline(previous);
-    return next.pipe;
-  } finally {
-    if (loading?.promise === promise) loading = null;
-  }
-}
+// One slot per process, swapped lazily when the selected model changes, so
+// Settings → Dev Agents needs no server restart. The swap, shared-load and
+// load-failure behavior is unit-tested in pipeline-cache.ts's suite.
+const pipelineCache = createPipelineCache<ZeroShotPipeline>({
+  load: loadPipeline,
+  dispose: (pipe) => pipe.dispose?.(),
+});
 
 async function selectedModel(): Promise<string> {
   try {
@@ -177,7 +151,7 @@ export async function classifyText(params: ClassifyTextParams): Promise<Classify
   const threshold = normalizeThreshold(params.threshold, mode);
 
   const model = await selectedModel();
-  const pipe = await getPipeline(model);
+  const pipe = await pipelineCache.get(model);
 
   let output: { labels: string[]; scores: number[] };
   try {
@@ -198,48 +172,16 @@ export async function classifyText(params: ClassifyTextParams): Promise<Classify
 
 // --- cache management --------------------------------------------------------
 
-export interface ClassificationModelCacheStatus {
-  id: string;
-  downloaded: boolean;
-  sizeBytes: number;
-}
-
-async function directorySize(dir: string): Promise<number> {
-  let total = 0;
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return 0; // missing (or unreadable) means nothing cached
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      total += await directorySize(full);
-    } else if (entry.isFile()) {
-      try {
-        total += (await fs.stat(full)).size;
-      } catch {
-        // A file that vanished mid-walk just doesn't count.
-      }
-    }
-  }
-  return total;
-}
+export type ClassificationModelCacheStatus = ModelCacheStatus;
 
 /**
  * On-disk cache state for each curated model, for Settings → Dev Agents.
  * Read fresh on demand rather than cached, same as localModelStatus().
  */
 export async function classificationCacheStatus(): Promise<ClassificationModelCacheStatus[]> {
-  return Promise.all(
-    CLASSIFICATION_MODELS.map(async (option) => {
-      // Model ids contain a "/" — split so this builds a real nested path on
-      // Windows as well as POSIX.
-      const dir = path.join(CLASSIFICATION_CACHE_DIR, ...option.id.split('/'));
-      const sizeBytes = await directorySize(dir);
-      return { id: option.id, downloaded: sizeBytes > 0, sizeBytes };
-    }),
+  return modelCacheStatus(
+    CLASSIFICATION_CACHE_DIR,
+    CLASSIFICATION_MODELS.map((option) => option.id),
   );
 }
 
@@ -249,14 +191,10 @@ export async function classificationCacheStatus(): Promise<ClassificationModelCa
  * whichever model is selected at that point.
  */
 export async function clearClassificationCache(): Promise<void> {
-  const previous = loaded;
-  loaded = null;
-  loading = null;
-  if (previous) await disposePipeline(previous);
+  await pipelineCache.reset();
 
   try {
-    await fs.rm(CLASSIFICATION_CACHE_DIR, { recursive: true, force: true });
-    await fs.mkdir(CLASSIFICATION_CACHE_DIR, { recursive: true });
+    await clearModelCache(CLASSIFICATION_CACHE_DIR);
   } catch (err) {
     throw new Error(`Could not clear the classification model cache at ${CLASSIFICATION_CACHE_DIR}: ${errorText(err)}`);
   }
