@@ -1,68 +1,75 @@
-import { readdirSync, readFileSync } from 'fs';
-import { join } from 'path';
-
 import { describe, expect, test } from 'bun:test';
+
+import { normalizeMode } from '../../../harness-server/backend/src/agents/classification-core';
+import { classifyTextSchema } from '../../../harness-server/backend/src/agents/tool-defs/classify-text-schema';
 
 // Guards a defect that shipped once: classify_text declared
 // `mode: z.enum([...]).default('single')`, and a zod default makes the
 // argument *required* on the Claude-Agent-SDK/MCP path — calling the tool
 // without `mode` failed with "expected nonoptional, received undefined",
 // contradicting the tool's own description and docs. Optional tool parameters
-// must be `.optional()`, with the default applied in the execute path.
+// must be `.optional()`, with the default applied in the execute path
+// (classifyText()'s `params.mode ?? 'single'`, i.e. normalizeMode below).
 //
-// Source-scanned rather than imported because the tool defs pull in `ai` and
-// `zod`, which live in the agent server's node_modules, not the frontend's.
-const TOOL_DEFS_DIR = join(
-  import.meta.dir,
-  '..',
-  '..',
-  '..',
-  'harness-server',
-  'backend',
-  'src',
-  'agents',
-  'tool-defs',
-);
+// These assert on the real schema object, not on the source text, so they
+// survive reordering/renaming and say nothing about what other tools may do.
+const call = (input: unknown) => classifyTextSchema.safeParse(input);
 
-/** Comments discuss `.default()` on purpose; only real code should be matched. */
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
-}
+const minimal = { text: 'The totals round to the wrong number of decimals.', labels: ['bug report', 'question'] };
 
-const toolDefSources = readdirSync(TOOL_DEFS_DIR)
-  .filter((name) => name.endsWith('.ts'))
-  .map((name) => ({ name, source: stripComments(readFileSync(join(TOOL_DEFS_DIR, name), 'utf8')) }));
+describe('classify_text schema: optional parameters', () => {
+  test('a call that omits mode and threshold is accepted', () => {
+    const result = call(minimal);
 
-describe('tool-defs zod schemas', () => {
-  test('there are tool defs to check', () => {
-    expect(toolDefSources.length).toBeGreaterThan(0);
+    expect(result.success).toBe(true);
   });
 
-  test('no tool parameter uses .default() — it makes the parameter required', () => {
-    const offenders = toolDefSources.filter(({ source }) => /\.default\(/.test(source)).map(({ name }) => name);
+  test('omitting mode leaves it undefined rather than parsing to a default', () => {
+    // A zod `.default('single')` would both populate this and make the
+    // parameter required over MCP — undefined here is the point.
+    const result = call(minimal);
 
-    expect(offenders).toEqual([]);
+    expect(result.success && result.data.mode).toBeUndefined();
+    expect(result.success && 'mode' in result.data).toBe(false);
+  });
+
+  test('the single-mode default is applied by the execute path instead', () => {
+    expect(normalizeMode(undefined)).toBe('single');
+  });
+
+  test('omitting threshold leaves it undefined rather than parsing to a default', () => {
+    const result = call(minimal);
+
+    expect(result.success && result.data.threshold).toBeUndefined();
+    expect(result.success && 'threshold' in result.data).toBe(false);
   });
 });
 
-describe('classify_text schema', () => {
-  const source = toolDefSources.find(({ name }) => name === 'classify-text-tool.ts')?.source ?? '';
-
-  test('the tool def exists', () => {
-    expect(source).not.toBe('');
+describe('classify_text schema: accepted and rejected input', () => {
+  test('both modes are accepted when given explicitly', () => {
+    expect(call({ ...minimal, mode: 'single' }).success).toBe(true);
+    expect(call({ ...minimal, mode: 'multi' }).success).toBe(true);
   });
 
-  test('mode is optional, so a call that omits it defaults to single', () => {
-    const mode = source.slice(source.indexOf('mode: z'), source.indexOf('threshold: z'));
-
-    expect(mode).toContain(".enum(['single', 'multi'])");
-    expect(mode).toContain('.optional()');
-    expect(mode).not.toContain('.default(');
+  test('an unknown mode is rejected', () => {
+    expect(call({ ...minimal, mode: 'maybe' }).success).toBe(false);
   });
 
-  test('threshold is optional', () => {
-    const threshold = source.slice(source.indexOf('threshold: z'));
+  test('text and labels are required', () => {
+    expect(call({ labels: minimal.labels }).success).toBe(false);
+    expect(call({ text: minimal.text }).success).toBe(false);
+  });
 
-    expect(threshold).toContain('.optional()');
+  test('fewer than two labels is rejected', () => {
+    expect(call({ ...minimal, labels: ['bug report'] }).success).toBe(false);
+    expect(call({ ...minimal, labels: [] }).success).toBe(false);
+  });
+
+  test('a threshold inside 0-1 is accepted and one outside it is rejected', () => {
+    expect(call({ ...minimal, mode: 'multi', threshold: 0 }).success).toBe(true);
+    expect(call({ ...minimal, mode: 'multi', threshold: 0.75 }).success).toBe(true);
+    expect(call({ ...minimal, mode: 'multi', threshold: 1 }).success).toBe(true);
+    expect(call({ ...minimal, mode: 'multi', threshold: 1.5 }).success).toBe(false);
+    expect(call({ ...minimal, mode: 'multi', threshold: -0.1 }).success).toBe(false);
   });
 });
