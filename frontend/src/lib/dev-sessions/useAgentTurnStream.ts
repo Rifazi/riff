@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { postSSE } from './sse-client';
 import type { AgentEvent, AttachmentInput, TranscriptEntry } from './types';
@@ -35,6 +35,8 @@ export function useAgentTurnStream() {
   const [runningTool, setRunningTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  // Each call's tool, so a result can be shown for its tool (the delegate card).
+  const toolNames = useRef(new Map<string, string>());
 
   const consume = (onEvent?: (event: AgentEvent) => void) => (event: AgentEvent) => {
     onEvent?.(event);
@@ -42,6 +44,7 @@ export function useAgentTurnStream() {
       setOverlay((prev) => [...prev, { id: nextId(), role: 'assistant', text: event.text, timestamp: new Date().toISOString() }]);
     } else if (event.type === 'tool_call') {
       setRunningTool(event.name);
+      toolNames.current.set(event.toolCallId, event.name);
       setOverlay((prev) => [
         ...prev,
         { id: nextId(), role: 'tool_call', toolName: event.name, toolInput: event.input, timestamp: new Date().toISOString() },
@@ -50,7 +53,14 @@ export function useAgentTurnStream() {
       setRunningTool(null);
       setOverlay((prev) => [
         ...prev,
-        { id: nextId(), role: 'tool_result', toolResult: event.content, isError: event.isError, timestamp: new Date().toISOString() },
+        {
+          id: nextId(),
+          role: 'tool_result',
+          toolName: toolNames.current.get(event.toolCallId),
+          toolResult: event.content,
+          isError: event.isError,
+          timestamp: new Date().toISOString(),
+        },
       ]);
     } else if (event.type === 'coordinator_decision') {
       setOverlay((prev) => [

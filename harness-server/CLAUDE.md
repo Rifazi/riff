@@ -660,6 +660,59 @@ below) — never inside the target repo.
    handoff notes and delivery text; the coordinator still tries it first
    even when its fallback provider is ollama.
 
+28. User was running out of context on paid agents and asked for local
+   subagents that do small tasks in parallel and return only what the main
+   coding agent needs. The goal is saving tokens: if a helper finds nothing
+   useful, the paid agent should pay almost nothing for it. The coding agent
+   and team members got `delegate` (`tool-defs/delegate-tool.ts`, Claude
+   wrapper in `tool-defs-claude/`). It's only registered when
+   `models.coding.delegateModel` names an Ollama model and the turn isn't
+   already on Ollama. An AI-SDK history that still has delegate calls keeps a
+   refusing stub so replays stay valid (`delegateToolEntry`, like
+   `fetch_url` in step 17).
+   - **Helpers**: each task runs `runAgentTurn` on Ollama with an empty
+     history and its own read-only tools: `search_code`, `search_docs`,
+     `read_doc`, `outline_file`, and `read_file` with 150-line pages and its
+     own repeat-read cache. A helper gets 12 steps, no continuation and
+     a 3-minute `abortSignal` (new optional `RunAgentTurnParams.abortSignal`).
+     Two run at a time (`DELEGATE_PARALLEL`), since one GPU serves them all.
+     Their events never reach the paid agent's stream.
+   - **Returning less** (`agents/delegate-core.ts`, pure, tested by
+     `frontend/tests/harness-server/delegate-core.test.ts`): the helper
+     prompt asks for path:line facts, under 150 words, and `NOTHING_FOUND`
+     instead of a guess. `cleanAnswer` drops `<think>` blocks, preamble and
+     sign-off lines, treats NOTHING_FOUND (bare, in markdown, or explained)
+     as nothing, and cuts at 1,200 chars. `formatResults` returns one answer
+     bare, numbers several, and folds every empty task into "Nothing found:
+     2, 3." and every failure into one "Failed, do yourself" line. Running
+     out of steps counts as nothing found.
+   - **Savings**: `savedTokens` = characters the helpers' tools returned
+     minus the text handed back, ÷ 4. It's a lower bound, since a result in
+     the paid context is also re-read on every later step.
+     `addDelegateUsage` appends a `usage-log.jsonl` entry with
+     `delegate: { tasks, useful, savedTokens }` and the helpers' local
+     usage, and doesn't touch `session.usage`. `GET /api/usage` leaves
+     those entries out of every paid total (and out of the pre-log
+     estimate) and returns them as `local`. The Token usage panel opens with
+     "Saved by local helpers".
+   - The guidance is in the tool description and in `DELEGATE_NOTE`, which
+     is appended to the system prompt after any prompt override.
+   - **In the chat**: each run also records a system transcript entry
+     carrying `delegate: DelegateRunStats` (model, tasks, useful,
+     read/returned chars, saved tokens), written just before the tool
+     result. `tool_result` entries now carry `toolName` (persisted and in
+     the live overlays), so `ChatPane` shows a delegate call as "Asked local
+     helpers N questions" with the list. The result card shows exactly what
+     the paid agent got back, with that run's stats line folded in. The
+     stats entry itself isn't rendered on its own.
+   - Ollama's context window: if helpers come back empty on large files,
+     raise it (`OLLAMA_CONTEXT_LENGTH`).
+   - Live-checked on qwen2.5:7b-instruct against this backend with 3
+     questions in 18s: 2 answered with path:line, 1 "Nothing found: 3." The
+     helpers read 4.9k chars and 435 came back. A trailing `NOTHING_FOUND`
+     after a real answer is stripped. It hasn't run inside a real coding
+     session yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

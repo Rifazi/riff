@@ -18,6 +18,15 @@ export interface UsageLogEntry {
   usage: TokenUsage;
   // Absent on entries from before tool output was tracked.
   toolOutput?: ToolOutputStats;
+  // Set on a `delegate` call's entry (agents/tool-defs/delegate-tool.ts):
+  // `usage` is then the local helpers' tokens, which cost nothing and are
+  // kept out of the paid totals and of the session's own `usage`.
+  delegate?: {
+    tasks: number;
+    useful: number;
+    // Paid-context tokens the call avoided.
+    savedTokens: number;
+  };
 }
 
 const LOG_PATH = path.join(config.stateDir, 'usage-log.jsonl');

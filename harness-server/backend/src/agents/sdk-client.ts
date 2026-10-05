@@ -106,6 +106,8 @@ export type AgentEvent =
 // replaying it. Capped so a confused agent can't spin indefinitely; worst
 // case per human message becomes (1 + this) * the per-call budget.
 const MAX_CONTINUATION_HOPS = 3;
+// How runAgentTurn's result text starts when the turn ran out of hops.
+export const OUT_OF_STEPS = 'This step needed more tool calls than';
 const CONTINUATION_PROMPT =
   "You were stopped only because this turn reached its tool-call budget — you have NOT finished and this is " +
   "not an error to report. Continue exactly where you left off: do not restate progress, do not repeat " +
@@ -143,6 +145,8 @@ export interface RunAgentTurnParams {
   prompt: string;
   onEvent: (event: AgentEvent) => void;
   compaction?: CompactionOptions;
+  // Cancels the model calls, e.g. a delegate helper's time limit.
+  abortSignal?: AbortSignal;
 }
 
 export interface RunAgentTurnResult {
@@ -210,6 +214,7 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
       tools,
       messages,
       stopWhen: stepCountIs(steps),
+      abortSignal: params.abortSignal,
     });
 
     for await (const part of result.stream) {
@@ -319,7 +324,7 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   if (result.finishReason === 'tool-calls' && hop >= maxHops) {
     return {
       updatedHistory: result.updatedHistory,
-      resultText: `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
+      resultText: `${OUT_OF_STEPS} ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
       isError: true,
       usage,
       contextTokens: result.contextTokens,

@@ -47,6 +47,9 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         if (roleModelConfig?.localTeamModel !== undefined && typeof roleModelConfig.localTeamModel !== 'string') {
           return reply.code(400).send({ error: 'localTeamModel must be a string' });
         }
+        if (roleModelConfig?.delegateModel !== undefined && typeof roleModelConfig.delegateModel !== 'string') {
+          return reply.code(400).send({ error: 'delegateModel must be a string' });
+        }
       }
     }
     if (body.classification?.model !== undefined) {

@@ -637,6 +637,76 @@ function LocalTeamModelRow({
   );
 }
 
+/**
+ * Coding only: the Ollama model the delegate tool's read-only helpers run on.
+ * The coding agent hands them exploration questions and gets back only the
+ * answers, so the files they read never enter its paid context.
+ */
+function DelegateModelRow({
+  value,
+  ollamaModels,
+  onSave,
+  saving,
+}: {
+  value: RoleModelConfig;
+  ollamaModels: string[];
+  onSave: (config: RoleModelConfig) => void;
+  saving: boolean;
+}) {
+  const current = value.delegateModel ?? '';
+  const enabled = current !== '';
+  const [model, setModel] = useState(current);
+
+  useEffect(() => setModel(current), [current]);
+
+  const dirty = model.trim() !== current;
+
+  return (
+    <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
+      <div>
+        <div className="font-medium text-foreground">Local helpers for exploration</div>
+        <div className="text-xs text-muted-foreground">
+          The coding agent hands read-only questions (where is X, who calls Y) to helpers on this Ollama model, which
+          read the files for free and return only the answer. Needs a model that can call tools, e.g. qwen3:8b or
+          larger. Savings show under Token usage.
+        </div>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Switch
+          checked={enabled}
+          disabled={saving || (!enabled && !model.trim() && ollamaModels.length === 0)}
+          onCheckedChange={(on) => {
+            const next = on ? (model.trim() || ollamaModels[0] || '') : '';
+            if (next !== current) onSave({ ...value, delegateModel: next });
+            setModel(next);
+          }}
+          aria-label="Let the coding agent delegate exploration to local helpers"
+        />
+        <Input
+          list="dev-agent-delegate-models"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={enabled ? 'Ollama model ID' : 'Pick a tool-capable Ollama model to enable'}
+          className="flex-1 font-mono text-xs"
+        />
+        <datalist id="dev-agent-delegate-models">
+          {ollamaModels.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        <Button
+          size="sm"
+          className="h-9"
+          disabled={!enabled || !dirty || !model.trim() || saving}
+          onClick={() => onSave({ ...value, delegateModel: model.trim() })}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** Coordinator only: decide on Riff's built-in local model first, falling back to the coordinator's model. */
 function LocalCoordinatorRow({
   value,
@@ -756,6 +826,12 @@ export function DevAgentSettings() {
               <LocalTeamModelRow
                 value={settings.models.coding}
                 ollamaModels={ollamaModels?.models.map((m) => m.name) ?? []}
+                saving={saveModelMutation.isPending}
+                onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
+              />
+              <DelegateModelRow
+                value={settings.models.coding}
+                ollamaModels={ollamaModels?.models.filter((m) => m.tools).map((m) => m.name) ?? []}
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />

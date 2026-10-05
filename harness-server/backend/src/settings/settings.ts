@@ -36,6 +36,9 @@ export interface RoleModelConfig {
   // `model`, saving cloud tokens on work Jack judges simple enough to spin
   // up locally. '' = off.
   localTeamModel?: string;
+  // Coding only: the Ollama model the `delegate` tool's read-only helpers run
+  // on (agents/tool-defs/delegate-tool.ts). Unset or '' = no delegate tool.
+  delegateModel?: string;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';

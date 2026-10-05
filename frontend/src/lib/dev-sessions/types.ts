@@ -22,6 +22,19 @@ export interface TranscriptEntry {
   toolResult?: unknown;
   isError?: boolean;
   timestamp: string;
+  // A system entry recording one `delegate` call: what its local helpers
+  // read, handed back and saved (agents/tool-defs/delegate-tool.ts).
+  delegate?: DelegateRunStats;
+}
+
+export interface DelegateRunStats {
+  model: string;
+  tasks: number;
+  useful: number;
+  readChars: number;
+  returnedChars: number;
+  savedTokens: number;
+  localTokens: number;
 }
 
 /** A file staged in the chat composer, ready to send — base64, no `data:` prefix. */
@@ -379,6 +392,8 @@ export interface RoleModelConfig {
   // Coding only: when non-empty, Jack's automatic solo step turns AND every
   // workstream team member run on this Ollama model. '' = off.
   localTeamModel?: string;
+  // Coding only: the Ollama model the delegate tool's read-only helpers run on. ''/unset = off.
+  delegateModel?: string;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
@@ -493,6 +508,15 @@ export interface UsageReport {
     sessions: number;
   };
   daily: { date: string; byStage: Record<UsageStage, number>; estimated: number }[];
+  // The delegate tool's local helpers: free tokens, kept out of `totals`,
+  // and the paid-context tokens they saved. Absent from older servers.
+  local?: {
+    calls: number;
+    tasks: number;
+    useful: number;
+    usage: TokenUsage;
+    savedTokens: number;
+  };
   // Size of the tool results agents got back, per tool, for turns logged
   // since this was tracked. Absent from older servers.
   toolOutput?: { tool: string; calls: number; chars: number }[];

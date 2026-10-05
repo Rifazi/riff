@@ -41,6 +41,19 @@ export interface TranscriptEntry {
   toolResult?: unknown;
   isError?: boolean;
   timestamp: string;
+  // A system entry recording one `delegate` call: what its local helpers
+  // read, handed back and saved (agents/tool-defs/delegate-tool.ts).
+  delegate?: DelegateRunStats;
+}
+
+export interface DelegateRunStats {
+  model: string;
+  tasks: number;
+  useful: number;
+  readChars: number;
+  returnedChars: number;
+  savedTokens: number;
+  localTokens: number;
 }
 
 // The Riff meeting a session was started from, when it was created from a

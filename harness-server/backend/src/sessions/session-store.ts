@@ -242,6 +242,16 @@ export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsa
   );
 }
 
+/** A `delegate` call's local usage and savings: logged, never added to the session's paid totals. */
+export async function addDelegateUsage(
+  id: string,
+  stage: StageKey,
+  report: { tasks: number; useful: number; usage: TokenUsage; savedTokens: number },
+): Promise<void> {
+  const { tasks, useful, usage, savedTokens } = report;
+  await appendUsageLog({ at: new Date().toISOString(), sessionId: id, stage, usage, delegate: { tasks, useful, savedTokens } });
+}
+
 export async function appendTranscriptEntry(
   id: string,
   stage: StageKey,

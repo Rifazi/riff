@@ -11,8 +11,9 @@ import {
   setHistory,
   updateSession,
   addStageUsage,
+  addDelegateUsage,
 } from '../sessions/session-store.js';
-import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
+import type { CodingTeamKind, DelegateRunStats, SessionRecord, TranscriptEntry } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
@@ -51,6 +52,9 @@ import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
+import { createDelegateTool, type DelegateDeps } from './tool-defs/delegate-tool.js';
+import { createDelegateToolClaude } from './tool-defs-claude/delegate-tool.js';
+import { DELEGATE_NOTE, delegateStatsLine } from './delegate-core.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TOOL_NAMES = [
@@ -129,6 +133,11 @@ export async function runCodingAgentTurn(
   );
   const provider = usingLocalSolo ? 'ollama' : roleConfig.provider;
   const model = usingLocalSolo ? localTeamModel! : roleConfig.model;
+  // The delegate tool's local helpers (tool-defs/delegate-tool.ts); pointless
+  // when this turn already runs on Ollama.
+  const delegateDeps = delegateDepsFor(session, app, provider === 'ollama' ? null : roleConfig.delegateModel, (entry) =>
+    appendTranscriptEntry(session.id, 'coding', entry),
+  );
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
   const teamKind: CodingTeamKind = options.qaFix
@@ -193,7 +202,7 @@ export async function runCodingAgentTurn(
   const basePrompt = override ?? promptTemplate;
   const isFirstTurn = !hasContext || freshReason !== null;
 
-  let systemPrompt = basePrompt;
+  let systemPrompt = basePrompt + (delegateDeps ? DELEGATE_NOTE : '');
   const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
@@ -250,10 +259,13 @@ export async function runCodingAgentTurn(
   ]);
   let contextTokens = 0;
 
+  // Each result's tool, so the chat can show a delegate result as its own card.
+  const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
     contextLog.record(event);
     onEvent(event);
-    void persistEvent(session.id, event);
+    if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
+    void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
   const compaction: CompactionOptions = {
@@ -282,6 +294,7 @@ export async function runCodingAgentTurn(
         prompt: handoff,
         systemPrompt:
           basePrompt +
+          (delegateDeps ? DELEGATE_NOTE : '') +
           themeBriefingFor(app.repoRoot, 'coding') +
           (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
@@ -389,6 +402,7 @@ export async function runCodingAgentTurn(
             runCheckedCommandToolClaude,
             createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
+            ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
           ],
         });
 
@@ -399,7 +413,7 @@ export async function runCodingAgentTurn(
       } = await runClaudeAgentTurn({
         systemPrompt,
         createMcpServer,
-        toolNames: TOOL_NAMES,
+        toolNames: delegateDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
         model: turnModel,
         resumeSessionId: session.claudeSessionIds.coding,
         prompt: turnPrompt,
@@ -454,6 +468,7 @@ export async function runCodingAgentTurn(
         run_checked_command: runCheckedCommandTool,
         run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
+        ...delegateToolEntry(delegateDeps, session.histories.coding),
       };
 
       const {
@@ -478,6 +493,53 @@ export async function runCodingAgentTurn(
       return { isError };
     }
   }
+}
+
+/**
+ * The delegate tool's deps, or null when no helper model is set. Each run
+ * is logged for the Token usage panel and recorded in the chat (`record`)
+ * so the human sees what the helpers did and saved.
+ */
+export function delegateDepsFor(
+  session: SessionRecord,
+  app: { id: string; repoRoot: string },
+  model: string | null | undefined,
+  record: (entry: Omit<TranscriptEntry, 'id' | 'timestamp'>) => Promise<unknown>,
+  repoRoot = app.repoRoot,
+): DelegateDeps | null {
+  const trimmed = model?.trim();
+  if (!trimmed) return null;
+  return {
+    repoRoot,
+    appId: app.id,
+    sessionId: session.id,
+    model: trimmed,
+    onReport: (report) => {
+      void addDelegateUsage(session.id, 'coding', report);
+      const { usage, ...rest } = report;
+      const stats: DelegateRunStats = { model: trimmed, ...rest, localTokens: usage.input + usage.output };
+      void record({ role: 'system', text: delegateStatsLine(stats), delegate: stats });
+    },
+  };
+}
+
+/**
+ * The AI-SDK `delegate` entry. Also kept, refusing, while a replayed history
+ * still has calls to it after it was turned off, so that history stays valid.
+ */
+export function delegateToolEntry(deps: DelegateDeps | null, history: unknown[]): ToolSet {
+  if (deps) return { delegate: createDelegateTool(deps) };
+  if (!JSON.stringify(history).includes('"toolName":"delegate"')) return {};
+  return {
+    delegate: createDelegateTool({
+      repoRoot: '',
+      appId: '',
+      model: '',
+      runHelper: async () => {
+        throw new Error('the local helpers are turned off in Settings');
+      },
+    }),
+  };
 }
 
 /**
@@ -621,7 +683,7 @@ export function suggestedBranchName(session: SessionRecord): string {
   return `${key.replace(/\s+/g, '_')}_${titleSlug}`;
 }
 
-async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {
+async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
   if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'coding', { role: 'assistant', text: event.text });
@@ -634,6 +696,7 @@ async function persistEvent(sessionId: string, event: AgentEvent): Promise<void>
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'coding', {
       role: 'tool_result',
+      toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,
     });

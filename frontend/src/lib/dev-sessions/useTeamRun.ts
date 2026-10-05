@@ -33,6 +33,8 @@ export function useTeamRun() {
     setOverlays({});
     setRunningTools({});
     try {
+      // Each call's tool, so a result can be shown for its tool (the delegate card).
+      const toolNames = new Map<string, string>();
       await postSSE<TeamEvent>(`/api/sessions/${sessionId}/coding/team/run`, {}, (e) => {
         if (e.type === 'error') {
           setError(e.message);
@@ -47,10 +49,16 @@ export function useTeamRun() {
           if (event.type === 'assistant_text') push(memberId, { role: 'assistant', text: event.text });
           else if (event.type === 'tool_call') {
             setRunningTools((prev) => ({ ...prev, [memberId]: event.name }));
+            toolNames.set(event.toolCallId, event.name);
             push(memberId, { role: 'tool_call', toolName: event.name, toolInput: event.input });
           } else if (event.type === 'tool_result') {
             setRunningTools((prev) => ({ ...prev, [memberId]: null }));
-            push(memberId, { role: 'tool_result', toolResult: event.content, isError: event.isError });
+            push(memberId, {
+              role: 'tool_result',
+              toolName: toolNames.get(event.toolCallId),
+              toolResult: event.content,
+              isError: event.isError,
+            });
             // Checklist ticks, commits and the diff land as tools finish.
             onChange();
           } else if (event.type === 'error') {

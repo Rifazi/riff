@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { listSessions } from '../sessions/session-store.js';
 import { listApps } from '../apps/apps-store.js';
-import { readUsageLog, type UsageStage } from '../sessions/usage-log.js';
+import { readUsageLog, type UsageLogEntry, type UsageStage } from '../sessions/usage-log.js';
 import { addUsage, ZERO_USAGE, type TokenUsage, type ToolOutputStats } from '../agents/sdk-client.js';
 import type { SessionRecord } from '../sessions/session.js';
 
@@ -48,8 +48,7 @@ function localDay(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-async function usageRecords(sessions: SessionRecord[]): Promise<UsageRecord[]> {
-  const log = await readUsageLog();
+async function usageRecords(sessions: SessionRecord[], log: UsageLogEntry[]): Promise<UsageRecord[]> {
   const records: UsageRecord[] = log.map((e) => ({ ...e, estimated: false }));
 
   for (const session of sessions) {
@@ -76,8 +75,11 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
     const requested = Number(request.query.days);
     const days = (RANGES as readonly number[]).includes(requested) ? requested : 30;
 
-    const [sessions, apps] = await Promise.all([listSessions(), listApps()]);
-    const records = await usageRecords(sessions);
+    const [sessions, apps, log] = await Promise.all([listSessions(), listApps(), readUsageLog()]);
+    // Delegate entries are the local helpers' free tokens: reported on their
+    // own, never in the paid totals (or the estimate, which compares the log
+    // with each session's paid running totals).
+    const records = await usageRecords(sessions, log.filter((e) => !e.delegate));
 
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -118,15 +120,24 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
       bySession.set(r.sessionId, s);
     }
 
+    const delegated = log.filter((e) => e.delegate && new Date(e.at) >= start);
+    const local = {
+      calls: delegated.length,
+      tasks: delegated.reduce((acc, e) => acc + e.delegate!.tasks, 0),
+      useful: delegated.reduce((acc, e) => acc + e.delegate!.useful, 0),
+      usage: delegated.reduce((acc, e) => addUsage(acc, e.usage), ZERO_USAGE),
+      savedTokens: delegated.reduce((acc, e) => acc + e.delegate!.savedTokens, 0),
+    };
+
     const sessionById = new Map(sessions.map((s) => [s.id, s]));
     const appName = new Map(apps.map((a) => [a.id, a.name]));
-    const log = records.filter((r) => !r.estimated);
+    const logged = records.filter((r) => !r.estimated);
 
     return {
       days,
       since: start.toISOString(),
       // When per-turn logging began; earlier usage is estimated.
-      trackedSince: log.reduce<string | null>((min, r) => (!min || r.at < min ? r.at : min), null),
+      trackedSince: logged.reduce<string | null>((min, r) => (!min || r.at < min ? r.at : min), null),
       totals: {
         usage: STAGES.reduce((acc, s) => addUsage(acc, byStage[s]), ZERO_USAGE),
         byStage,
@@ -134,6 +145,7 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
         sessions: bySession.size,
       },
       daily: [...daily.values()],
+      local,
       toolOutput: [...byTool.entries()].map(([tool, s]) => ({ tool, ...s })).sort((a, b) => b.chars - a.chars),
       sessions: [...bySession.entries()]
         .map(([id, s]) => {

@@ -15,7 +15,16 @@ import { classifyTextTool } from '../tool-defs/classify-text-tool.js';
 import { classifyTextToolClaude } from '../tool-defs-claude/classify-text-tool.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
-import { COMPACT_AT_TOKENS, HOP_COUNT, HOP_STEPS, loadApprovedDocsForCoding } from '../coding-agent.js';
+import {
+  COMPACT_AT_TOKENS,
+  delegateDepsFor,
+  delegateToolEntry,
+  HOP_COUNT,
+  HOP_STEPS,
+  loadApprovedDocsForCoding,
+} from '../coding-agent.js';
+import { createDelegateToolClaude } from '../tool-defs-claude/delegate-tool.js';
+import { DELEGATE_NOTE } from '../delegate-core.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
@@ -78,12 +87,19 @@ export async function runWorkstreamAgent({
   model: modelOverride,
   prompt: promptOverride,
 }: RunWorkstreamParams): Promise<void> {
-  const { provider: roleProvider, model: roleModel } = await getRoleModelConfig('coding');
+  const { provider: roleProvider, model: roleModel, delegateModel } = await getRoleModelConfig('coding');
   // When the member carries a localModel, spin it up on Ollama instead of the
   // cloud coding model — the lead set this via assign_team based on the
   // settings.ts localTeamModel setting.
   const provider = member.localModel ? 'ollama' : roleProvider;
   const model = member.localModel ?? modelOverride ?? roleModel;
+  const delegateDeps = delegateDepsFor(
+    session,
+    app,
+    provider === 'ollama' ? null : delegateModel,
+    (entry) => appendTeamTranscriptEntry(session.id, member.id, entry),
+    worktreePath,
+  );
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
@@ -114,6 +130,7 @@ export async function runWorkstreamAgent({
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
   const systemPrompt =
     base +
+    (delegateDeps ? DELEGATE_NOTE : '') +
     themeBriefingFor(worktreePath, 'coding') +
     repoInstructionsNote(worktreePath) +
     approvedDocs +
@@ -164,10 +181,13 @@ export async function runWorkstreamAgent({
     },
   };
 
+  // Each result's tool, so the chat can show a delegate result as its own card.
+  const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
     contextLog.record(event);
     onEvent(event);
-    void persistEvent(session.id, member.id, event);
+    if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
+    void persistEvent(session.id, member.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
   const scoped = { repoRoot: worktreePath, writablePaths: member.ownedPaths };
@@ -200,6 +220,7 @@ export async function runWorkstreamAgent({
       createRunPrettierToolClaude(scoped),
       createUpdateMyStepsToolClaude(steps),
       ...(ownsPackageJson(member) ? [createRunNpmInstallToolClaude({ repoRoot: worktreePath })] : []),
+      ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
     ];
     const toolNames = [
       'search_docs',
@@ -216,6 +237,7 @@ export async function runWorkstreamAgent({
       'run_prettier',
       'update_my_steps',
       ...(ownsPackageJson(member) ? ['run_npm_install'] : []),
+      ...(delegateDeps ? ['delegate'] : []),
     ];
 
     const { sdkSessionId } = await runClaudeAgentTurn({
@@ -262,6 +284,7 @@ export async function runWorkstreamAgent({
     run_prettier: createRunPrettierTool(scoped),
     update_my_steps: createUpdateMyStepsTool(steps),
     ...(ownsPackageJson(member) ? { run_npm_install: createRunNpmInstallTool({ repoRoot: worktreePath }) } : {}),
+    ...delegateToolEntry(delegateDeps, member.history),
   };
 
   const { updatedHistory } = await runAgentTurn({
@@ -281,7 +304,7 @@ export async function runWorkstreamAgent({
   });
 }
 
-async function persistEvent(sessionId: string, memberId: string, event: AgentEvent): Promise<void> {
+async function persistEvent(sessionId: string, memberId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
   if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
   if (event.type === 'assistant_text') {
     await appendTeamTranscriptEntry(sessionId, memberId, { role: 'assistant', text: event.text });
@@ -294,6 +317,7 @@ async function persistEvent(sessionId: string, memberId: string, event: AgentEve
   } else if (event.type === 'tool_result') {
     await appendTeamTranscriptEntry(sessionId, memberId, {
       role: 'tool_result',
+      toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,
     });

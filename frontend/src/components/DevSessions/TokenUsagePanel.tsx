@@ -398,6 +398,9 @@ export function TokenUsagePanel() {
         <div
           className={`space-y-8 transition-opacity ${isFetching ? "opacity-60" : ""}`}
         >
+          {data.local && data.local.calls > 0 && (
+            <LocalSavings local={data.local} paidTotal={total} />
+          )}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatTile
               label="Total tokens"
@@ -620,6 +623,44 @@ function ToolOutput({
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// The delegate tool's helpers run on this machine's Ollama: what they read
+// never entered the paid agents' context. Saved = what they read minus what
+// they handed back, so it's a lower bound (a read the paid agent did itself
+// would also have been re-read on each later step).
+function LocalSavings({
+  local,
+  paidTotal,
+}: {
+  local: NonNullable<UsageReport["local"]>;
+  paidTotal: number;
+}) {
+  const localTotal = sum(local.usage);
+  return (
+    <div className="rounded-lg border border-success/40 bg-success/10 p-4">
+      <div className="text-xs font-medium text-muted-foreground">
+        Saved by local helpers
+      </div>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-1">
+        <span className="text-2xl font-semibold text-foreground tabular-nums">
+          ≈{compact(local.savedTokens)} paid tokens
+        </span>
+        {paidTotal > 0 && (
+          <span className="text-sm text-muted-foreground">
+            {percent(local.savedTokens, paidTotal + local.savedTokens)} less
+            than without them
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground mt-1">
+        {full(local.useful)} of {full(local.tasks)} delegated{" "}
+        {local.tasks === 1 ? "question" : "questions"} answered ·{" "}
+        {compact(localTotal)} local tokens, free · at least this much, since
+        files the coding agent reads itself are re-read on every later step
       </div>
     </div>
   );

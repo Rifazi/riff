@@ -3,11 +3,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
+import { Check, ChevronRight, Paperclip, Send, Users, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import type { AttachmentInput, TranscriptEntry } from '@/lib/dev-sessions/types';
+import type { AttachmentInput, DelegateRunStats, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona } from '@/lib/dev-sessions/agents';
 import { ACCEPTED_ATTACHMENT_TYPES, readAttachments } from '@/lib/dev-sessions/attachments';
 
@@ -41,6 +41,9 @@ const ASK_QUESTION_TOOL = 'ask_question';
 // batched into the same "answer everything asked since the last message"
 // flow below.
 const QUESTION_TOOL_NAMES = new Set([ASK_MULTIPLE_CHOICE_TOOL, ASK_QUESTION_TOOL]);
+// The coding agent's local helpers (harness-server tool-defs/delegate-tool.ts):
+// shown as their own card, with the run's stats entry folded into it.
+const DELEGATE_TOOL = 'delegate';
 
 function stripToolPrefix(name: string | undefined): string {
   return (name ?? '').replace(/^mcp__[^_]+(-[^_]+)?__/, '');
@@ -138,6 +141,82 @@ function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
       </summary>
       {open && <ToolCallBody entry={entry} />}
     </details>
+  );
+}
+
+/** A tool result as plain text: the AI-SDK engine stores a string, the Claude engine MCP content blocks. */
+function toolResultText(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (Array.isArray(result)) {
+    return result
+      .map((b) => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : ''))
+      .join('\n');
+  }
+  return JSON.stringify(result ?? '');
+}
+
+const approxTokens = (chars: number) => {
+  const t = Math.round(chars / 4);
+  return t >= 1000 ? `${(t / 1000).toFixed(t >= 10_000 ? 0 : 1)}k` : String(t);
+};
+
+/** A delegate result's stats: recorded after its call, just before the result. */
+function delegateStatsBefore(entries: TranscriptEntry[], resultIndex: number): DelegateRunStats | null {
+  for (let j = resultIndex - 1; j >= 0; j--) {
+    const e = entries[j];
+    if (e.delegate) return e.delegate;
+    if (e.role === 'tool_call' && stripToolPrefix(e.toolName) === DELEGATE_TOOL) return null;
+  }
+  return null;
+}
+
+/** The coding agent's questions to its local helpers. */
+function DelegateCallBubble({ entry }: { entry: TranscriptEntry }) {
+  const input = entry.toolInput as { tasks?: { task?: string; paths?: string[] }[] } | undefined;
+  const tasks = input?.tasks ?? [];
+  return (
+    <div className="rounded-md border border-success/40 bg-success/10 text-xs px-2.5 py-2">
+      <div className="flex items-center gap-1.5 font-medium text-foreground">
+        <Users className="w-3.5 h-3.5 flex-shrink-0" />
+        Asked local helpers {tasks.length} {tasks.length === 1 ? 'question' : 'questions'}
+      </div>
+      <ol className="mt-1.5 ml-5 list-decimal space-y-0.5 text-muted-foreground">
+        {tasks.map((t, i) => (
+          <li key={i} className="break-words">
+            {t.task}
+            {t.paths?.length ? <span className="font-mono"> — {t.paths.join(', ')}</span> : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** What the helpers handed back (all the paid agent saw), with the run's stats. */
+function DelegateResultBubble({ entry, stats }: { entry: TranscriptEntry; stats: DelegateRunStats | null }) {
+  const text = toolResultText(entry.toolResult);
+  return (
+    <div
+      className={`rounded-md border text-xs px-2.5 py-2 ${
+        entry.isError ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-success/40 bg-success/10'
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="flex items-center gap-1.5 font-medium text-foreground">
+          <Users className="w-3.5 h-3.5 flex-shrink-0" />
+          Local helpers answered
+          {stats ? ` ${stats.useful} of ${stats.tasks}` : ''}
+        </span>
+        {stats && (
+          <span className="text-muted-foreground">
+            {stats.model} · read ≈{approxTokens(stats.readChars)} tokens on this machine · handed back ≈
+            {approxTokens(stats.returnedChars)} ·{' '}
+            <span className="font-medium text-foreground">saved ≈{approxTokens(stats.savedTokens * 4)} paid tokens</span>
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 font-mono whitespace-pre-wrap break-words text-foreground/80">{text}</div>
+    </div>
   );
 }
 
@@ -282,6 +361,8 @@ interface ChatEntryProps {
   answer?: DraftAnswer;
   onAnswer: (id: string, answer: DraftAnswer) => void;
   disabled: boolean;
+  /** For a delegate result: the stats of that run, recorded just before it. */
+  delegateStats?: DelegateRunStats | null;
 }
 
 // Memoized so typing in the composer, or one more streamed event, only
@@ -294,6 +375,7 @@ const ChatEntry = React.memo(function ChatEntry({
   answer,
   onAnswer,
   disabled,
+  delegateStats,
 }: ChatEntryProps) {
   if (entry.role === 'user') {
     return (
@@ -327,6 +409,10 @@ const ChatEntry = React.memo(function ChatEntry({
         readOnly={!questionPending}
       />
     );
+  }
+  if (stripToolPrefix(entry.toolName) === DELEGATE_TOOL) {
+    if (entry.role === 'tool_call') return <DelegateCallBubble entry={entry} />;
+    if (entry.role === 'tool_result') return <DelegateResultBubble entry={entry} stats={delegateStats ?? null} />;
   }
   if (entry.role === 'tool_call' || entry.role === 'tool_result') {
     return <ToolCallBubble entry={entry} />;
@@ -485,6 +571,12 @@ export function ChatPane({
         {entries.slice(firstVisible).map((entry, offset) => {
           const i = firstVisible + offset;
           if (duplicatePendingIds.has(entry.id)) return null;
+          // A delegate run's stats show inside its result card.
+          if (entry.delegate) return null;
+          const delegateStats =
+            entry.role === 'tool_result' && stripToolPrefix(entry.toolName) === DELEGATE_TOOL
+              ? delegateStatsBefore(entries, i)
+              : undefined;
           if (entry.role === 'tool_result') {
             // A question tool's result is a trivial placeholder — the
             // question bubble from the preceding tool_call already shows it.
@@ -502,13 +594,18 @@ export function ChatPane({
               answer={answers[entry.id]}
               onAnswer={setAnswer}
               disabled={disabled}
+              delegateStats={delegateStats}
             />
           );
         })}
         {streaming && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-            {runningTool ? `${agent.name} is running ${stripToolPrefix(runningTool)}…` : `${agent.name} is thinking…`}
+            {runningTool
+              ? stripToolPrefix(runningTool) === DELEGATE_TOOL
+                ? `${agent.name} is waiting on local helpers…`
+                : `${agent.name} is running ${stripToolPrefix(runningTool)}…`
+              : `${agent.name} is thinking…`}
           </div>
         )}
       </div>
