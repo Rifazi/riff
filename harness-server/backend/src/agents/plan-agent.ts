@@ -5,13 +5,21 @@ import matter from 'gray-matter';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
+import {
+  appendTranscriptEntry,
+  setClaudeSessionId,
+  setHistory,
+  updateSession,
+  addStageUsage,
+} from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { classifyTextTool } from './tool-defs/classify-text-tool.js';
+import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffStatAgainstBase } from '../repo/git.js';
@@ -38,6 +46,7 @@ const TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
+  'classify_text',
   'read_file',
   'outline_file',
   'write_plan_doc',
@@ -49,7 +58,7 @@ export async function runPlanAgentTurn(
   session: SessionRecord,
   userMessage: string,
   onEvent: (event: AgentEvent) => void,
-  attachments: ParsedAttachment[] = []
+  attachments: ParsedAttachment[] = [],
 ): Promise<SessionRecord> {
   await appendTranscriptEntry(session.id, 'plan', { role: 'user', text: userMessage });
   let prompt = await applyAttachments(session.id, 'plan', userMessage, attachments);
@@ -93,11 +102,14 @@ export async function runPlanAgentTurn(
 
     let stepsText = 'No coding checklist recorded yet.';
     if (session.codingPlan && session.codingPlan.length > 0) {
-      stepsText = session.codingPlan.map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`).join('\n');
+      stepsText = session.codingPlan
+        .map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`)
+        .join('\n');
     }
     let diffStat = '(unable to read diff stat)';
     try {
-      diffStat = (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
+      diffStat =
+        (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
     } catch {
       // repo/branch not in a readable state — proceed without it
     }
@@ -122,7 +134,10 @@ export async function runPlanAgentTurn(
   };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
+      appId: app.id,
+      sessionId: session.id,
+    });
     const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
     const createMcpServer = () =>
       createSdkMcpServer({
@@ -134,6 +149,7 @@ export async function runPlanAgentTurn(
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
+          classifyTextToolClaude,
           readFileToolClaude,
           createWritePlanToolClaude({
             sessionKey: session.sessionKey,
@@ -174,6 +190,7 @@ export async function runPlanAgentTurn(
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
+      classify_text: classifyTextTool,
       read_file: readFileTool,
       write_plan_doc: createWritePlanTool({
         sessionKey: session.sessionKey,

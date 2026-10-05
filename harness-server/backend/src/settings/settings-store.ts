@@ -6,6 +6,7 @@ import {
   PROVIDERS,
   normalizeOllamaEndpoint,
   providerNeedsApiKey,
+  type ClassificationSettings,
   type HarnessSettings,
   type JiraSettings,
   type Provider,
@@ -31,6 +32,7 @@ export async function getSettings(): Promise<HarnessSettings> {
           ? normalizeOllamaEndpoint(parsed.ollamaEndpoint)
           : DEFAULT_SETTINGS.ollamaEndpoint,
       jira: { ...DEFAULT_SETTINGS.jira, ...parsed.jira },
+      classification: { ...DEFAULT_SETTINGS.classification, ...parsed.classification },
     };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);
@@ -46,6 +48,9 @@ export interface SettingsPatch {
   // apiToken: null clears it, a non-empty string replaces it, undefined/''
   // leaves the stored value untouched — same convention as `credentials`.
   jira?: Partial<Omit<JiraSettings, 'apiToken'>> & { apiToken?: string | null };
+  // Takes effect on the next classify_text call — agents/classification.ts
+  // re-reads this and hot-swaps its in-memory pipeline, no restart needed.
+  classification?: Partial<ClassificationSettings>;
 }
 
 export async function updateSettings(patch: SettingsPatch): Promise<HarnessSettings> {
@@ -79,6 +84,10 @@ export async function updateSettings(patch: SettingsPatch): Promise<HarnessSetti
     } else if (typeof apiToken === 'string' && apiToken.trim()) {
       current.jira.apiToken = apiToken.trim();
     }
+  }
+
+  if (patch.classification) {
+    current.classification = { ...current.classification, ...patch.classification };
   }
 
   await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true });

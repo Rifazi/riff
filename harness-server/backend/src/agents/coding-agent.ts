@@ -4,13 +4,22 @@ import matter from 'gray-matter';
 import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
-import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
+import {
+  appendTranscriptEntry,
+  getSession,
+  setClaudeSessionId,
+  setHistory,
+  updateSession,
+  addStageUsage,
+} from '../sessions/session-store.js';
 import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { classifyTextTool } from './tool-defs/classify-text-tool.js';
+import { classifyTextToolClaude } from './tool-defs-claude/classify-text-tool.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -49,6 +58,7 @@ const TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
+  'classify_text',
   'read_file',
   'outline_file',
   'write_file',
@@ -106,7 +116,7 @@ export async function runCodingAgentTurn(
   userMessage: string,
   onEvent: (event: AgentEvent) => void,
   attachments: ParsedAttachment[] = [],
-  options: CodingTurnOptions = {}
+  options: CodingTurnOptions = {},
 ): Promise<SessionRecord> {
   const app = await getApp(session.appId);
   const roleConfig = await getRoleModelConfig('coding');
@@ -134,7 +144,8 @@ export async function runCodingAgentTurn(
   // A fresh conversation instead of resuming this one (see
   // SessionRecord.codingContext). Never for a reconciliation, which relies
   // on the agent remembering what it built against the old requirements.
-  const hasContext = provider === 'claude' ? Boolean(session.claudeSessionIds.coding) : session.histories.coding.length > 0;
+  const hasContext =
+    provider === 'claude' ? Boolean(session.claudeSessionIds.coding) : session.histories.coding.length > 0;
   const ctx = session.codingContext;
   let freshReason: string | null = null;
   if (hasContext && !session.codingReconciliationPending) {
@@ -335,11 +346,26 @@ export async function runCodingAgentTurn(
 
   async function runEngine(): Promise<{ isError: boolean }> {
     if (provider === 'claude') {
-      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id });
-      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
-      const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
-      const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({ repoRoot: app.repoRoot });
-      const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
+        appId: app.id,
+        sessionId: session.id,
+      });
+      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({
+        repoRoot: app.repoRoot,
+      });
+      const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({
+        repoRoot: app.repoRoot,
+        baseBranch: baseBranchFor(app),
+        onBranchCreated,
+      });
+      const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({
+        repoRoot: app.repoRoot,
+      });
+      const { runCheckedCommandToolClaude } = createQaToolsClaude({
+        repoRoot: app.repoRoot,
+        baseBranch: baseBranchFor(app),
+        checkCommands: app.checkCommands,
+      });
       const createMcpServer = () =>
         createSdkMcpServer({
           name: 'harness-tools',
@@ -350,6 +376,7 @@ export async function runCodingAgentTurn(
             createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
             createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
+            classifyTextToolClaude,
             readFileToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
@@ -365,7 +392,11 @@ export async function runCodingAgentTurn(
           ],
         });
 
-      const { sdkSessionId, isError, contextTokens: tokens } = await runClaudeAgentTurn({
+      const {
+        sdkSessionId,
+        isError,
+        contextTokens: tokens,
+      } = await runClaudeAgentTurn({
         systemPrompt,
         createMcpServer,
         toolNames: TOOL_NAMES,
@@ -392,9 +423,17 @@ export async function runCodingAgentTurn(
 
       const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
       const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
-      const { gitCreateBranchTool, gitCommitTool } = createGitTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), onBranchCreated });
+      const { gitCreateBranchTool, gitCommitTool } = createGitTools({
+        repoRoot: app.repoRoot,
+        baseBranch: baseBranchFor(app),
+        onBranchCreated,
+      });
       const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
-      const { runCheckedCommandTool } = createQaTools({ repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands });
+      const { runCheckedCommandTool } = createQaTools({
+        repoRoot: app.repoRoot,
+        baseBranch: baseBranchFor(app),
+        checkCommands: app.checkCommands,
+      });
 
       const tools: ToolSet = {
         search_docs: searchDocsTool,
@@ -402,6 +441,7 @@ export async function runCodingAgentTurn(
         search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
+        classify_text: classifyTextTool,
         read_file: readFileTool,
         write_file: writeFileTool,
         edit_file: editFileTool,
@@ -416,7 +456,11 @@ export async function runCodingAgentTurn(
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
       };
 
-      const { updatedHistory, isError, contextTokens: tokens } = await runAgentTurn({
+      const {
+        updatedHistory,
+        isError,
+        contextTokens: tokens,
+      } = await runAgentTurn({
         systemPrompt,
         tools,
         provider,
@@ -476,16 +520,22 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
       `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
   }
 
-  if (!session.codingTeam && !session.branch) text += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
+  if (!session.codingTeam && !session.branch)
+    text += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
   return text;
 }
 
 /** What the lead needs to know about the session's current team round. */
 function teamSection(session: SessionRecord): string {
   const team = session.codingTeam!;
-  const checklist = (session.codingPlan ?? []).map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`).join('\n');
+  const checklist = (session.codingPlan ?? [])
+    .map((s) => `- id: "${s.id}", status: "${s.status}", title: "${s.title}"`)
+    .join('\n');
   const members = team.members
-    .map((m) => `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; steps ${m.stepIds.join(', ')}; owned ${m.ownedPaths.join(', ')}`)
+    .map(
+      (m) =>
+        `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; steps ${m.stepIds.join(', ')}; owned ${m.ownedPaths.join(', ')}`,
+    )
     .join('\n');
   const what = team.kind === 'qa-fix' ? "QA's findings" : team.kind === 'plan' ? 'the plan' : 'the work you split';
   const where = session.branch ? `on branch "${session.branch}", which is checked out` : 'on the session branch';
@@ -512,7 +562,7 @@ function teamSection(session: SessionRecord): string {
 export async function loadApprovedDocsForCoding(
   session: SessionRecord,
   repoRoot: string,
-  focusStepIds?: string[]
+  focusStepIds?: string[],
 ): Promise<{ text: string; planSteps: { id: string; title: string }[] }> {
   if (!session.requirementsPath || !session.planPath) {
     throw new Error('Coding needs an approved requirements document and plan.');

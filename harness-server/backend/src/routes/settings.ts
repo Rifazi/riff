@@ -1,8 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { getSettings, updateSettings, type SettingsPatch } from '../settings/settings-store.js';
-import { isProvider, isRole, redactSettings, type JiraSettings, type RoleModelConfig } from '../settings/settings.js';
+import {
+  isClassificationModel,
+  isProvider,
+  isRole,
+  redactSettings,
+  type JiraSettings,
+  type RoleModelConfig,
+} from '../settings/settings.js';
 import { listOllamaModels, testOllama } from '../settings/ollama.js';
 import { testClaudeLogin, testProviderCredential } from '../agents/sdk-client.js';
+import { classificationCacheStatus, clearClassificationCache } from '../agents/classification.js';
 import { testJiraConnection } from '../jira/jira-client.js';
 
 export async function registerSettingsRoutes(app: FastifyInstance): Promise<void> {
@@ -39,6 +47,12 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         if (roleModelConfig?.localTeamModel !== undefined && typeof roleModelConfig.localTeamModel !== 'string') {
           return reply.code(400).send({ error: 'localTeamModel must be a string' });
         }
+      }
+    }
+    if (body.classification?.model !== undefined) {
+      const model = body.classification.model;
+      if (typeof model !== 'string' || !isClassificationModel(model)) {
+        return reply.code(400).send({ error: `unknown classification model: ${String(model)}` });
       }
     }
     const updated = await updateSettings(body);
@@ -101,7 +115,7 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
-    }
+    },
   );
 
   // Tests against whatever's already saved, overlaid with any unsaved
@@ -123,6 +137,28 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Cache status for the on-device classification models. Read fresh off disk
+  // on every request (same as the local-model status) so Settings reflects a
+  // download that finished, or a cache someone cleared, without a restart.
+  app.get('/api/settings/classification-cache', async (_request, reply) => {
+    try {
+      return { models: await classificationCacheStatus() };
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Wipes every cached classification model, not just the selected one — the
+  // next classify_text call re-downloads whichever model is selected then.
+  app.post('/api/settings/classification-cache/clear', async (_request, reply) => {
+    try {
+      await clearClassificationCache();
+      return { ok: true };
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 }

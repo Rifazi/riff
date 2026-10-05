@@ -3,6 +3,7 @@ import type {
   AppPrompts,
   AppWriteResult,
   CheckCommands,
+  ClassificationCacheEntry,
   CreateJiraTicketsResult,
   DeliveryPlan,
   Integration,
@@ -65,7 +66,13 @@ export const api = {
       body: JSON.stringify({ repoRoot }),
     }).then((r) => json<{ ok: boolean; error?: string; note?: string }>(r)),
 
-  createApp: (input: { name: string; repoRoot: string; checkCommands?: CheckCommands; theme?: ThemeDefinition; basedOn?: string | null }) =>
+  createApp: (input: {
+    name: string;
+    repoRoot: string;
+    checkCommands?: CheckCommands;
+    theme?: ThemeDefinition;
+    basedOn?: string | null;
+  }) =>
     fetch(apiUrl('/api/apps'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -118,7 +125,9 @@ export const api = {
     }).then((r) => json<ThemeApplyResult>(r)),
 
   dismissThemeProposal: (sessionId: string) =>
-    fetch(apiUrl(`/api/sessions/${sessionId}/theme-proposal/dismiss`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+    fetch(apiUrl(`/api/sessions/${sessionId}/theme-proposal/dismiss`), { method: 'POST' }).then((r) =>
+      json<SessionRecord>(r),
+    ),
 
   getAppPrompts: (id: string) => fetch(apiUrl(`/api/apps/${id}/prompts`)).then((r) => json<AppPrompts>(r)),
 
@@ -130,8 +139,8 @@ export const api = {
     }).then((r) => json<{ ok: boolean }>(r)),
 
   listSessions: (filter?: { meetingId?: string }) =>
-    fetch(apiUrl(`/api/sessions${filter?.meetingId ? `?meetingId=${encodeURIComponent(filter.meetingId)}` : ''}`)).then((r) =>
-      json<SessionRecord[]>(r)
+    fetch(apiUrl(`/api/sessions${filter?.meetingId ? `?meetingId=${encodeURIComponent(filter.meetingId)}` : ''}`)).then(
+      (r) => json<SessionRecord[]>(r),
     ),
 
   getSession: (id: string) => fetch(apiUrl(`/api/sessions/${id}`)).then((r) => json<SessionRecord>(r)),
@@ -155,7 +164,9 @@ export const api = {
     }),
 
   getRequirementsDoc: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/requirements/doc`)).then((r) => json<{ markdown: string | null; body: string | null }>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/requirements/doc`)).then((r) =>
+      json<{ markdown: string | null; body: string | null }>(r),
+    ),
 
   updateRequirementsDoc: (id: string, markdownBody: string) =>
     fetch(apiUrl(`/api/sessions/${id}/requirements/doc`), {
@@ -172,11 +183,13 @@ export const api = {
 
   acceptSplit: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/requirements/split/accept`), { method: 'POST' }).then((r) =>
-      json<{ parent: SessionRecord; children: SessionRecord[] }>(r)
+      json<{ parent: SessionRecord; children: SessionRecord[] }>(r),
     ),
 
   dismissSplit: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/requirements/split/dismiss`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/requirements/split/dismiss`), { method: 'POST' }).then((r) =>
+      json<SessionRecord>(r),
+    ),
 
   getPlanDoc: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/plan/doc`)).then((r) =>
@@ -185,9 +198,7 @@ export const api = {
         body: string | null;
         steps: PlanStepSummary[];
         jira: { epicKey: string; issues: CreateJiraTicketsResult['issues'] } | null;
-      }>(
-        r
-      )
+      }>(r),
     ),
 
   updatePlanDoc: (id: string, markdownBody: string) =>
@@ -197,23 +208,28 @@ export const api = {
       body: JSON.stringify({ markdownBody }),
     }).then((r) => json<{ markdown: string }>(r)),
 
-  approvePlan: (id: string) => fetch(apiUrl(`/api/sessions/${id}/plan/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  approvePlan: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/plan/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
-  rejectPlan: (id: string) => fetch(apiUrl(`/api/sessions/${id}/plan/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  rejectPlan: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/plan/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
   createJiraTickets: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/plan/jira/create`), { method: 'POST' }).then((r) => json<CreateJiraTicketsResult>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/plan/jira/create`), { method: 'POST' }).then((r) =>
+      json<CreateJiraTicketsResult>(r),
+    ),
 
   getDeliveryPlan: (id: string) => fetch(apiUrl(`/api/sessions/${id}/delivery`)).then((r) => json<DeliveryPlan>(r)),
 
-  deliver: (id: string) => fetch(apiUrl(`/api/sessions/${id}/delivery`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  deliver: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/delivery`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
   getTeamStatus: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/team`)).then((r) => json<{ running: boolean }>(r)),
 
   getCodingDiff: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/diff`)).then((r) =>
-      json<{ diff: string | null; stat: string | null; commits: { hash: string; message: string; date: string }[] }>(r)
+      json<{ diff: string | null; stat: string | null; commits: { hash: string; message: string; date: string }[] }>(r),
     ),
 
   approveCoding: (id: string) =>
@@ -253,12 +269,21 @@ export const api = {
     models?: Partial<Record<Role, RoleModelConfig>>;
     ollamaEndpoint?: string;
     jira?: Partial<JiraSettingsFields> & { apiToken?: string | null };
+    classification?: { model?: string };
   }) =>
     fetch(apiUrl('/api/settings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     }).then((r) => json<SettingsResponse>(r)),
+
+  // Per-model on-disk state for the agents' on-device classify_text tool.
+  getClassificationCache: () =>
+    fetch(apiUrl('/api/settings/classification-cache')).then((r) => json<{ models: ClassificationCacheEntry[] }>(r)),
+
+  // Deletes every cached classification model, not just the selected one.
+  clearClassificationCache: () =>
+    fetch(apiUrl('/api/settings/classification-cache/clear'), { method: 'POST' }).then(noContent),
 
   testCredential: (input: { provider: Provider; apiKey?: string; model?: string; endpoint?: string }) =>
     fetch(apiUrl('/api/settings/test'), {
@@ -297,7 +322,9 @@ export const api = {
     fetch(apiUrl(`/api/apps/${appId}/reference-docs/${docId}`), { method: 'DELETE' }).then(noContent),
 
   listSessionReferenceDocs: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/reference-docs`)).then((r) => json<{ app: ReferenceDoc[]; session: ReferenceDoc[] }>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs`)).then((r) =>
+      json<{ app: ReferenceDoc[]; session: ReferenceDoc[] }>(r),
+    ),
 
   addSessionReferenceDocs: (id: string, attachments: AttachmentInput[]) =>
     fetch(apiUrl(`/api/sessions/${id}/reference-docs`), {
@@ -310,10 +337,15 @@ export const api = {
     fetch(apiUrl(`/api/sessions/${id}/reference-docs/${docId}`), { method: 'DELETE' }).then(noContent),
 
   shareReferenceDocWithApp: (id: string, docId: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/reference-docs/${docId}/share`), { method: 'POST' }).then((r) => json<ReferenceDoc>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/reference-docs/${docId}/share`), { method: 'POST' }).then((r) =>
+      json<ReferenceDoc>(r),
+    ),
 
-  listIntegrations: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/integrations`)).then((r) => json<Integration[]>(r)),
+  listIntegrations: (appId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/integrations`)).then((r) => json<Integration[]>(r)),
 
   getIntegrationDoc: (appId: string, path: string) =>
-    fetch(apiUrl(`/api/apps/${appId}/integrations/doc?path=${encodeURIComponent(path)}`)).then((r) => json<{ markdown: string }>(r)),
+    fetch(apiUrl(`/api/apps/${appId}/integrations/doc?path=${encodeURIComponent(path)}`)).then((r) =>
+      json<{ markdown: string }>(r),
+    ),
 };

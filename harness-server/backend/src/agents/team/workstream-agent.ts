@@ -11,6 +11,8 @@ import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
 import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
+import { classifyTextTool } from '../tool-defs/classify-text-tool.js';
+import { classifyTextToolClaude } from '../tool-defs-claude/classify-text-tool.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
 import { COMPACT_AT_TOKENS, HOP_COUNT, HOP_STEPS, loadApprovedDocsForCoding } from '../coding-agent.js';
@@ -37,7 +39,6 @@ import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-to
 
 const CODING_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TEAM_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-team-member.md');
-
 
 const noBranchCreation = async () => {
   throw new Error('Team members work on a branch created for them — there is no branch to create.');
@@ -100,7 +101,10 @@ export async function runWorkstreamAgent({
       : `This round isn't building the approved plan: ${kind === 'qa-fix' ? 'QA reviewed the merged branch and sent it back' : 'the human asked for more work on the branch'}, and the lead split it across the team. Your steps' briefs say what to change. The plan above is context for what the feature is.\n\n`;
   const others = teammates
     .filter((t) => t.id !== member.id)
-    .map((t) => `- ${t.title} (${t.id}) owns ${t.ownedPaths.join(', ')}${member.dependsOn.includes(t.id) ? ' — already merged into your branch' : ''}`)
+    .map(
+      (t) =>
+        `- ${t.title} (${t.id}) owns ${t.ownedPaths.join(', ')}${member.dependsOn.includes(t.id) ? ' — already merged into your branch' : ''}`,
+    )
     .join('\n');
   const brief =
     `\n\n${teamRules}\n\n# Your workstream: ${member.title} (${member.id})\n\n${roundNote}` +
@@ -109,14 +113,21 @@ export async function runWorkstreamAgent({
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
   const systemPrompt =
-    base + themeBriefingFor(worktreePath, 'coding') + repoInstructionsNote(worktreePath) + approvedDocs + brief + (referenceDocs ? `\n\n${referenceDocs}` : '');
+    base +
+    themeBriefingFor(worktreePath, 'coding') +
+    repoInstructionsNote(worktreePath) +
+    approvedDocs +
+    brief +
+    (referenceDocs ? `\n\n${referenceDocs}` : '');
 
   const resuming = member.transcript.length > 0;
-  const prompt = promptOverride ?? (resuming
-    ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
-      'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
-      'remaining steps and leave nothing uncommitted.'
-    : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`);
+  const prompt =
+    promptOverride ??
+    (resuming
+      ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
+        'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
+        'remaining steps and leave nothing uncommitted.'
+      : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`);
 
   await appendTeamTranscriptEntry(session.id, member.id, { role: 'user', text: prompt });
 
@@ -163,16 +174,24 @@ export async function runWorkstreamAgent({
   const steps = { sessionId: session.id, stepIds: member.stepIds };
 
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: app.id, sessionId: session.id, repoRoot: worktreePath });
+    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
+      appId: app.id,
+      sessionId: session.id,
+      repoRoot: worktreePath,
+    });
     const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude(scoped);
     const { gitCommitTool } = createGitToolsClaude({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
-    const { runCheckedCommandToolClaude } = createQaToolsClaude({ repoRoot: worktreePath, checkCommands: app.checkCommands });
+    const { runCheckedCommandToolClaude } = createQaToolsClaude({
+      repoRoot: worktreePath,
+      checkCommands: app.checkCommands,
+    });
     const tools = [
       searchDocsToolClaude,
       readDocToolClaude,
       createSearchCodeToolClaude({ repoRoot: worktreePath }),
       createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
+      classifyTextToolClaude,
       readFileToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
@@ -187,6 +206,7 @@ export async function runWorkstreamAgent({
       'read_doc',
       'search_code',
       'audit_theme',
+      'classify_text',
       'read_file',
       'outline_file',
       'write_file',
@@ -219,7 +239,11 @@ export async function runWorkstreamAgent({
   const apiKey = await getApiKey(provider);
   if (apiKey === null) throw new Error(`No API key configured for ${provider} — add one in Settings.`);
 
-  const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, repoRoot: worktreePath });
+  const { searchDocsTool, readDocTool } = createDocsSearchTools({
+    appId: app.id,
+    sessionId: session.id,
+    repoRoot: worktreePath,
+  });
   const { readFileTool, writeFileTool, editFileTool } = createFileTools(scoped);
   const { gitCommitTool } = createGitTools({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
   const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands });
@@ -229,6 +253,7 @@ export async function runWorkstreamAgent({
     search_code: createSearchCodeTool({ repoRoot: worktreePath }),
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
+    classify_text: classifyTextTool,
     read_file: readFileTool,
     write_file: writeFileTool,
     edit_file: editFileTool,
@@ -261,9 +286,17 @@ async function persistEvent(sessionId: string, memberId: string, event: AgentEve
   if (event.type === 'assistant_text') {
     await appendTeamTranscriptEntry(sessionId, memberId, { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {
-    await appendTeamTranscriptEntry(sessionId, memberId, { role: 'tool_call', toolName: event.name, toolInput: event.input });
+    await appendTeamTranscriptEntry(sessionId, memberId, {
+      role: 'tool_call',
+      toolName: event.name,
+      toolInput: event.input,
+    });
   } else if (event.type === 'tool_result') {
-    await appendTeamTranscriptEntry(sessionId, memberId, { role: 'tool_result', toolResult: event.content, isError: event.isError });
+    await appendTeamTranscriptEntry(sessionId, memberId, {
+      role: 'tool_result',
+      toolResult: event.content,
+      isError: event.isError,
+    });
   } else if (event.type === 'continuation') {
     await appendTeamTranscriptEntry(sessionId, memberId, {
       role: 'system',
