@@ -55,12 +55,13 @@ The tool returns:
 
 ## Example
 
+A real run against the default model — including the part worth learning from:
+
 ```
 Tool input:
 {
   "text": "The app crashed when I tried to upload a large file. Stack trace: ...",
-  "labels": ["bug report", "feature request", "question", "documentation issue"],
-  "mode": "single"
+  "labels": ["bug report", "feature request", "question", "documentation issue"]
 }
 
 Tool output:
@@ -69,28 +70,50 @@ Tool output:
   "mode": "single",
   "threshold": null,
   "selected": [
-    { "label": "bug report", "score": 0.98 }
+    { "label": "question", "score": 0.73 }
   ],
   "allScores": [
-    { "label": "bug report", "score": 0.98 },
-    { "label": "feature request", "score": 0.01 },
-    { "label": "question", "score": 0.005 },
-    { "label": "documentation issue", "score": 0.005 }
+    { "label": "question", "score": 0.73 },
+    { "label": "feature request", "score": 0.13 },
+    { "label": "documentation issue", "score": 0.09 },
+    { "label": "bug report", "score": 0.05 }
   ]
 }
 ```
+
+The text is plainly a bug report, and the default model ranked `bug report`
+**last**. That is not a malfunction, it is what a 70 MB distilled NLI model
+does with abstract, jargon-y labels: it is matching the surface wording of
+each label against the text, not applying your taxonomy.
+
+So treat a `selected` label as a _suggestion_, never as ground truth:
+
+- Read `allScores`, not just `selected`. A confident win (one label far ahead)
+  means something; a flat spread, or a winner you find surprising, means the
+  model had nothing to go on and you should fall back to your own judgement.
+- Prefer labels phrased the way the text itself would be phrased
+  (`"this reports a crash or defect"` beats `"bug report"`), and keep label
+  sets short and mutually exclusive.
+- If a label set matters and keeps coming out wrong, switch to
+  `Xenova/bart-large-mnli` in Settings → Dev Agents and re-check.
+
+The tool is there to save a turn on cheap, clear-cut bucketing — not to make a
+judgement call you would not delegate to a 70 MB model.
+
+(`mode` is omitted above because it is optional and defaults to `"single"`;
+passing `"mode": "single"` explicitly is equivalent.)
 
 ## Model Selection
 
 Three curated ONNX models are available, all trained on NLI/MNLI datasets and compatible with the zero-shot-classification pipeline. You can switch between them in **Settings → Dev Agents → Classification Model**.
 
-| Model                         | Size    | Speed     | Accuracy | Best for                                                                                     |
-| ----------------------------- | ------- | --------- | -------- | -------------------------------------------------------------------------------------------- |
-| **DistilBERT MNLI** (default) | ~70 MB  | Very fast | Good     | Clear-cut label sets, resource-constrained environments. **Recommended for most use cases.** |
-| **DeBERTa v3 XSmall NLI**     | ~90 MB  | Fast      | Better   | Nuanced, overlapping, or adversarial labels. Noticeably better than DistilBERT.              |
-| **BART Large MNLI**           | ~400 MB | Slower    | Best     | Subtle semantic distinctions, corner cases, low confidence. Slowest to download and to run.  |
+| Model                         | Size    | Speed     | Accuracy | Best for                                                                                                                                                            |
+| ----------------------------- | ------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **DistilBERT MNLI** (default) | ~70 MB  | Very fast | Rough    | Cheap, obvious bucketing where a wrong answer is survivable. Can rank the "right" label last on abstract labels (see the example above) — always check `allScores`. |
+| **DeBERTa v3 XSmall NLI**     | ~90 MB  | Fast      | Better   | Nuanced, overlapping, or adversarial labels. Noticeably better than DistilBERT.                                                                                     |
+| **BART Large MNLI**           | ~400 MB | Slower    | Best     | Subtle semantic distinctions, corner cases, low confidence. Slowest to download and to run.                                                                         |
 
-All three are small enough to cache on disk; pick the smallest that handles your label set clearly, and upgrade if you see false positives or confidence coin-flips.
+The default is the smallest and fastest, not the most accurate: it is chosen so the first call downloads ~70 MB rather than ~400 MB. If a label set matters, move up the table — and whichever model is loaded, read `allScores` before trusting a single-mode winner.
 
 ## Cache and Offline Operation
 
