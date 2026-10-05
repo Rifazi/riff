@@ -35,6 +35,7 @@ import { useConfig } from "@/contexts/ConfigContext";
 
 import Logo from "../Logo";
 import Info from "../Info";
+import { TokenRingIndicator } from "../DevSessions/TokenRingIndicator";
 
 const Sidebar: React.FC = () => {
   const router = useRouter();
@@ -248,7 +249,9 @@ const Sidebar: React.FC = () => {
 
     return (
       <TooltipProvider>
-        <div className="flex flex-col items-center space-y-4 mt-4">
+        <div className="flex flex-col h-full py-4 items-center justify-between">
+          {/* Nav icons — top group */}
+          <div className="flex flex-col items-center space-y-4">
           <Logo isCollapsed={isCollapsed} />
 
           <Tooltip>
@@ -382,7 +385,13 @@ const Sidebar: React.FC = () => {
             </TooltipContent>
           </Tooltip>
 
-          <Info isCollapsed={isCollapsed} />
+          </div>{/* end nav group */}
+
+          {/* Bottom group — pinned to the bottom */}
+          <div className="flex flex-col items-center space-y-2 pb-1">
+            <TokenRingIndicator />
+            <Info isCollapsed={isCollapsed} />
+          </div>
         </div>
       </TooltipProvider>
     );
@@ -517,6 +526,7 @@ const Sidebar: React.FC = () => {
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-muted-foreground">
               v0.4.1
             </div>
+            <TokenRingIndicator showLabel />
           </div>
         )}
       </div>

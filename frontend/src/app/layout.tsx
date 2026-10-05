@@ -113,6 +113,22 @@ export default function RootLayout({
         document.removeEventListener("contextmenu", handleContextMenu);
     }
   }, []);
+
+  // Cmd+N (macOS) / Ctrl+N (other platforms): open a new window at the current path
+  useEffect(() => {
+    const handleNewWindow = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().includes("MAC");
+      const trigger = isMac ? e.metaKey : e.ctrlKey;
+      if (trigger && e.key === "n") {
+        e.preventDefault();
+        invoke("open_new_window", { path: window.location.pathname }).catch(
+          (err) => console.error("[Layout] Failed to open new window:", err),
+        );
+      }
+    };
+    document.addEventListener("keydown", handleNewWindow);
+    return () => document.removeEventListener("keydown", handleNewWindow);
+  }, []);
   useEffect(() => {
     // Listen for tray recording toggle request
     const unlisten = listen("request-recording-toggle", () => {

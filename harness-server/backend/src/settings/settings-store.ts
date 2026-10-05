@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import {
   DEFAULT_SETTINGS,
   PROVIDERS,
+  normalizeOllamaEndpoint,
+  providerNeedsApiKey,
   type HarnessSettings,
   type JiraSettings,
   type Provider,
@@ -22,6 +24,12 @@ export async function getSettings(): Promise<HarnessSettings> {
     return {
       credentials: { ...parsed.credentials },
       models: { ...DEFAULT_SETTINGS.models, ...parsed.models },
+      // Older files predate the ollama provider — fall back to the default
+      // endpoint rather than leaving it undefined.
+      ollamaEndpoint:
+        typeof parsed.ollamaEndpoint === 'string' && parsed.ollamaEndpoint.trim()
+          ? normalizeOllamaEndpoint(parsed.ollamaEndpoint)
+          : DEFAULT_SETTINGS.ollamaEndpoint,
       jira: { ...DEFAULT_SETTINGS.jira, ...parsed.jira },
     };
   } catch {
@@ -32,6 +40,9 @@ export async function getSettings(): Promise<HarnessSettings> {
 export interface SettingsPatch {
   credentials?: Partial<Record<Provider, string | null>>;
   models?: Partial<Record<Role, RoleModelConfig>>;
+  // Ollama's server URL (e.g. http://localhost:11434). A non-empty string
+  // replaces the stored value; undefined/'' leaves it untouched.
+  ollamaEndpoint?: string;
   // apiToken: null clears it, a non-empty string replaces it, undefined/''
   // leaves the stored value untouched — same convention as `credentials`.
   jira?: Partial<Omit<JiraSettings, 'apiToken'>> & { apiToken?: string | null };
@@ -56,6 +67,10 @@ export async function updateSettings(patch: SettingsPatch): Promise<HarnessSetti
     current.models = { ...current.models, ...patch.models };
   }
 
+  if (typeof patch.ollamaEndpoint === 'string' && patch.ollamaEndpoint.trim()) {
+    current.ollamaEndpoint = normalizeOllamaEndpoint(patch.ollamaEndpoint);
+  }
+
   if (patch.jira) {
     const { apiToken, ...rest } = patch.jira;
     current.jira = { ...current.jira, ...rest };
@@ -71,9 +86,17 @@ export async function updateSettings(patch: SettingsPatch): Promise<HarnessSetti
   return current;
 }
 
-export async function getCredential(provider: Provider): Promise<string | null> {
+/**
+ * The key to send for `provider`: the stored one, or '' for the providers
+ * that need none (claude authenticates via `claude login`, ollama via a
+ * local unauthenticated server). null means this provider needs a key and
+ * none is saved — the caller should stop and ask the human for one.
+ */
+export async function getApiKey(provider: Provider): Promise<string | null> {
   const settings = await getSettings();
-  return settings.credentials[provider]?.trim() || null;
+  const key = settings.credentials[provider]?.trim();
+  if (key) return key;
+  return providerNeedsApiKey(provider) ? null : '';
 }
 
 export async function getRoleModelConfig(role: Role): Promise<RoleModelConfig> {

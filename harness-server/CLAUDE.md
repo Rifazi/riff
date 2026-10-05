@@ -634,6 +634,32 @@ below) — never inside the target repo.
    engineer: validation, kickoff split, merge, a QA-fix round with briefs on
    `r2-` branches, and a failed member. Not run with real agents yet.
 
+27. User asked to run the agents on their local models — a Qwen in the
+   system's Ollama alongside Riff's built-in one. Added an "ollama"
+   provider (`settings/settings.ts`): every role, the light model and
+   team workstreams can select it like the cloud providers. It takes no
+   API key — `providerNeedsApiKey()` is false for it, and the new
+   `getApiKey()` in settings-store.ts returns the stored key, or '' for
+   keyless providers, or null only when a keyed provider has none (the
+   agents' "No API key" checks now test `=== null`). `settings/ollama.ts`
+   owns the endpoint: stored as `ollamaEndpoint` in local-settings.json
+   (default http://localhost:11434, editable in Settings), lists
+   installed models with their `tools` capability from GET /api/tags
+   (`GET /api/settings/ollama/models` feeds the pickers' datalists), and
+   `testOllama` backs the Settings Test button (reachable + model
+   installed + tools-capable). Engine side, `resolveLanguageModel()` is
+   now async and builds `createOpenAI({ baseURL: '<endpoint>/v1' }).chat(model)`
+   — Ollama's OpenAI-compatible API, which its tool-capable models speak
+   natively (verified live: a `runAgentTurn` smoke on `qwen3.8:27b` did
+   the read→write tool loop and reported usage). `KNOWN_MODELS.ollama`
+   is `[]` (live list instead) and `DEFAULT_LIGHT_MODEL.ollama` is `''`
+   (light routing off until a cheaper model is picked — see the
+   LightStepsRow's no-default handling in DevAgentSettings.tsx). Riff's
+   built-in Qwen (step 12) is unchanged: llama-helper has no tool
+   calling, so it stays on the coordinator's single-shot decisions,
+   handoff notes and delivery text; the coordinator still tries it first
+   even when its fallback provider is ollama.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -653,12 +679,13 @@ backend/src/
     session.ts             — SessionRecord type: appId (which app this session drives) + stage machine, transcripts (UI display) + histories (ModelMessage[] per stage, for conversation continuity)
     session-store.ts        — flat-file JSON persistence, one file per session under state/sessions/; normalizeSession() defaults a pre-multi-app session's missing appId to LEGACY_APP_ID
   settings/
-    settings.ts             — Provider/Role types, KNOWN_MODELS (curated, not exhaustive — any model ID works), redaction
-    settings-store.ts        — reads/writes backend/local-settings.json
+    settings.ts             — Provider/Role types (incl. "ollama" — the system's Ollama server, keyless), KNOWN_MODELS (curated, not exhaustive — any model ID works; ollama's comes live from the endpoint), ollamaEndpoint + its normalization, redaction
+    settings-store.ts       — reads/writes backend/local-settings.json; getApiKey() = stored key, '' for keyless providers (claude/ollama), null only when a keyed provider has none saved
+    ollama.ts               — the "ollama" provider's endpoint: listOllamaModels() (installed models + tools capability from /api/tags), testOllama() for Settings' Test, openAICompatBase() for the engine
     prompts-store.ts          — per-app, per-role system prompt overrides; reads/writes backend/local-prompts.json, seeds the legacy app's overrides from prompts/customer-edi-legacy/*.md the first time it's read
   agents/
     handoff.ts               — the opening note of a new coding conversation (step boundary, QA fix, compaction): repo state + Qwen-written notes on the previous conversation
-    sdk-client.ts            — BOTH engines: runAgentTurn() (AI SDK: resolveLanguageModel() switches on ApiKeyProvider, streamText() with stopWhen: stepCountIs(20)) and runClaudeAgentTurn()/testClaudeLogin() (Claude Agent SDK: query(), MCP server, resume: sessionId, cwd: the session's app's repoRoot) — both normalize to the same AgentEvent union so routes/frontend don't care which ran
+    sdk-client.ts            — BOTH engines: runAgentTurn() (AI SDK: resolveLanguageModel() switches on ApiKeyProvider — "ollama" builds createOpenAI().chat() against <endpoint>/v1, everything else uses the pasted key — then streamText() with stopWhen: stepCountIs(20)) and runClaudeAgentTurn()/testClaudeLogin() (Claude Agent SDK: query(), MCP server, resume: sessionId, cwd: the session's app's repoRoot) — both normalize to the same AgentEvent union so routes/frontend don't care which ran
     requirements-agent.ts, plan-agent.ts, coding-agent.ts, qa-agent.ts — one per role: resolve the session's app, load prompt (app override, else the checked-in base) + role's model config, branch on provider === 'claude' to pick engine + matching tool set (tool-defs/ vs tool-defs-claude/) built against that app's repoRoot, persist transcript + (history or claudeSessionId)
     prompts.ts                — readBasePrompt(role): the checked-in file for a role, or coordinator-agent.ts's DECISION_INSTRUCTIONS constant for "coordinator" (which has no file) — used by the Apps page's "view base prompt"
     prompts/*.md             — app-generic base system prompts (no target-repo specifics)

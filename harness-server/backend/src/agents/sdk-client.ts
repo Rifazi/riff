@@ -4,14 +4,18 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogle } from '@ai-sdk/google';
 import { query, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import type { ApiKeyProvider } from '../settings/settings.js';
+import { ollamaEndpoint, openAICompatBase } from '../settings/ollama.js';
 
 const DEFAULT_TEST_MODEL: Record<ApiKeyProvider, string> = {
   anthropic: 'claude-haiku-4-5',
   openai: 'gpt-4o-mini',
   google: 'gemini-2.0-flash',
+  // Never used: ollama is tested against its installed-model list instead
+  // (routes/settings.ts → settings/ollama.ts's testOllama).
+  ollama: '',
 };
 
-export function resolveLanguageModel(provider: ApiKeyProvider, model: string, apiKey: string): LanguageModel {
+export async function resolveLanguageModel(provider: ApiKeyProvider, model: string, apiKey: string): Promise<LanguageModel> {
   switch (provider) {
     case 'anthropic':
       return createAnthropic({ apiKey })(model);
@@ -19,6 +23,13 @@ export function resolveLanguageModel(provider: ApiKeyProvider, model: string, ap
       return createOpenAI({ apiKey })(model);
     case 'google':
       return createGoogle({ apiKey })(model);
+    case 'ollama': {
+      // The system Ollama's OpenAI-compatible API (<endpoint>/v1/chat/
+      // completions): native tool calling on whatever model is installed
+      // there, no auth — the key is only the placeholder the API shape wants.
+      const baseURL = openAICompatBase(await ollamaEndpoint());
+      return createOpenAI({ baseURL, apiKey: apiKey || 'ollama', name: 'ollama' }).chat(model);
+    }
     default: {
       const exhaustive: never = provider;
       throw new Error(`Unknown provider: ${String(exhaustive)}`);
@@ -26,8 +37,10 @@ export function resolveLanguageModel(provider: ApiKeyProvider, model: string, ap
   }
 }
 
+// Note: for the "ollama" provider, test the endpoint instead (settings/ollama.ts's
+// testOllama) — see routes/settings.ts.
 export async function testProviderCredential(provider: ApiKeyProvider, apiKey: string, model?: string): Promise<void> {
-  const languageModel = resolveLanguageModel(provider, model || DEFAULT_TEST_MODEL[provider], apiKey);
+  const languageModel = await resolveLanguageModel(provider, model || DEFAULT_TEST_MODEL[provider], apiKey);
   await generateText({ model: languageModel, prompt: 'Reply with just "ok".', maxOutputTokens: 5 });
 }
 
@@ -178,7 +191,7 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
   const textBuffers = new Map<string, string>();
 
   try {
-    const languageModel = resolveLanguageModel(provider, model, apiKey);
+    const languageModel = await resolveLanguageModel(provider, model, apiKey);
 
     // Anthropic only caches what's marked: the system prompt (with the
     // tools ahead of it) and the prior-turn history. Without this, every

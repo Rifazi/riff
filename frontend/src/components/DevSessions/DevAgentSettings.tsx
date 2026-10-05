@@ -11,7 +11,6 @@ import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
 import {
   PROVIDERS,
-  providerNeedsApiKey,
   type Provider,
   type RedactedJiraSettings,
   type SettingsResponse,
@@ -23,13 +22,13 @@ import { Badge } from '@/components/ui/badge';
 import { AgentServerBanner } from './AgentServerBanner';
 import { ExternalAnchor } from './ExternalAnchor';
 import { LoadingState } from './PageShell';
-import { TokenUsagePanel } from './TokenUsagePanel';
 
 const PROVIDER_LABEL: Record<Provider, string> = {
   claude: 'Claude (subscription login)',
   anthropic: 'Anthropic (API key)',
   openai: 'OpenAI',
   google: 'Google (Gemini)',
+  ollama: 'Ollama (local)',
 };
 
 const ROLES: { key: Role; label: string; hint: string }[] = [
@@ -190,6 +189,97 @@ function CredentialRow({ provider, hasKey }: { provider: Provider; hasKey: boole
         )}
       </div>
       <TestResult result={testResult} okText="Key works" />
+    </div>
+  );
+}
+
+/**
+ * Ollama needs no API key — this row edits the server URL instead. Test
+ * checks reachability (via the endpoint typed here, saved or not) and
+ * reports what's installed; role pickers suggest those models as the
+ * datalist (see DevAgentSettings's ollama-models query).
+ */
+function OllamaRow({ endpoint }: { endpoint: string }) {
+  const queryClient = useQueryClient();
+  const [value, setValue] = useState(endpoint);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    error?: string;
+    models?: { name: string; tools: boolean }[];
+  } | null>(null);
+
+  useEffect(() => setValue(endpoint), [endpoint]);
+
+  const trimmed = value.trim();
+  const valid = /^https?:\/\/\S+$/.test(trimmed);
+  const dirty = trimmed !== endpoint && valid;
+
+  const invalidate = () => {
+    setTestResult(null);
+    queryClient.invalidateQueries({ queryKey: ['settings'] });
+    queryClient.invalidateQueries({ queryKey: ['ollama-models'] });
+  };
+  const saveMutation = useMutation({
+    mutationFn: () => api.updateSettings({ ollamaEndpoint: trimmed }),
+    onSuccess: invalidate,
+  });
+  const testMutation = useMutation({
+    mutationFn: () => api.testCredential({ provider: 'ollama', endpoint: trimmed || undefined }),
+    onSuccess: setTestResult,
+  });
+
+  const toolModels = (testResult?.models ?? []).filter((m) => m.tools).length;
+
+  return (
+    <div className="py-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="font-medium text-foreground">{PROVIDER_LABEL.ollama}</span>
+        <Badge variant="success">No key needed</Badge>
+      </div>
+      <p className="text-sm text-muted-foreground mb-2 max-w-xl">
+        Runs any model installed in the system Ollama server (e.g. your bigger Qwen) — tool calling included, nothing
+        leaves this machine.
+      </p>
+      <div className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="http://localhost:11434"
+          className="flex-1 font-mono text-xs"
+          autoComplete="off"
+        />
+        <Button
+          size="sm"
+          className="h-9"
+          onClick={() => saveMutation.mutate()}
+          disabled={!dirty || saveMutation.isPending}
+        >
+          {saveMutation.isPending ? 'Saving…' : 'Save'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9"
+          onClick={() => testMutation.mutate()}
+          disabled={!valid || testMutation.isPending}
+        >
+          {testMutation.isPending ? 'Testing…' : 'Test'}
+        </Button>
+      </div>
+      {testResult &&
+        (testResult.ok ? (
+          <div className="flex items-center gap-1.5 text-sm mt-2 text-success">
+            <CheckCircle2 className="w-4 h-4" />
+            {testResult.models?.length
+              ? `Connected — ${testResult.models.length} model${testResult.models.length === 1 ? '' : 's'} installed (${toolModels} with tool support)`
+              : 'Connected — no models installed yet'}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-sm mt-2 text-destructive">
+            <XCircle className="w-4 h-4" />
+            Failed: {testResult.error}
+          </div>
+        ))}
     </div>
   );
 }
@@ -419,7 +509,7 @@ function LightStepsRow({
   onSave: (config: RoleModelConfig) => void;
   saving: boolean;
 }) {
-  const enabled = value.lightModel !== '';
+  const enabled = value.lightModel !== '' && (value.lightModel !== undefined || defaultLightModel !== '');
   const current = value.lightModel || defaultLightModel;
   const [model, setModel] = useState(current);
 
@@ -441,15 +531,21 @@ function LightStepsRow({
         <Switch
           checked={enabled}
           disabled={saving}
-          onCheckedChange={(on) => onSave({ ...value, lightModel: on ? defaultLightModel : '' })}
+          // Providers without a cheaper default (ollama) get the typed model
+          // — type one first, then flip the switch to route light steps to it.
+          onCheckedChange={(on) => onSave({ ...value, lightModel: on ? defaultLightModel || model.trim() : '' })}
           aria-label="Use a cheaper model for light steps"
         />
         <Input
           list={listId}
           value={enabled ? model : ''}
-          disabled={!enabled}
+          // With a default (claude etc.) the input only matters once routing
+          // is on; without one there's nothing to enable, so it stays editable.
+          disabled={!enabled && defaultLightModel !== ''}
           onChange={(e) => setModel(e.target.value)}
-          placeholder={enabled ? 'Model ID' : 'Off — every step uses the coding model'}
+          placeholder={
+            enabled || !defaultLightModel ? 'Model ID' : 'Off — every step uses the coding model'
+          }
           className="flex-1 font-mono text-xs"
         />
         <datalist id={listId}>
@@ -462,6 +558,76 @@ function LightStepsRow({
           className="h-9"
           disabled={!enabled || !dirty || !model.trim() || saving}
           onClick={() => onSave({ ...value, lightModel: model.trim() })}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Coding only: when enabled, Jack's automatic solo step turns AND every
+ * workstream team member run on this Ollama model instead of the cloud
+ * coding model — saving cloud tokens on work Jack judges simple enough to
+ * spin up locally.
+ */
+function LocalTeamModelRow({
+  value,
+  ollamaModels,
+  onSave,
+  saving,
+}: {
+  value: RoleModelConfig;
+  ollamaModels: string[];
+  onSave: (config: RoleModelConfig) => void;
+  saving: boolean;
+}) {
+  const current = value.localTeamModel ?? '';
+  const enabled = current !== '';
+  const [model, setModel] = useState(current);
+
+  useEffect(() => setModel(current), [current]);
+
+  const dirty = model.trim() !== current;
+
+  return (
+    <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
+      <div>
+        <div className="font-medium text-foreground">Local models for team work</div>
+        <div className="text-xs text-muted-foreground">
+          When Jack decides work can run in parallel he spins up agents on this Ollama model instead of the cloud
+          coding model — saving cloud tokens. Also applies to his own solo step turns.
+        </div>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Switch
+          checked={enabled}
+          disabled={saving || (!enabled && !model.trim() && ollamaModels.length === 0)}
+          onCheckedChange={(on) => {
+            const next = on ? (model.trim() || ollamaModels[0] || '') : '';
+            if (next !== current) onSave({ ...value, localTeamModel: next });
+            setModel(next);
+          }}
+          aria-label="Use local Ollama model for team workstreams and solo steps"
+        />
+        <Input
+          list="dev-agent-local-team-models"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder={enabled ? 'Ollama model ID' : 'Pick an Ollama model to enable'}
+          className="flex-1 font-mono text-xs"
+        />
+        <datalist id="dev-agent-local-team-models">
+          {ollamaModels.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        <Button
+          size="sm"
+          className="h-9"
+          disabled={!enabled || !dirty || !model.trim() || saving}
+          onClick={() => onSave({ ...value, localTeamModel: model.trim() })}
         >
           Save
         </Button>
@@ -515,6 +681,19 @@ export function DevAgentSettings() {
     queryKey: ['settings'],
     queryFn: api.getSettings,
   });
+  // Live model suggestions for the "ollama" provider — whatever is installed
+  // on this machine (KNOWN_MODELS can't know that statically).
+  const { data: ollamaModels } = useQuery({
+    queryKey: ['ollama-models'],
+    queryFn: api.listOllamaModels,
+    staleTime: 60_000,
+  });
+  const knownModels = settings
+    ? {
+        ...settings.knownModels,
+        ollama: ollamaModels?.models.map((m) => m.name) ?? settings.knownModels.ollama,
+      }
+    : undefined;
 
   const saveModelMutation = useMutation({
     mutationFn: (input: { role: Role; config: RoleModelConfig }) =>
@@ -532,13 +711,15 @@ export function DevAgentSettings() {
           <>
             <Section
               title="Agent providers"
-              description="The requirements, plan, coding and QA agents can run on any of these. API keys are stored by the local agent server (harness-server/backend/local-settings.json) and never sent back to this window."
+              description="The requirements, plan, coding and QA agents can run on any of these. API keys are stored by the local agent server (harness-server/backend/local-settings.json) and never sent back to this window — Ollama needs none, it's local."
             >
               {PROVIDERS.map((p) =>
-                providerNeedsApiKey(p) ? (
-                  <CredentialRow key={p} provider={p} hasKey={settings.credentials[p].hasKey} />
-                ) : (
+                p === 'claude' ? (
                   <ClaudeLoginRow key={p} />
+                ) : p === 'ollama' ? (
+                  <OllamaRow key={p} endpoint={settings.ollamaEndpoint} />
+                ) : (
+                  <CredentialRow key={p} provider={p} hasKey={settings.credentials[p].hasKey} />
                 ),
               )}
             </Section>
@@ -553,7 +734,7 @@ export function DevAgentSettings() {
                   label={role.label}
                   hint={role.hint}
                   value={settings.models[role.key]}
-                  knownModels={settings.knownModels}
+                  knownModels={knownModels ?? settings.knownModels}
                   saving={saveModelMutation.isPending}
                   onSave={(config) => saveModelMutation.mutate({ role: role.key, config })}
                 />
@@ -566,14 +747,18 @@ export function DevAgentSettings() {
               />
               <LightStepsRow
                 value={settings.models.coding}
-                knownModels={settings.knownModels}
+                knownModels={knownModels ?? settings.knownModels}
                 defaultLightModel={settings.defaultLightModels[settings.models.coding.provider]}
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />
+              <LocalTeamModelRow
+                value={settings.models.coding}
+                ollamaModels={ollamaModels?.models.map((m) => m.name) ?? []}
+                saving={saveModelMutation.isPending}
+                onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
+              />
             </Section>
-
-            <TokenUsagePanel />
 
             <JiraSettings jira={settings.jira} />
           </>

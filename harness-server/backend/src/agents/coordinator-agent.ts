@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import type { TranscriptEntry } from '../sessions/session.js';
 import type { ApiKeyProvider } from '../settings/settings.js';
-import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
+import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { resolveLanguageModel, runClaudeSingleShot } from './sdk-client.js';
 import { generateLocal } from './local-llm.js';
@@ -155,11 +155,11 @@ export async function decideNextAction(params: {
     const raw = await runClaudeSingleShot({ systemPrompt, prompt, model });
     return parseDecision(raw);
   } else {
-    const apiKey = await getCredential(provider);
-    if (!apiKey) {
+    const apiKey = await getApiKey(provider);
+    if (apiKey === null) {
       return { action: 'ready', reason: `No API key configured for ${provider} — stopping for a human to review.` };
     }
-    const languageModel = resolveLanguageModel(provider as ApiKeyProvider, model, apiKey);
+    const languageModel = await resolveLanguageModel(provider as ApiKeyProvider, model, apiKey);
     const { text } = await generateText({ model: languageModel, system: systemPrompt, prompt });
     return parseDecision(text);
   }

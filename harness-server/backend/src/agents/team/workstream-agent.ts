@@ -6,7 +6,7 @@ import { config } from '../../config.js';
 import type { AppConfig } from '../../apps/apps.js';
 import { appendTeamTranscriptEntry, getSession, mutateSession, addStageUsage } from '../../sessions/session-store.js';
 import type { CodingTeamMember, SessionRecord } from '../../sessions/session.js';
-import { getCredential, getRoleModelConfig } from '../../settings/settings-store.js';
+import { getApiKey, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
 import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
@@ -77,8 +77,12 @@ export async function runWorkstreamAgent({
   model: modelOverride,
   prompt: promptOverride,
 }: RunWorkstreamParams): Promise<void> {
-  const { provider, model: roleModel } = await getRoleModelConfig('coding');
-  const model = modelOverride ?? roleModel;
+  const { provider: roleProvider, model: roleModel } = await getRoleModelConfig('coding');
+  // When the member carries a localModel, spin it up on Ollama instead of the
+  // cloud coding model — the lead set this via assign_team based on the
+  // settings.ts localTeamModel setting.
+  const provider = member.localModel ? 'ollama' : roleProvider;
+  const model = member.localModel ?? modelOverride ?? roleModel;
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
@@ -212,8 +216,8 @@ export async function runWorkstreamAgent({
     return;
   }
 
-  const apiKey = await getCredential(provider);
-  if (!apiKey) throw new Error(`No API key configured for ${provider} — add one in Settings.`);
+  const apiKey = await getApiKey(provider);
+  if (apiKey === null) throw new Error(`No API key configured for ${provider} — add one in Settings.`);
 
   const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, repoRoot: worktreePath });
   const { readFileTool, writeFileTool, editFileTool } = createFileTools(scoped);

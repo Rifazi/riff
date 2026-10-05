@@ -6,7 +6,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
 import { appendTranscriptEntry, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
-import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
+import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
@@ -161,8 +161,8 @@ export async function runQaAgentTurn(
 
     await setClaudeSessionId(session.id, 'qa', sdkSessionId);
   } else {
-    const apiKey = await getCredential(provider);
-    if (!apiKey) {
+    const apiKey = await getApiKey(provider);
+    if (apiKey === null) {
       const message = `No API key configured for ${provider} — add one in Settings before starting QA.`;
       onEvent({ type: 'error', message });
       await appendTranscriptEntry(session.id, 'qa', { role: 'system', text: message, isError: true });

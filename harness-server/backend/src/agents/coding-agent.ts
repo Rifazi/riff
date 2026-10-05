@@ -6,7 +6,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
 import { appendTranscriptEntry, getSession, setClaudeSessionId, setHistory, updateSession, addStageUsage } from '../sessions/session-store.js';
 import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
-import { getCredential, getRoleModelConfig } from '../settings/settings-store.js';
+import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
@@ -110,7 +110,15 @@ export async function runCodingAgentTurn(
 ): Promise<SessionRecord> {
   const app = await getApp(session.appId);
   const roleConfig = await getRoleModelConfig('coding');
-  const { provider, model } = roleConfig;
+  const localTeamModel = roleConfig.localTeamModel?.trim() || null;
+  // When localTeamModel is configured, automatic solo step turns run on the
+  // local Ollama model instead of the cloud coding model (saving cloud tokens).
+  // QA fixes and human follow-ups always use the cloud model regardless.
+  const usingLocalSolo = Boolean(
+    options.stepTurn && !options.qaFix && !session.codingReconciliationPending && localTeamModel
+  );
+  const provider = usingLocalSolo ? 'ollama' : roleConfig.provider;
+  const model = usingLocalSolo ? localTeamModel! : roleConfig.model;
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
   const teamKind: CodingTeamKind = options.qaFix
@@ -272,9 +280,9 @@ export async function runCodingAgentTurn(
 
   // Light-model routing (agents/model-routing.ts): only for an automatic
   // step turn on a plan step tagged light, never for a human's follow-up,
-  // a QA fix or a reconciliation.
+  // a QA fix, a reconciliation, or when already routing to local Ollama.
   let lightStep: { id: string; title: string; model: string } | null = null;
-  const lightModel = lightModelFor(roleConfig);
+  const lightModel = usingLocalSolo ? null : lightModelFor(roleConfig);
   // Never the kickoff (no branch yet), where the lead decides team or solo.
   if (options.stepTurn && lightModel && session.branch && !session.codingTeam && !session.codingReconciliationPending) {
     const stepId = targetStepId;
@@ -374,8 +382,8 @@ export async function runCodingAgentTurn(
       session.claudeSessionIds.coding = sdkSessionId;
       return { isError };
     } else {
-      const apiKey = await getCredential(provider);
-      if (!apiKey) {
+      const apiKey = await getApiKey(provider);
+      if (apiKey === null) {
         const message = `No API key configured for ${provider} — add one in Settings before starting the coding stage.`;
         onEvent({ type: 'error', message });
         await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: message, isError: true });
@@ -548,15 +556,19 @@ function currentStepId(session: SessionRecord): string | null {
 }
 
 export function suggestedBranchName(session: SessionRecord): string {
-  // Ticket id keeps whatever case the human typed it in (e.g. "API-1234")
-  // rather than being forced to lowercase — it's a ticket key, not a slug.
-  const key = session.sessionKey.trim().replace(/\s+/g, '_');
+  const key = session.sessionKey.trim();
+  // A ticket-style key (e.g. "API-1234", "JIRA-42") has uppercase letters or
+  // uppercase+digits separated by a hyphen. When the key is just a kebab-slug
+  // of the title (no-ticket path), appending the title slug again would
+  // double it, so we use the key alone in that case.
+  const isTicketKey = /[A-Z]/.test(key);
+  if (!isTicketKey) return key;
   const titleSlug = session.title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 40);
-  return `${key}_${titleSlug}`;
+  return `${key.replace(/\s+/g, '_')}_${titleSlug}`;
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent): Promise<void> {

@@ -4,7 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FolderGit2, GitFork, Loader2, NotebookPen, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronRight, ExternalLink, FolderGit2, GitFork, Loader2, NotebookPen, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/dev-sessions/api';
@@ -191,6 +192,20 @@ export default function DevSessionsPage() {
                       aria-label="Delete session"
                     >
                       {busyDelete ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        invoke('open_session_window', { sessionId: session.id, title: session.title });
+                      }}
+                      aria-label="Open in new window"
+                      title="Open in new window"
+                    >
+                      <ExternalLink className="w-4 h-4" />
                     </Button>
                     <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-muted-foreground" />
                   </div>

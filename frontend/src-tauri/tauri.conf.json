@@ -41,7 +41,9 @@
                     "identifier": "main",
                     "description": "Main window capability with file system and media access",
                     "windows": [
-                        "main"
+                        "main",
+                        "session-*",
+                        "window-*"
                     ],
                     "permissions": [
                         "fs:default",

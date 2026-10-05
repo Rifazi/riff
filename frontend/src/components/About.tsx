@@ -47,7 +47,7 @@ export function About() {
         <h1 className="text-xl font-bold text-foreground">Riff</h1>
         <span className="text-sm text-muted-foreground"> v{currentVersion}</span>
         <p className="text-medium text-muted-foreground mt-1">
-          From riff to release. Meetings in, requirements, plans and code out, all on your machine.
+          Record meetings. Get transcripts, summaries, journals and code — powered by whichever AI fits your workflow.
         </p>
         {UPDATES_ENABLED && (
           <div className="mt-3">
@@ -82,15 +82,15 @@ export function About() {
         <h2 className="text-base font-semibold text-foreground">What makes Riff different</h2>
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-muted rounded p-3 hover:bg-muted/80 transition-colors">
-            <h3 className="font-bold text-sm text-foreground mb-1">Privacy-first</h3>
+            <h3 className="font-bold text-sm text-foreground mb-1">Transcription & summaries</h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.
+              Every word captured and timestamped. AI summaries hit your journals automatically when the meeting ends.
             </p>
           </div>
           <div className="bg-muted rounded p-3 hover:bg-muted/80 transition-colors">
-            <h3 className="font-bold text-sm text-foreground mb-1">Use Any Model</h3>
+            <h3 className="font-bold text-sm text-foreground mb-1">Use any model</h3>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.
+              Local Ollama, Claude, Groq or OpenRouter. Run fully offline or use the best cloud model — your call.
             </p>
           </div>
           <div className="bg-muted rounded p-3 hover:bg-muted/80 transition-colors">
@@ -100,8 +100,10 @@ export function About() {
             </p>
           </div>
           <div className="bg-muted rounded p-3 hover:bg-muted/80 transition-colors">
-            <h3 className="font-bold text-sm text-foreground mb-1">Works everywhere</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">Google Meet, Zoom, Teams-online or offline.</p>
+            <h3 className="font-bold text-sm text-foreground mb-1">Smart journals</h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              AI files each meeting into topic journals, so decisions and ideas are easy to find later.
+            </p>
           </div>
         </div>
       </div>
@@ -110,15 +112,15 @@ export function About() {
       <div className="bg-primary/10 rounded p-3 space-y-1">
         <h3 className="text-sm font-semibold text-foreground">Why &ldquo;Riff&rdquo;?</h3>
         <p className="text-s text-foreground leading-relaxed">
-          It&rsquo;s named for its maker, <span className="font-bold">Rifaz Iqbal</span>: the &ldquo;Rif&rdquo; in
-          Rifaz, and a nod to what a good meeting is. People riff on an idea until it takes shape. Riff listens, then
-          carries that idea the rest of the way, through requirements, plan, code and QA.
+          The best meetings aren&rsquo;t presentations &mdash; they&rsquo;re riffs. People riff on an idea until it
+          takes shape. Riff listens, captures every thread, then carries the idea the rest of the way: transcript,
+          summary, journals, and if it&rsquo;s a dev idea, all the way to code.
         </p>
       </div>
 
       {/* Footer - Compact */}
       <div className="pt-2 border-t border-border text-center">
-        <p className="text-xs text-muted-foreground">Built by Rifaz Iqbal, on Meetily by Zackriya Solutions (MIT)</p>
+        <p className="text-xs text-muted-foreground">Built on Meetily by Zackriya Solutions (MIT)</p>
       </div>
       <AnalyticsConsentSwitch />
 

@@ -4,11 +4,13 @@ import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { NotebookPen } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { ExternalLink, NotebookPen } from 'lucide-react';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
 import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ErrorText, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import { StageStepper } from '@/components/DevSessions/StageStepper';
 import { SessionReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
@@ -86,7 +88,20 @@ function SessionView() {
         </span>
       }
       back={back}
-      actions={<SessionReferenceDocsButton session={session} />}
+      actions={
+        <>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => invoke('open_session_window', { sessionId: session.id, title: session.title })}
+            aria-label="Open in new window"
+            title="Open in new window"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </Button>
+          <SessionReferenceDocsButton session={session} />
+        </>
+      }
     >
       <div className="flex-shrink-0 mb-3">
         <StageStepper session={session} current={stage} />

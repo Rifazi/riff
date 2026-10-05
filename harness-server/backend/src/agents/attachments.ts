@@ -45,6 +45,7 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
 
   const isPdf = input.mediaType === 'application/pdf' || /\.pdf$/i.test(input.name);
   const isText = input.mediaType.startsWith('text/') || /\.(md|markdown|txt|csv|json|ya?ml)$/i.test(input.name);
+  const mightBeText = input.mediaType === 'application/octet-stream' || input.mediaType === '';
 
   let text: string;
   if (isPdf) {
@@ -59,6 +60,16 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
     }
   } else if (isText) {
     text = buffer.toString('utf8');
+  } else if (mightBeText) {
+    // Browser sends application/octet-stream for unrecognized types (e.g. .ts, .py, .toml).
+    // Try UTF-8 decoding; reject if null bytes are found (indicates a real binary file).
+    const decoded = buffer.toString('utf8');
+    if (decoded.includes('\0')) {
+      throw new Error(
+        `${input.name}: unsupported file type "${input.mediaType}" — attach a PDF or a plain-text/code file.`
+      );
+    }
+    text = decoded;
   } else {
     throw new Error(
       `${input.name}: unsupported file type "${input.mediaType || 'unknown'}" — attach a PDF or a plain-text/markdown file.`

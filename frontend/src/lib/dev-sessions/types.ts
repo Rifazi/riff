@@ -354,13 +354,19 @@ export type AgentEvent =
   | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage };
 
-export type Provider = 'claude' | 'anthropic' | 'openai' | 'google';
-export const PROVIDERS: Provider[] = ['claude', 'anthropic', 'openai', 'google'];
+export type Provider = 'claude' | 'anthropic' | 'openai' | 'google' | 'ollama';
+export const PROVIDERS: Provider[] = ['claude', 'anthropic', 'openai', 'google', 'ollama'];
 
-// Every provider except "claude" (which authenticates via `claude login`
-// instead of a pasted API key) needs a stored key.
+// Every provider except "claude" (authenticates via `claude login`) and
+// "ollama" (a local, unauthenticated server) needs a stored key.
 export function providerNeedsApiKey(provider: Provider): boolean {
-  return provider !== 'claude';
+  return provider !== 'claude' && provider !== 'ollama';
+}
+
+/** A model installed in the system Ollama server, with tool support flagged. */
+export interface OllamaModel {
+  name: string;
+  tools: boolean;
 }
 
 export interface RoleModelConfig {
@@ -370,6 +376,9 @@ export interface RoleModelConfig {
   lightModel?: string;
   // Coordinator only: try Riff's built-in local model first. Unset = on.
   useLocalModel?: boolean;
+  // Coding only: when non-empty, Jack's automatic solo step turns AND every
+  // workstream team member run on this Ollama model. '' = off.
+  localTeamModel?: string;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
@@ -391,7 +400,14 @@ export interface SettingsResponse {
   knownModels: Record<Provider, string[]>;
   defaultLightModels: Record<Provider, string>;
   localModel: { available: boolean; model: string | null; reason: string | null };
+  ollamaEndpoint: string;
   jira: RedactedJiraSettings;
+}
+
+/** GET /api/settings/ollama/models — [] plus an error when Ollama is unreachable. */
+export interface OllamaModelsResponse {
+  models: OllamaModel[];
+  error?: string;
 }
 
 export interface JiraTicketRef {

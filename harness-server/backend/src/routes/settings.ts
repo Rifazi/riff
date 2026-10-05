@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { getSettings, updateSettings, type SettingsPatch } from '../settings/settings-store.js';
-import { isProvider, isRole, providerNeedsApiKey, redactSettings, type JiraSettings, type RoleModelConfig } from '../settings/settings.js';
+import { isProvider, isRole, redactSettings, type JiraSettings, type RoleModelConfig } from '../settings/settings.js';
+import { listOllamaModels, testOllama } from '../settings/ollama.js';
 import { testClaudeLogin, testProviderCredential } from '../agents/sdk-client.js';
 import { testJiraConnection } from '../jira/jira-client.js';
 
@@ -17,6 +18,9 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         if (!isProvider(key)) return reply.code(400).send({ error: `unknown provider: ${key}` });
       }
     }
+    if (body.ollamaEndpoint !== undefined && typeof body.ollamaEndpoint !== 'string') {
+      return reply.code(400).send({ error: 'ollamaEndpoint must be a string' });
+    }
     if (body.models) {
       for (const [role, cfg] of Object.entries(body.models)) {
         if (!isRole(role)) {
@@ -32,24 +36,52 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         if (roleModelConfig?.useLocalModel !== undefined && typeof roleModelConfig.useLocalModel !== 'boolean') {
           return reply.code(400).send({ error: 'useLocalModel must be a boolean' });
         }
+        if (roleModelConfig?.localTeamModel !== undefined && typeof roleModelConfig.localTeamModel !== 'string') {
+          return reply.code(400).send({ error: 'localTeamModel must be a string' });
+        }
       }
     }
     const updated = await updateSettings(body);
     return redactSettings(updated);
   });
 
-  app.post<{ Body: { provider: string; apiKey?: string; model?: string } }>(
+  // What the Settings → Dev Agents model pickers suggest for the "ollama"
+  // provider: whatever is installed on this machine, with tool support
+  // flagged (the agent roles are tool-calling loops). Failing to reach the
+  // server is not an error here — the UI shows an empty list and Test's
+  // failure message explains why.
+  app.get('/api/settings/ollama/models', async () => {
+    try {
+      return { models: await listOllamaModels() };
+    } catch (err) {
+      return { models: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.post<{ Body: { provider: string; apiKey?: string; model?: string; endpoint?: string } }>(
     '/api/settings/test',
     async (request, reply) => {
-      const { provider, apiKey, model } = request.body ?? {};
+      const { provider, apiKey, model, endpoint } = request.body ?? {};
       if (!provider || !isProvider(provider)) {
         return reply.code(400).send({ ok: false, error: 'unknown provider' });
       }
 
-      if (!providerNeedsApiKey(provider)) {
+      if (provider === 'claude') {
         try {
           await testClaudeLogin();
           return { ok: true };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
+      // Ollama takes no key: the test is reachability plus (when one is
+      // given) the model being installed and tools-capable. `endpoint` is
+      // the form's unsaved value — same test-before-save as the rest.
+      if (provider === 'ollama') {
+        try {
+          const models = await testOllama(model, typeof endpoint === 'string' ? endpoint : undefined);
+          return { ok: true, models };
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }

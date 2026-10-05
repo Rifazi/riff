@@ -9,6 +9,8 @@ import type {
   JiraSettingsFields,
   AttachmentInput,
   MeetingSourceInput,
+  OllamaModel,
+  OllamaModelsResponse,
   PlanStepSummary,
   Provider,
   ReferenceDoc,
@@ -249,6 +251,7 @@ export const api = {
   updateSettings: (patch: {
     credentials?: Partial<Record<Provider, string | null>>;
     models?: Partial<Record<Role, RoleModelConfig>>;
+    ollamaEndpoint?: string;
     jira?: Partial<JiraSettingsFields> & { apiToken?: string | null };
   }) =>
     fetch(apiUrl('/api/settings'), {
@@ -257,12 +260,14 @@ export const api = {
       body: JSON.stringify(patch),
     }).then((r) => json<SettingsResponse>(r)),
 
-  testCredential: (input: { provider: Provider; apiKey?: string; model?: string }) =>
+  testCredential: (input: { provider: Provider; apiKey?: string; model?: string; endpoint?: string }) =>
     fetch(apiUrl('/api/settings/test'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
-    }).then((r) => json<{ ok: boolean; error?: string }>(r)),
+    }).then((r) => json<{ ok: boolean; error?: string; models?: OllamaModel[] }>(r)),
+
+  listOllamaModels: () => fetch(apiUrl('/api/settings/ollama/models')).then((r) => json<OllamaModelsResponse>(r)),
 
   testJiraConnection: (input: Partial<JiraSettingsFields> & { apiToken?: string }) =>
     fetch(apiUrl('/api/settings/jira/test'), {

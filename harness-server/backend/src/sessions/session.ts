@@ -125,6 +125,9 @@ export interface CodingTeamMember extends Workstream {
   // The transcript entry the member's current conversation started after
   // (agents/handoff.ts) — null = the start of its transcript.
   contextStartEntryId?: string | null;
+  // When set, this member runs on Ollama with this model ID rather than the
+  // coding role's configured provider/model (see settings.ts localTeamModel).
+  localModel?: string | null;
 }
 
 export interface CodingContext {

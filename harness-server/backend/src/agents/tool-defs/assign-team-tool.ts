@@ -8,6 +8,7 @@ import { getSession, mutateSession } from '../../sessions/session-store.js';
 import type { CodingPlanStep, CodingTeamKind, CodingTeamMember } from '../../sessions/session.js';
 import { hasUncommittedChanges } from '../../repo/git.js';
 import { validateWorkstreams, workstreamSchema } from '../team/workstreams.js';
+import { getRoleModelConfig } from '../../settings/settings-store.js';
 
 export const assignTeamSchema = z.object({
   steps: z
@@ -76,6 +77,8 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
     if (session.branch && (await hasUncommittedChanges(deps.repoRoot))) {
       throw new Error('The branch has uncommitted changes — commit or discard them before handing work to a team.');
     }
+    const codingConfig = await getRoleModelConfig('coding');
+    const localTeamModel = codingConfig.localTeamModel?.trim() || null;
 
     const checklist: CodingPlanStep[] = session.codingPlan ?? (await approvedPlanSteps(session.planPath));
     const taken = new Set(checklist.map((s) => s.id));
@@ -113,6 +116,7 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
             transcript: [],
             history: [],
             claudeSessionId: null,
+            localModel: localTeamModel,
           })
         ),
       };

@@ -41,6 +41,9 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, item_id: &str) {
         "resume_recording" => resume_recording_handler(app),
         "stop_recording" => stop_recording_handler(app),
         "open_window" => focus_main_window(app),
+        "new_window" => {
+            let _ = crate::spawn_new_window(app, None);
+        }
         "settings" => {
             focus_main_window(app);
             if let Some(window) = app.get_webview_window("main") {
@@ -384,6 +387,7 @@ fn build_menu<R: Runtime>(
     builder
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("open_window", "Open Main Window").build(app)?)
+        .item(&MenuItemBuilder::with_id("new_window", "New Window").build(app)?)
         .item(&MenuItemBuilder::with_id("settings", "Settings").build(app)?)
         // "check_updates" menu item hidden until Riff has its own release feed
         // (see UPDATES_ENABLED in frontend/src/services/updateService.ts).

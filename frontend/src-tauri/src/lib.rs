@@ -63,6 +63,7 @@ use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
@@ -448,6 +449,96 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+pub fn spawn_new_window<R: Runtime>(app: &AppHandle<R>, path: Option<String>) -> Result<(), String> {
+    let path = path.unwrap_or_else(|| "/".to_string());
+    let label = format!(
+        "window-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    tauri::WebviewWindowBuilder::new(
+        app,
+        label,
+        tauri::WebviewUrl::App(path.into()),
+    )
+    .title("Riff")
+    .inner_size(1100.0, 700.0)
+    .resizable(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_new_window<R: Runtime>(
+    app: AppHandle<R>,
+    path: Option<String>,
+) -> Result<(), String> {
+    spawn_new_window(&app, path)
+}
+
+#[tauri::command]
+async fn open_session_window<R: Runtime>(
+    app: AppHandle<R>,
+    session_id: String,
+    title: String,
+) -> Result<(), String> {
+    let label = format!("session-{}", session_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        label,
+        tauri::WebviewUrl::App(format!("/dev-sessions/session?id={}", session_id).into()),
+    )
+    .title(title)
+    .inner_size(1100.0, 700.0)
+    .resizable(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&MenuItemBuilder::with_id("new_window", "New Window")
+            .accelerator("CmdOrCtrl+N")
+            .build(app)?)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .close_window()
+        .build()?;
+
+    #[cfg(target_os = "macos")]
+    let app_menu = SubmenuBuilder::new(app, "Riff")
+        .about(None)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .services()
+        .item(&PredefinedMenuItem::separator(app)?)
+        .hide()
+        .hide_others()
+        .show_all()
+        .item(&PredefinedMenuItem::separator(app)?)
+        .quit()
+        .build()?;
+
+    #[cfg(target_os = "macos")]
+    let menu = MenuBuilder::new(app)
+        .item(&app_menu)
+        .item(&file_menu)
+        .build()?;
+
+    #[cfg(not(target_os = "macos"))]
+    let menu = MenuBuilder::new(app).item(&file_menu).build()?;
+
+    Ok(menu)
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -470,6 +561,11 @@ pub fn run() {
     }
 
     builder
+        .on_menu_event(|app, event| {
+            if event.id() == "new_window" {
+                let _ = spawn_new_window(app, None);
+            }
+        })
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -513,6 +609,16 @@ pub fn run() {
             };
 
             log::info!("Application setup complete");
+
+            // Build and attach the native app menu
+            match build_app_menu(_app.handle()) {
+                Ok(menu) => {
+                    if let Err(e) = _app.set_menu(menu) {
+                        log::warn!("Failed to set app menu: {}", e);
+                    }
+                }
+                Err(e) => log::warn!("Failed to build app menu: {}", e),
+            }
 
             // Local agent server behind Dev Sessions (requirements → QA)
             agent_server::start(_app.handle());
@@ -835,6 +941,9 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            // Window commands
+            open_new_window,
+            open_session_window,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,
