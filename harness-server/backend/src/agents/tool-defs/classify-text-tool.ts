@@ -10,9 +10,14 @@ export const classifyTextSchema = z.object({
     .describe(
       'The candidate labels to rank the text against, e.g. ["bug report", "feature request", "question"] — at least two',
     ),
+  // Optional, not `.default('single')`: both engines treat a zod default as a
+  // required argument (the Claude/MCP path rejects a call that omits it with
+  // "expected nonoptional, received undefined"), so the default lives in
+  // classifyText()'s `params.mode ?? 'single'` instead — same as every other
+  // optional tool parameter in tool-defs/.
   mode: z
     .enum(['single', 'multi'])
-    .default('single')
+    .optional()
     .describe(
       '"single" (default): return the one best-fitting label. "multi": return every label that fits, scored independently.',
     ),

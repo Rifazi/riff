@@ -94,8 +94,3 @@ export async function getJiraSettings(): Promise<JiraSettings> {
   const settings = await getSettings();
   return settings.jira;
 }
-
-export async function getClassificationSettings(): Promise<ClassificationSettings> {
-  const settings = await getSettings();
-  return settings.classification;
-}

@@ -4,6 +4,18 @@ import { env, pipeline } from '@xenova/transformers';
 import { config } from '../config.js';
 import { CLASSIFICATION_MODELS, DEFAULT_CLASSIFICATION_MODEL } from '../settings/settings.js';
 import { getSettings } from '../settings/settings-store.js';
+import {
+  normalizeLabels,
+  normalizeMode,
+  normalizeText,
+  normalizeThreshold,
+  rankScores,
+  selectLabels,
+  type ClassificationMode,
+  type LabelScore,
+} from './classification-core.js';
+
+export { DEFAULT_MULTI_LABEL_THRESHOLD, type ClassificationMode, type LabelScore } from './classification-core.js';
 
 // On-device zero-shot text classification for the Dev Sessions agents.
 //
@@ -24,11 +36,6 @@ import { getSettings } from '../settings/settings-store.js';
 // coexist without colliding.
 export const CLASSIFICATION_CACHE_DIR = path.join(config.stateDir, 'classification-models');
 
-/** Multi-label mode keeps every label scoring at least this, unless the caller overrides it. */
-export const DEFAULT_MULTI_LABEL_THRESHOLD = 0.5;
-
-export type ClassificationMode = 'single' | 'multi';
-
 export interface ClassifyTextParams {
   text: string;
   labels: string[];
@@ -36,11 +43,6 @@ export interface ClassifyTextParams {
   mode?: ClassificationMode;
   /** Multi-label only; defaults to DEFAULT_MULTI_LABEL_THRESHOLD. */
   threshold?: number;
-}
-
-export interface LabelScore {
-  label: string;
-  score: number;
 }
 
 export interface ClassifyTextResult {
@@ -165,55 +167,12 @@ async function selectedModel(): Promise<string> {
   }
 }
 
-// --- input validation --------------------------------------------------------
-// Every failure in here is a plain `throw`: both agent engines turn a thrown
-// Error into a tool-level error for the model to read and retry, rather than
-// failing the turn (see tool-defs-claude/wrap.ts and agents/sdk-client.ts).
-
-function normalizeLabels(labels: unknown): string[] {
-  if (!Array.isArray(labels)) {
-    throw new Error('classify_text needs a "labels" array of at least 2 candidate labels.');
-  }
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const label of labels) {
-    if (typeof label !== 'string') {
-      throw new Error('classify_text labels must all be strings.');
-    }
-    const trimmed = label.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    normalized.push(trimmed);
-  }
-  if (normalized.length < 2) {
-    throw new Error(
-      `classify_text needs at least 2 distinct, non-empty candidate labels (got ${normalized.length}). ` +
-        'Zero-shot classification ranks labels against each other, so a single label has nothing to compare to.',
-    );
-  }
-  return normalized;
-}
-
-function normalizeThreshold(threshold: number | undefined, mode: ClassificationMode): number | null {
-  if (mode === 'single') return null;
-  if (threshold === undefined) return DEFAULT_MULTI_LABEL_THRESHOLD;
-  if (typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
-    throw new Error(`classify_text "threshold" must be a number between 0 and 1 (got ${String(threshold)}).`);
-  }
-  return threshold;
-}
-
 export async function classifyText(params: ClassifyTextParams): Promise<ClassifyTextResult> {
-  const text = typeof params.text === 'string' ? params.text.trim() : '';
-  if (!text) {
-    throw new Error('classify_text needs a non-empty "text" to classify.');
-  }
-
-  const mode: ClassificationMode = params.mode ?? 'single';
-  if (mode !== 'single' && mode !== 'multi') {
-    throw new Error(`classify_text "mode" must be "single" or "multi" (got ${String(params.mode)}).`);
-  }
-
+  // Input normalization and result selection live in classification-core.js,
+  // which is unit-tested without a model; this function is the part that
+  // actually loads and runs the pipeline.
+  const text = normalizeText(params.text);
+  const mode = normalizeMode(params.mode);
   const labels = normalizeLabels(params.labels);
   const threshold = normalizeThreshold(params.threshold, mode);
 
@@ -231,13 +190,8 @@ export async function classifyText(params: ClassifyTextParams): Promise<Classify
     throw new Error(`On-device classification returned an unexpected result shape from "${model}".`);
   }
 
-  // The pipeline already returns labels sorted by descending score; sort again
-  // so the contract here doesn't depend on that staying true.
-  const allScores: LabelScore[] = output.labels
-    .map((label, index) => ({ label, score: output.scores[index] ?? 0 }))
-    .sort((a, b) => b.score - a.score);
-
-  const selected = threshold === null ? allScores.slice(0, 1) : allScores.filter((entry) => entry.score >= threshold);
+  const allScores: LabelScore[] = rankScores(output.labels, output.scores);
+  const selected = selectLabels(allScores, threshold);
 
   return { model, mode, threshold, selected, allScores };
 }
