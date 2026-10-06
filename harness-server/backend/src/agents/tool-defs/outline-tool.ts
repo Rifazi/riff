@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -156,6 +157,9 @@ export function outlineText(content: string, fileName: string): string[] {
 }
 
 export function createOutlineFileExecute(deps: { repoRoot: string }) {
+  const notedRepeats = new Map<string, string>();
+  const lastOutlines = new Map<string, string>();
+
   return async ({ path: requestedPath }: z.infer<typeof outlineFileSchema>): Promise<string> => {
     const absolute = assertPathAllowed(requestedPath, ['.'], deps.repoRoot);
     const content = await fs.readFile(absolute, 'utf8');
@@ -166,7 +170,15 @@ export function createOutlineFileExecute(deps: { repoRoot: string }) {
     if (body.length > OUTLINE_CHAR_LIMIT) {
       body = `${body.slice(0, body.lastIndexOf('\n', OUTLINE_CHAR_LIMIT))}\n[outline cut at ${OUTLINE_CHAR_LIMIT} chars]`;
     }
-    return `${requestedPath}: ${total} lines\n${body}`;
+    const result = `${requestedPath}: ${total} lines\n${body}`;
+    const hash = createHash('sha1').update(result).digest('hex');
+    if (lastOutlines.get(requestedPath) === hash && notedRepeats.get(requestedPath) !== hash) {
+      notedRepeats.set(requestedPath, hash);
+      return `[${requestedPath} is unchanged since you last outlined it — use that outline. Call again to get the outline text.]`;
+    }
+    notedRepeats.delete(requestedPath);
+    lastOutlines.set(requestedPath, hash);
+    return result;
   };
 }
 

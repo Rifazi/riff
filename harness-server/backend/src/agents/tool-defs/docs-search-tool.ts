@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
@@ -41,6 +42,9 @@ export const readDocDescription =
 
 // sessionId adds that session's own reference documents to the app's.
 export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
+  const notedRepeats = new Map<string, string>();
+  const lastReads = new Map<string, string>();
+
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
     const [referenceScopes] = await Promise.all([
       syncReferenceDocsSearch(deps.appId, deps.sessionId),
@@ -62,24 +66,32 @@ export function createDocsSearchExecutors(deps: { appId: string; sessionId?: str
   };
 
   const readDocExecute = async ({ path: requestedPath, heading }: z.infer<typeof readDocSchema>): Promise<string> => {
+    let content: string;
     if (requestedPath.startsWith('reference/')) {
-      const content = await readReferenceDoc(deps.appId, deps.sessionId, requestedPath, heading);
-      if (content === null) throw new Error(`No reference document at ${requestedPath}.`);
-      return content;
+      const raw = await readReferenceDoc(deps.appId, deps.sessionId, requestedPath, heading);
+      if (raw === null) throw new Error(`No reference document at ${requestedPath}.`);
+      content = raw;
+    } else if (requestedPath === REPO_INSTRUCTIONS_FILE) {
+      content = await readRepoInstructions(deps.repoRoot ?? (await getApp(deps.appId)).repoRoot, heading);
+    } else if (requestedPath === SESSION_PLAN_DOC || requestedPath === SESSION_REQUIREMENTS_DOC) {
+      content = await readSessionDoc(deps.sessionId, requestedPath, heading);
+    } else {
+      if (!requestedPath.startsWith('docs/')) {
+        throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/, nor ${REPO_INSTRUCTIONS_FILE}, ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}.`);
+      }
+      const raw = readDocSection(deps.appId, requestedPath, heading);
+      if (raw === null) throw new Error(`No indexed content found for ${requestedPath}.`);
+      content = raw;
     }
-    if (requestedPath === REPO_INSTRUCTIONS_FILE) {
-      return readRepoInstructions(deps.repoRoot ?? (await getApp(deps.appId)).repoRoot, heading);
+
+    const key = `${requestedPath}\u0000${heading ?? ''}`;
+    const hash = createHash('sha1').update(content).digest('hex');
+    if (lastReads.get(key) === hash && notedRepeats.get(key) !== hash) {
+      notedRepeats.set(key, hash);
+      return `[${requestedPath}${heading ? ` > ${heading}` : ''} is unchanged since you last read it — use that copy. Call again to get the text.]`;
     }
-    if (requestedPath === SESSION_PLAN_DOC || requestedPath === SESSION_REQUIREMENTS_DOC) {
-      return readSessionDoc(deps.sessionId, requestedPath, heading);
-    }
-    if (!requestedPath.startsWith('docs/')) {
-      throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/, nor ${REPO_INSTRUCTIONS_FILE}, ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}.`);
-    }
-    const content = readDocSection(deps.appId, requestedPath, heading);
-    if (content === null) {
-      throw new Error(`No indexed content found for ${requestedPath}.`);
-    }
+    notedRepeats.delete(key);
+    lastReads.set(key, hash);
     return content;
   };
 

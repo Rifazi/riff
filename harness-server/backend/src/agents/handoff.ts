@@ -101,7 +101,7 @@ const NOTES_SYSTEM = `You write handoff notes for a software engineer who is tak
 ### Learned
 ### Next
 
-"Learned" is for facts about the codebase worth not rediscovering: where things live, conventions, commands, gotchas, which tests fail and why. Use only facts in the log, be concrete (file paths, function names, error messages), no preamble, at most 250 words. Write "- none" under a heading with nothing to say.`;
+"Learned" is for facts about the codebase worth not rediscovering: where things live, conventions, commands, gotchas, which tests fail and why. Include key facts from files that were read — for example: "package.json: monorepo root with workspaces backend/, infra/, frontend/" or "backend/src/routes/audit.ts: defines GET /audit using auditHandlers.list, lines 1-45". The next engineer will re-read those files if they find nothing here, so anything that saves a re-read belongs in Learned. Use only facts in the log, be concrete (file paths, function names, error messages), no preamble, at most 300 words. Write "- none" under a heading with nothing to say.`;
 
 async function qwenNotes(entries: ContextEntry[]): Promise<string | null> {
   const log = activityLog(entries);
