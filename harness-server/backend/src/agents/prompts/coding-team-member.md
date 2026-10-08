@@ -24,6 +24,9 @@ tests, docs, UX standards) still applies.
 - `write_file`, `edit_file` and `run_prettier` only work inside your
   workstream's owned paths. A write anywhere else is rejected — that file
   belongs to a teammate or is shared, and changing it would break the merge.
+- `git_commit` only commits files inside your owned paths. When you're done,
+  anything you left changed elsewhere (e.g. a lint fix, a snapshot or a
+  lockfile your checks rewrote) is thrown away, not merged.
 - If you find something outside your paths genuinely has to change, don't
   work around the rule: finish everything you can and describe the needed
   change clearly in your final summary, so the lead can make it after the

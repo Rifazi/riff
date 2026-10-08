@@ -2,16 +2,19 @@ import { useState } from 'react';
 import { postSSE } from './sse-client';
 import type { TeamEvent, TranscriptEntry } from './types';
 
+/** Which team a run drives: the coding team or the QA team. */
+export type TeamKind = 'coding' | 'qa';
+
 let seq = 0;
 const nextId = () => `overlay-team-${++seq}`;
 
 /**
- * Drives /coding/team/run: one SSE stream carrying every team member's
+ * Drives /coding/team/run or /qa/team/run: one SSE stream carrying every team member's
  * events, tagged by memberId. Keeps a live overlay and "running tool" per
  * member (the persisted transcripts arrive with the next session refetch),
  * mirroring what useAgentTurnStream does for a single agent.
  */
-export function useTeamRun() {
+export function useTeamRun(kind: TeamKind = 'coding') {
   const [running, setRunning] = useState(false);
   const [overlays, setOverlays] = useState<Record<string, TranscriptEntry[]>>({});
   const [runningTools, setRunningTools] = useState<Record<string, string | null>>({});
@@ -35,10 +38,10 @@ export function useTeamRun() {
     try {
       // Each call's tool, so a result can be shown for its tool (the delegate card).
       const toolNames = new Map<string, string>();
-      await postSSE<TeamEvent>(`/api/sessions/${sessionId}/coding/team/run`, {}, (e) => {
+      await postSSE<TeamEvent>(`/api/sessions/${sessionId}/${kind}/team/run`, {}, (e) => {
         if (e.type === 'error') {
           setError(e.message);
-        } else if (e.type === 'team_member_status' || e.type === 'team_status') {
+        } else if (e.type === 'team_member_status' || e.type === 'team_status' || e.type === 'team_check') {
           // Persisted server-side — refetch for the new status.
           if (e.type === 'team_member_status' && e.status !== 'running') {
             setRunningTools((prev) => ({ ...prev, [e.memberId]: null }));

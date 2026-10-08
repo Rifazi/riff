@@ -1,14 +1,31 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { config } from '../../config.js';
 import { getSession, mutateSession } from '../../sessions/session-store.js';
-import type { CodingPlanStep, CodingTeamKind, CodingTeamMember } from '../../sessions/session.js';
+import type { CodingPlanStep, CodingTeamKind, CodingTeamMember, Workstream } from '../../sessions/session.js';
 import { hasUncommittedChanges } from '../../repo/git.js';
 import { validateWorkstreams, workstreamSchema } from '../team/workstreams.js';
 import { getRoleModelConfig } from '../../settings/settings-store.js';
+import { planStepEfforts } from '../model-routing.js';
+
+const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb'];
+
+/**
+ * The workstream that owns package.json is the only one that can run
+ * run_npm_install, which rewrites the lockfile, so it owns the lockfile too.
+ * Another workstream listing it is then an overlap validation reports.
+ */
+function withLockfiles(repoRoot: string, workstreams: Workstream[]): Workstream[] {
+  const present = LOCKFILES.filter((f) => existsSync(path.join(repoRoot, f)));
+  return workstreams.map((ws) =>
+    ws.ownedPaths.some((p) => p.trim().replace(/^\.\//, '') === 'package.json')
+      ? { ...ws, ownedPaths: [...new Set([...ws.ownedPaths, ...present])] }
+      : ws
+  );
+}
 
 export const assignTeamSchema = z.object({
   steps: z
@@ -45,12 +62,16 @@ export const assignTeamDescription =
   'whenever QA sends the branch back (its findings).\n\n' +
   'Split only when it genuinely saves time: two or more groups of steps write completely disjoint sets of files ' +
   '(e.g. an API endpoint and the page that calls it, two unrelated adapters, fixes in unrelated areas), at least two ' +
-  'groups can run at the same time, and each is a meaningful chunk, not a one-line change. Small or tightly coupled ' +
+  'groups can run at the same time, and each is a meaningful chunk, not a one-line change. The longest chain of ' +
+  'dependent workstreams must be at most three quarters of the work (light steps count half), so a big foundation ' +
+  'with two small leaves is rejected. Small or tightly coupled ' +
   'work, or anything where you aren\'t sure which files a step touches, you build yourself — don\'t call this.\n\n' +
   'For each workstream:\n' +
   '- ownedPaths: every file or directory it will write, new and edited, tests included. Ownership is enforced (an ' +
   'engineer cannot write outside its paths) and no two workstreams may overlap, so be complete, and prefer ' +
   'directories for new code over guessing filenames.\n' +
+  '- Each engineer can only commit inside its ownedPaths; changes its checks or formatter make anywhere else are ' +
+  'discarded before the merge. The workstream owning package.json automatically owns the lockfile too.\n' +
   '- Shared touch points (package.json and the lockfile, a route or DI registry, a barrel index.ts, shared types or ' +
   'schemas) go to exactly one workstream, usually a small foundation workstream the others list in dependsOn. A ' +
   'dependent workstream starts from the merged result of everything it depends on.\n' +
@@ -89,7 +110,7 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
     const added: CodingPlanStep[] = newSteps.map((s) => ({ id: s.id, title: s.title, brief: s.brief, status: 'pending' }));
     const open = [...checklist, ...added].filter((s) => s.status !== 'done').map((s) => s.id);
     // Thrown before anything is saved, so the model sees why and retries.
-    const valid = validateWorkstreams(open, workstreams);
+    const valid = validateWorkstreams(open, withLockfiles(deps.repoRoot, workstreams), await planStepEfforts(session));
 
     let round = 1;
     await mutateSession(deps.sessionId, (s) => {

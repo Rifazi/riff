@@ -270,9 +270,58 @@ export interface CodingTeamState {
   finishedAt: string | null;
 }
 
+/** One part of a QA review the QA lead handed a reviewer (read-only, in parallel with the others). */
+export interface QaReviewArea {
+  id: string;
+  title: string;
+  criteria: string[];
+  focusPaths: string[];
+  brief: string;
+}
+
+export type QaReviewerStatus = 'waiting' | 'running' | 'done' | 'failed';
+
+export interface QaReviewFindings {
+  summary: string;
+  criteria: { criterion: string; verdict: 'met' | 'not-met' | 'unverified'; note: string }[];
+  blockingFindings: string[];
+  actionableNotes: string[];
+}
+
+export interface QaTeamMember extends QaReviewArea {
+  status: QaReviewerStatus;
+  note: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  transcript: TranscriptEntry[];
+  findings: QaReviewFindings | null;
+}
+
+export type QaCheckCommand = 'lint' | 'test';
+
+export interface QaTeamCheck {
+  command: QaCheckCommand;
+  status: 'pending' | 'running' | 'pass' | 'fail';
+  output: string | null;
+}
+
+export interface QaTeamState {
+  status: CodingTeamState['status'];
+  round: number;
+  members: QaTeamMember[];
+  /** Lint and the unit tests, run by the team runner alongside the reviewers. */
+  checks: QaTeamCheck[];
+  startedAt: string;
+  finishedAt: string | null;
+  /** The lead's next turn has been handed the reviewers' findings. */
+  relayed: boolean;
+}
+
+/** Shared by the coding team and the QA team runs. */
 export type TeamEvent =
   | { type: 'team_member_event'; memberId: string; event: AgentEvent }
-  | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus; note: string | null }
+  | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus | QaReviewerStatus; note: string | null }
+  | { type: 'team_check'; command: QaCheckCommand; status: QaTeamCheck['status'] }
   | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
   | { type: 'error'; message: string };
 
@@ -320,6 +369,8 @@ export interface SessionRecord {
   codingTeamHistory: CodingTeamState[];
 
   qaReportPath: string | null;
+  qaTeam: QaTeamState | null;
+  qaTeamHistory: QaTeamState[];
   delivery: SessionDelivery | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
 

@@ -824,6 +824,64 @@ below) — never inside the target repo.
      names to `mcp__harness-tools__<name>`.
    Not yet checked against a real coding run.
 
+32. User asked that the team only run when parallel work makes sense, and
+   never mess up the git history. Owned paths limited only file writes, so
+   commits could still pick up other files. A team member's `git_commit`
+   (`GitToolDeps.writablePaths` → `stageAndCommit`'s `scope`) refuses files
+   outside its owned paths, and a catch-all commit stages only those paths.
+   Before the final auto-commit, `coding-team.ts` discards uncommitted
+   changes outside them (lint --fix, snapshots, a lockfile, build output)
+   and notes them in the member's chat. A branch whose commits still touch
+   other files (a hook, say) fails instead of merging. `mergeBranch` takes
+   the session branch and refuses if the main checkout has moved to another
+   branch or is dirty (another session or the human may be using it). A
+   member that already finished, so only its merge failed, resumes straight
+   to the merge. `validateWorkstreams` rejects a split whose longest
+   dependency chain is over `MAX_CRITICAL_SHARE` (75%) of the work, with
+   light plan steps counted as half. `assign_team` gives the workstream that
+   owns `package.json` the lockfile too. Tests:
+   `frontend/tests/harness-server/coding-team-git.test.ts` (temp repo).
+
+32. User asked for the QA agent to be parallelized like coding, reusing as
+   much code and UI as possible. Tess, the QA lead, got `assign_qa_team`
+   (`tool-defs/qa-team-tools.ts`): 2+ reviewers, each with its own
+   acceptance criteria (every criterion to exactly one reviewer; "Docs to
+   update" counts as one), focus paths and a brief, validated by
+   `agents/team/qa-review-areas.ts`. Like `assign_team` it only records
+   `session.qaTeam` (`assigned`, a `round`; the previous round moves to
+   `qaTeamHistory`), and the QA tab starts it once Tess's turn ends.
+   `agents/team/qa-team.ts` (`POST /qa/team/run`, the same `TeamEvent` SSE
+   as the coding team plus `team_check`) runs every reviewer at once and,
+   alongside them, lint then the unit tests (one after the other: they share
+   `junit.xml`), storing results in `qaTeam.checks`. Reviewers are read-only,
+   so there are no worktrees, owned paths, dependencies or merges: they share
+   the main checkout. A reviewer (`team/qa-reviewer-agent.ts`) is the QA
+   prompt (or override) + `prompts/qa-team-reviewer.md` + its criteria, with
+   QA's read-only tools (`createReviewTools` in qa-agent.ts, shared with the
+   lead) plus `submit_review`, which stores `QaReviewFindings` on the member.
+   No `run_checked_command`, report or questions. One that ends without
+   submitting is `failed`; the run is then `needs_attention`, and resuming
+   reruns only reviewers without findings, from a fresh conversation, and
+   only checks that never finished. Once a round is `done` the QA tab sends
+   Tess a wrap-up message; Tess's next turn, whoever sends it, is prefixed
+   once (`qaTeam.relayed`) with `formatQaTeamFindings`: check results (failing
+   output only), every reviewer's verdicts and findings, and the criteria of
+   any reviewer that didn't report. She writes the one report. A QA rerun
+   after fixes retires the team to history, so the fresh pass decides again.
+   The coordinator says "ready" while a QA team is assigned or running.
+   Reviewer usage counts toward the QA stage. UI: the team board moved from
+   `CodingTeam.tsx` into the generic `AgentTeam.tsx` (`TeamPanel`,
+   `EarlierRounds`, `PathChips`); `CodingTeam.tsx` and `QaTeam.tsx` are thin
+   wrappers, and `lib/dev-sessions/useTeamBoard.ts` (run, poll, auto-start
+   per round, live overlays) drives both stages. Reviewers have their own
+   pun-name roster (`qaReviewerPersona`) and Tess shows as "QA Lead".
+   `CodingPlanChecklist` takes a `failed` item state and a count label so it
+   shows a reviewer's criteria (met / not met / unverified). Verified on a
+   scratch copy with a stub reviewer: validation, concurrent reviewers and
+   checks, a reviewer that didn't submit, resume, a second round and boot
+   recovery; `frontend/tests/harness-server/qa-review-areas.test.ts` covers
+   validation and the findings text. Not run with real agents yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

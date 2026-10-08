@@ -11,7 +11,7 @@ import {
   updateSession,
   addStageUsage,
 } from '../sessions/session-store.js';
-import type { SessionRecord } from '../sessions/session.js';
+import type { QaTeamState, SessionRecord } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
@@ -20,7 +20,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateToolEntry } from './helpers/research/tool.js';
-import { stageHelperContext } from './helpers/helper.js';
+import { stageHelperContext, type HelperContext } from './helpers/helper.js';
 import { tryCompressCode, compressMessages } from './helpers/compress.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
@@ -43,9 +43,15 @@ import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createWriteQaReportToolClaude } from './tool-defs-claude/write-qa-report-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { createAssignQaTeamTool } from './tool-defs/qa-team-tools.js';
+import { createAssignQaTeamToolClaude } from './tool-defs-claude/qa-team-tools.js';
+import { formatQaTeamFindings } from './team/qa-review-areas.js';
+import type { CheckCommand } from './tool-defs/qa-tools.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/qa-agent.md');
-const TOOL_NAMES = [
+// What QA reads the branch with — shared by the QA lead and its reviewers
+// (team/qa-reviewer-agent.ts), none of which can change anything.
+export const REVIEW_TOOL_NAMES = [
   'search_docs',
   'read_doc',
   'search_code',
@@ -54,12 +60,84 @@ const TOOL_NAMES = [
   'read_file',
   'outline_file',
   'get_diff',
+];
+const TOOL_NAMES = [
+  ...REVIEW_TOOL_NAMES,
   'run_checked_command',
   'write_qa_report',
+  'assign_qa_team',
   'ask_multiple_choice',
   'ask_question',
 ];
 
+export interface ReviewToolDeps {
+  appId: string;
+  sessionId: string;
+  repoRoot: string;
+  baseBranch: string;
+  checkCommands?: Partial<Record<CheckCommand, string>>;
+  helperContext: HelperContext;
+}
+
+/** The read-only review tools (REVIEW_TOOL_NAMES) for either engine. */
+export function createReviewTools(deps: ReviewToolDeps) {
+  const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext };
+  return {
+    claude: () => {
+      const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: deps.appId, sessionId: deps.sessionId });
+      const { readFileToolClaude } = createFileToolsClaude({ repoRoot: deps.repoRoot, compress: tryCompressCode });
+      const { getDiffToolClaude } = createQaToolsClaude(qaDeps);
+      return [
+        searchDocsToolClaude,
+        readDocToolClaude,
+        createSearchCodeToolClaude({ repoRoot: deps.repoRoot }),
+        createOutlineFileToolClaude({ repoRoot: deps.repoRoot }),
+        createAuditThemeToolClaude({ repoRoot: deps.repoRoot }),
+        createClassifyTextToolClaude(deps.helperContext),
+        readFileToolClaude,
+        getDiffToolClaude,
+      ];
+    },
+    aiSdk: (): ToolSet => {
+      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: deps.appId, sessionId: deps.sessionId });
+      const { readFileTool } = createFileTools({ repoRoot: deps.repoRoot, compress: tryCompressCode });
+      const { getDiffTool } = createQaTools(qaDeps);
+      return {
+        search_docs: searchDocsTool,
+        read_doc: readDocTool,
+        search_code: createSearchCodeTool({ repoRoot: deps.repoRoot }),
+        outline_file: createOutlineFileTool({ repoRoot: deps.repoRoot }),
+        audit_theme: createAuditThemeTool({ repoRoot: deps.repoRoot }),
+        classify_text: createClassifyTextTool(deps.helperContext),
+        read_file: readFileTool,
+        get_diff: getDiffTool,
+      };
+    },
+  };
+}
+
+// Asked on the lead's first turn of a review. The when-to-split criteria live
+// in assign_qa_team's description, since an app's prompt override replaces
+// the base prompt.
+const QA_TEAM_FIRST_TURN_NOTE =
+  `\n\n# First: review it yourself, or split it across a QA team?\n\nYou are the QA lead. Before checking the ` +
+  `criteria one by one, look at the requirements and get_diff (no path) and decide whether a team of reviewers ` +
+  `should check this branch in parallel (assign_qa_team says when that's worth it). If so, call assign_qa_team ` +
+  `and end your turn; you write the report from their findings. If not, review it yourself as below.`;
+
+/** What the lead needs to know about the current QA team round. */
+function qaTeamSection(team: QaTeamState): string {
+  const members = team.members
+    .map((m) => `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; ${m.criteria.length} criteria`)
+    .join('\n');
+  const state =
+    team.status === 'assigned'
+      ? "You split this review across a team; it hasn't started yet. Calling assign_qa_team again replaces that split."
+      : team.status === 'running'
+        ? 'Your reviewers are checking the branch now.'
+        : 'Your reviewers have finished; their findings are in your messages.';
+  return `\n\n# Your QA team (round ${team.round})\n\n${state}\n\nReviewers:\n${members}`;
+}
 export async function runQaAgentTurn(
   session: SessionRecord,
   userMessage: string,
@@ -94,11 +172,25 @@ export async function runQaAgentTurn(
     session.claudeSessionIds.qa = null;
     await setHistory(session.id, 'qa', []);
     await setClaudeSessionId(session.id, 'qa', null);
-    await updateSession(session.id, { qaRerunPending: false });
+    // The last pass's team reviewed the pre-fix branch: it becomes history,
+    // and the fresh pass decides afresh whether to split.
+    const retired = session.qaTeam;
+    session.qaTeamHistory = retired ? [...session.qaTeamHistory, retired] : session.qaTeamHistory;
+    session.qaTeam = null;
+    await updateSession(session.id, { qaRerunPending: false, qaTeam: null, qaTeamHistory: session.qaTeamHistory });
     session.qaRerunPending = false;
+  }
+  // The team finished since the lead last spoke: hand it every reviewer's
+  // findings, once, whoever sent this message.
+  const team = session.qaTeam;
+  const relayFindings = Boolean(team?.finishedAt) && !team!.relayed;
+  if (relayFindings) {
+    team!.relayed = true;
+    await updateSession(session.id, { qaTeam: team });
   }
   await appendTranscriptEntry(session.id, 'qa', { role: 'user', text: userMessage });
   let prompt = await applyAttachments(session.id, 'qa', userMessage, attachments);
+  if (relayFindings) prompt = `${formatQaTeamFindings(team!)}\n\n---\n\n${prompt}`;
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('qa');
@@ -123,7 +215,9 @@ export async function runQaAgentTurn(
         `each one is actually resolved, but still do the full review above — every acceptance criterion, lint ` +
         `and tests — since the fixes may have broken something else.\n\n${previousFindings}`;
     }
+    if (!session.qaTeam) systemPrompt += QA_TEAM_FIRST_TURN_NOTE;
   }
+  if (session.qaTeam) systemPrompt += qaTeamSection(session.qaTeam);
 
   // What the human has already provided, so the agent reads it instead of
   // asking for it again (see sessions/reference-docs.ts).
@@ -138,42 +232,27 @@ export async function runQaAgentTurn(
     void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
+  const reviewTools = createReviewTools({
+    appId: app.id,
+    sessionId: session.id,
+    repoRoot: app.repoRoot,
+    baseBranch: baseBranchFor(app),
+    checkCommands: app.checkCommands,
+    helperContext,
+  });
+  const reportInfo = { sessionKey: session.sessionKey, sessionId: session.id, branch, requirementsPath };
+  const checkDeps = { repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands, helperContext };
+
   if (provider === 'claude') {
-    const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
-      appId: app.id,
-      sessionId: session.id,
-    });
-    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot, compress: tryCompressCode });
-    const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({
-      repoRoot: app.repoRoot,
-      baseBranch: baseBranchFor(app),
-      checkCommands: app.checkCommands,
-      helperContext,
-    });
-    const createMcpServer = () =>
-      createSdkMcpServer({
-        name: 'harness-tools',
-        version: '1.0.0',
-        tools: [
-          searchDocsToolClaude,
-          readDocToolClaude,
-          createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
-          createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
-          createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          createClassifyTextToolClaude(helperContext),
-          readFileToolClaude,
-          getDiffToolClaude,
-          runCheckedCommandToolClaude,
-          createWriteQaReportToolClaude({
-            sessionKey: session.sessionKey,
-            sessionId: session.id,
-            branch,
-            requirementsPath,
-          }),
-          askMultipleChoiceToolClaude,
-          askQuestionToolClaude,
-        ],
-      });
+    const tools = [
+      ...reviewTools.claude(),
+      createQaToolsClaude(checkDeps).runCheckedCommandToolClaude,
+      createWriteQaReportToolClaude(reportInfo),
+      createAssignQaTeamToolClaude({ sessionId: session.id }),
+      askMultipleChoiceToolClaude,
+      askQuestionToolClaude,
+    ];
+    const createMcpServer = () => createSdkMcpServer({ name: 'harness-tools', version: '1.0.0', tools });
 
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
@@ -196,33 +275,14 @@ export async function runQaAgentTurn(
       return session;
     }
 
-    const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
-    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot, compress: tryCompressCode });
-    const { runCheckedCommandTool, getDiffTool } = createQaTools({
-      repoRoot: app.repoRoot,
-      baseBranch: baseBranchFor(app),
-      checkCommands: app.checkCommands,
-      helperContext,
-    });
     const tools: ToolSet = {
-      search_docs: searchDocsTool,
-      read_doc: readDocTool,
-      search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
-      outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
-      audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: createClassifyTextTool(helperContext),
-      read_file: readFileTool,
+      ...reviewTools.aiSdk(),
       // QA has no delegate: it re-checked every helper answer itself, so the
       // calls only added time. The stub keeps older histories that called it valid.
       ...delegateToolEntry(null, session.histories.qa),
-      get_diff: getDiffTool,
-      run_checked_command: runCheckedCommandTool,
-      write_qa_report: createWriteQaReportTool({
-        sessionKey: session.sessionKey,
-        sessionId: session.id,
-        branch,
-        requirementsPath,
-      }),
+      run_checked_command: createQaTools(checkDeps).runCheckedCommandTool,
+      write_qa_report: createWriteQaReportTool(reportInfo),
+      assign_qa_team: createAssignQaTeamTool({ sessionId: session.id }),
       ask_multiple_choice: askMultipleChoiceTool,
       ask_question: askQuestionTool,
     };

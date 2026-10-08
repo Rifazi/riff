@@ -47,8 +47,12 @@ function subtract(a: TokenUsage, b: TokenUsage): TokenUsage {
 
 function stageTimestamps(session: SessionRecord, stage: UsageStage): string[] {
   const own = session.transcripts[stage].map((e) => e.timestamp);
-  if (stage !== 'coding') return own;
-  const teams = [...session.codingTeamHistory, ...(session.codingTeam ? [session.codingTeam] : [])];
+  const teams: { members: { transcript: { timestamp: string }[] }[] }[] =
+    stage === 'coding'
+      ? [...session.codingTeamHistory, ...(session.codingTeam ? [session.codingTeam] : [])]
+      : stage === 'qa'
+        ? [...session.qaTeamHistory, ...(session.qaTeam ? [session.qaTeam] : [])]
+        : [];
   return [...own, ...teams.flatMap((t) => t.members.flatMap((m) => m.transcript.map((e) => e.timestamp)))];
 }
 

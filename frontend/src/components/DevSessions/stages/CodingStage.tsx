@@ -7,10 +7,10 @@ import { GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
-import type { AttachmentInput, CodingTeamMember, SessionRecord } from '@/lib/dev-sessions/types';
+import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS, COORDINATOR_PERSONA, TEAM_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
-import { useTeamRun } from '@/lib/dev-sessions/useTeamRun';
+import { teamStatusKey, useTeamBoard } from '@/lib/dev-sessions/useTeamBoard';
 import { autoRunStopReason, progressOf } from '@/lib/dev-sessions/auto-run';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
@@ -29,8 +29,6 @@ const AGENT = AGENT_PERSONAS.coding;
 // don't fire twice when the user navigates away and back before the server
 // clears the pending flag. Keys are `${sessionId}:${flagName}`.
 const kicked = new Set<string>();
-// Tracks which team round was last started per session.
-const startedRounds = new Map<string, number>();
 
 // Generous cap on consecutive auto-continues. A turn that makes no progress
 // already stops auto-run (see autoRunStopReason) — this only bounds a plan
@@ -109,58 +107,22 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['team-status', sessionId] });
+    queryClient.invalidateQueries({ queryKey: teamStatusKey('coding', sessionId) });
   };
 
   // Team mode: the lead (Jack) split the work into 2+ workstreams — at
   // kickoff, or when QA sent the branch back — so a team of agents codes it
   // in parallel (see harness-server agents/team/).
   const teamMode = Boolean(session.codingTeam);
-  const team = useTeamRun();
   const codingTeam = session.codingTeam;
-  // A run keeps going server-side if this page is closed; the persisted
-  // status alone can't tell that apart from a run cut off by a restart.
-  const { data: teamServer } = useQuery({
-    queryKey: ['team-status', sessionId],
-    queryFn: () => api.getTeamStatus(sessionId),
-    enabled: teamMode,
-  });
-  const teamActive = team.running || (codingTeam?.status === 'running' && teamServer?.running !== false);
-  const teamStatus =
-    !codingTeam || codingTeam.status === 'assigned'
-      ? ('not_started' as const)
-      : codingTeam.status === 'running' && !teamActive
-        ? ('interrupted' as const)
-        : codingTeam.status;
-  const teamFinished =
-    Boolean(codingTeam) && !teamActive && (teamStatus === 'done' || teamStatus === 'needs_attention');
-
-  // Watching a run started elsewhere (another window, or before a reload):
-  // poll instead of streaming.
-  // Not once the server says no run is going: a run cut off by a restart
-  // stays "running" on disk and would otherwise be polled forever.
-  useEffect(() => {
-    if (team.running || !teamActive) return;
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team.running, teamActive]);
-
-  const startTeam = () => void team.start(sessionId, refresh);
-
-  // Jack assigned a team: start it once Jack's turn has ended, once per round.
-  useEffect(() => {
-    if (codingTeam?.status !== 'assigned' || team.running || streaming) return;
-    if (startedRounds.get(sessionId) === codingTeam.round) return;
-    startedRounds.set(sessionId, codingTeam.round);
-    startTeam();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codingTeam?.status, codingTeam?.round, team.running, streaming]);
-
-  const entriesFor = (member: CodingTeamMember) =>
-    team.running && team.startedAt
-      ? [...member.transcript.filter((e) => e.timestamp < team.startedAt!), ...(team.overlays[member.id] ?? [])]
-      : member.transcript;
+  const {
+    run: team,
+    active: teamActive,
+    status: teamStatus,
+    finished: teamFinished,
+    start: startTeam,
+    entriesFor,
+  } = useTeamBoard({ sessionId, kind: 'coding', team: codingTeam, leadBusy: streaming, refresh });
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveCoding(sessionId),

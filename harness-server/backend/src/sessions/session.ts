@@ -181,6 +181,72 @@ export interface CodingTeamState {
   finishedAt: string | null;
 }
 
+// One part of a QA review the QA lead (Tess) hands to a reviewer with
+// assign_qa_team, run in parallel with the others (agents/team/qa-team.ts).
+// Reviewers are read-only, so unlike coding workstreams they share the main
+// checkout and need no owned paths or dependencies.
+export interface QaReviewArea {
+  id: string;
+  title: string;
+  // The acceptance criteria this reviewer verifies, as worded in the requirements doc.
+  criteria: string[];
+  // Repo-relative files or directories in the diff to concentrate on.
+  focusPaths: string[];
+  // Anything else the reviewer should check or know.
+  brief: string;
+}
+
+export type QaReviewerStatus = 'waiting' | 'running' | 'done' | 'failed';
+
+export interface QaCriterionVerdict {
+  criterion: string;
+  verdict: 'met' | 'not-met' | 'unverified';
+  note: string;
+}
+
+// What a reviewer hands back (submit_review); the lead folds every
+// reviewer's findings into the one QA report.
+export interface QaReviewFindings {
+  summary: string;
+  criteria: QaCriterionVerdict[];
+  blockingFindings: string[];
+  actionableNotes: string[];
+}
+
+export interface QaTeamMember extends QaReviewArea {
+  status: QaReviewerStatus;
+  note: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  transcript: TranscriptEntry[];
+  history: ModelMessage[];
+  claudeSessionId: string | null;
+  findings: QaReviewFindings | null;
+}
+
+export type QaCheckCommand = 'lint' | 'test';
+
+// The repo's checks, run by the QA team runner alongside the reviewers
+// (one at a time — they share the checkout's junit.xml).
+export interface QaTeamCheck {
+  command: QaCheckCommand;
+  status: 'pending' | 'running' | 'pass' | 'fail';
+  output: string | null;
+}
+
+export interface QaTeamState {
+  // Same lifecycle as CodingTeamState: "assigned" until the QA tab starts
+  // it once the lead's turn ends; "interrupted" when the server stopped mid-run.
+  status: 'assigned' | 'running' | 'done' | 'needs_attention' | 'interrupted';
+  round: number;
+  members: QaTeamMember[];
+  checks: QaTeamCheck[];
+  startedAt: string;
+  finishedAt: string | null;
+  // Set once the lead's next turn has been handed the reviewers' findings.
+  relayed: boolean;
+}
+
 export type ReferenceDocsStage = 'requirements' | 'plan' | 'coding' | 'qa';
 
 export interface SessionRecord {
@@ -227,6 +293,11 @@ export interface SessionRecord {
   codingContext: CodingContext | null;
 
   qaReportPath: string | null;
+  // Set when the QA lead split the review across reviewers (assign_qa_team);
+  // their transcripts live here, transcripts.qa is the lead's own chat.
+  qaTeam: QaTeamState | null;
+  // Earlier QA rounds, oldest first — a rerun after fixes retires the last one.
+  qaTeamHistory: QaTeamState[];
   // How the reviewed branch was shipped (repo/delivery.ts): merged into the
   // base branch for a local-only repo, or pushed with an MR/PR opened.
   delivery: { kind: 'merged' | 'merge_request' | 'pushed'; target: string; url: string | null; detail: string; at: string } | null;

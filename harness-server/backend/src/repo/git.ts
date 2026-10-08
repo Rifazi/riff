@@ -90,10 +90,32 @@ export async function assertOnBranch(repoRoot: string, expectedBranch: string): 
   }
 }
 
-export async function stageAndCommit(repoRoot: string, branchName: string, message: string, files: string[]): Promise<string> {
+/**
+ * Stages and commits on `branchName`. With `scope` (a coding-team member's
+ * owned paths) only files inside it can be committed: listed files outside
+ * it are refused, and a catch-all commit stages just the scope — so a stray
+ * change elsewhere (a formatter, lint --fix, a snapshot) never reaches the
+ * member's branch and can't collide with a teammate's at merge.
+ */
+export async function stageAndCommit(
+  repoRoot: string,
+  branchName: string,
+  message: string,
+  files: string[],
+  scope?: string[]
+): Promise<string> {
   await assertOnBranch(repoRoot, branchName);
   const git = client(repoRoot);
-  if (files.length > 0) {
+  if (scope) {
+    const outside = files.filter((f) => !withinPaths(f, scope));
+    if (outside.length) {
+      throw new GitPreconditionError(
+        `Not committed: ${outside.join(', ')} ${outside.length === 1 ? "isn't" : "aren't"} in your workstream's owned ` +
+          `paths (${scope.join(', ')}). Commit only your own files; changes elsewhere are discarded before the merge.`
+      );
+    }
+    await git.raw(['add', '-A', '--', ...(files.length > 0 ? files : scope)]);
+  } else if (files.length > 0) {
     await git.add(files);
   } else {
     // A coding-team worktree has node_modules symlinked in from the main
@@ -293,6 +315,45 @@ export async function commitPaths(
 
 // ---- Coding team: worktrees and merges -----------------------------------
 
+/** Whether repo-relative `file` is one of `scope`'s files or directories (or inside one). */
+export function withinPaths(file: string, scope: string[]): boolean {
+  const f = file.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  return scope.some((p) => {
+    const s = p.replace(/\/+$/, '');
+    return f === s || f.startsWith(`${s}/`);
+  });
+}
+
+/** Uncommitted paths (tracked or not, node_modules aside) outside `scope`; both sides of a rename. */
+export async function uncommittedPathsOutside(repoRoot: string, scope: string[]): Promise<string[]> {
+  const out = await client(repoRoot).raw(['status', '--porcelain=v1', '-z', '-uall', '--', '.', ':(exclude)node_modules']);
+  const fields = out.split('\0').filter(Boolean);
+  const paths: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const code = fields[i].slice(0, 2);
+    paths.push(fields[i].slice(3));
+    if (code.includes('R') || code.includes('C')) paths.push(fields[++i]);
+  }
+  return [...new Set(paths)].filter((p) => !withinPaths(p, scope));
+}
+
+/** Puts `paths` back as HEAD has them: unstaged, edits reverted, new files deleted. */
+export async function discardPaths(repoRoot: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const git = client(repoRoot);
+  await git.raw(['reset', '-q', 'HEAD', '--', ...paths]).catch(() => undefined);
+  const tracked = (await git.raw(['ls-tree', '-r', '--name-only', 'HEAD', '--', ...paths])).split('\n').filter(Boolean);
+  if (tracked.length) await git.raw(['checkout', 'HEAD', '--', ...tracked]);
+  const untracked = paths.filter((p) => !tracked.includes(p));
+  if (untracked.length) await git.raw(['clean', '-fdq', '--', ...untracked]);
+}
+
+/** Files `branch`'s own commits (since it left `base`) change outside `scope`. */
+export async function committedPathsOutside(repoRoot: string, base: string, branch: string, scope: string[]): Promise<string[]> {
+  const out = await client(repoRoot).raw(['diff', '--name-only', '--no-renames', `${base}...${branch}`]);
+  return out.split('\n').filter(Boolean).filter((p) => !withinPaths(p, scope));
+}
+
 // Serializes operations that touch one repo's shared state (the main
 // checkout's working tree during a merge, worktree registration, branch
 // refs) — team members finish at arbitrary times and must not merge at once.
@@ -345,9 +406,10 @@ export async function shortStatus(repoRoot: string): Promise<string> {
   return client(repoRoot).raw(['status', '--short', '--', '.', ':(exclude)node_modules']);
 }
 
-export async function commitAll(repoRoot: string, message: string): Promise<string | null> {
+/** Commits everything (node_modules aside), or with `scope` only what's inside it. */
+export async function commitAll(repoRoot: string, message: string, scope?: string[]): Promise<string | null> {
   const git = client(repoRoot);
-  await git.raw(['add', '-A', '--', '.', ':(exclude)node_modules']);
+  await git.raw(['add', '-A', '--', ...(scope ?? ['.', ':(exclude)node_modules'])]);
   const status = await git.status();
   if (status.staged.length === 0) return null;
   return (await git.commit(message)).commit || null;
@@ -367,9 +429,22 @@ export async function commitCount(repoRoot: string, from: string, to: string): P
 export async function mergeBranch(
   repoRoot: string,
   branch: string,
-  message: string
+  message: string,
+  into?: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const git = client(repoRoot);
+  // The main checkout is shared with the human and other sessions on this
+  // app: never merge into whatever happens to be checked out, or on top of
+  // someone's uncommitted work.
+  if (into) {
+    const current = await currentBranch(repoRoot);
+    if (current !== into) {
+      return { ok: false, error: `${repoRoot} is on "${current}", not "${into}" — switch it back to ${into}, then resume the team.` };
+    }
+    if (await hasUncommittedChanges(repoRoot)) {
+      return { ok: false, error: `${into} has uncommitted changes in ${repoRoot} — commit or stash them, then resume the team.` };
+    }
+  }
   try {
     await git.raw(['merge', '--no-ff', '-m', message, branch]);
     return { ok: true };

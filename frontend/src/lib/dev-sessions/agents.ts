@@ -49,15 +49,37 @@ const TEAM_ROSTER: Omit<TeamPersona, 'title'>[] = [
   { name: 'Mo', fullName: 'Mo Dule', initials: 'MO', color: { avatar: 'from-lime-500 to-green-500', ring: 'border-lime-300', soft: 'bg-lime-50', text: 'text-lime-700' } },
 ];
 
-export function teamMemberPersona(index: number, workstreamTitle: string): TeamPersona {
-  const base = TEAM_ROSTER[index % TEAM_ROSTER.length];
-  const lap = Math.floor(index / TEAM_ROSTER.length);
+function rosterPersona(roster: Omit<TeamPersona, 'title'>[], index: number, title: string): TeamPersona {
+  const base = roster[index % roster.length];
+  const lap = Math.floor(index / roster.length);
   return {
     ...base,
     name: lap ? `${base.name} ${lap + 1}` : base.name,
-    title: `Engineer · ${workstreamTitle}`,
+    title,
     gradient: base.color.avatar,
   };
 }
 
+export function teamMemberPersona(index: number, workstreamTitle: string): TeamPersona {
+  return rosterPersona(TEAM_ROSTER, index, `Engineer · ${workstreamTitle}`);
+}
+
 export const TEAM_LEAD_PERSONA: AgentPersona = { ...AGENT_PERSONAS.coding, title: 'Lead Engineer' };
+
+// The QA team: Tess leads, and each review area gets a reviewer. Same pun
+// names (Val Idate validates, Rex Gression hunts regressions, ...), the
+// coding roster's lane colors.
+const QA_ROSTER: Omit<TeamPersona, 'title'>[] = [
+  { name: 'Val', fullName: 'Val Idate', initials: 'VA', color: TEAM_ROSTER[0].color },
+  { name: 'Rex', fullName: 'Rex Gression', initials: 'RE', color: TEAM_ROSTER[1].color },
+  { name: 'Asa', fullName: 'Asa Sert', initials: 'AS', color: TEAM_ROSTER[2].color },
+  { name: 'Nell', fullName: 'Nell Check', initials: 'NE', color: TEAM_ROSTER[3].color },
+  { name: 'Fay', fullName: 'Fay Lure', initials: 'FA', color: TEAM_ROSTER[4].color },
+  { name: 'Edge', fullName: 'Edge Case', initials: 'ED', color: TEAM_ROSTER[5].color },
+];
+
+export function qaReviewerPersona(index: number, areaTitle: string): TeamPersona {
+  return rosterPersona(QA_ROSTER, index, `Reviewer · ${areaTitle}`);
+}
+
+export const QA_LEAD_PERSONA: AgentPersona = { ...AGENT_PERSONAS.qa, title: 'QA Lead' };

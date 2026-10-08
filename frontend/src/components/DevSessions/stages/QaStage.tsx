@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
-import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
+import { AGENT_PERSONAS, QA_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
+import { teamStatusKey, useTeamBoard } from '@/lib/dev-sessions/useTeamBoard';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { DeliveryPanel } from '../DeliveryPanel';
@@ -18,6 +19,7 @@ import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
+import { EarlierQaRounds, QaTeamPanel } from '../QaTeam';
 
 const AGENT = AGENT_PERSONAS.qa;
 
@@ -31,6 +33,13 @@ const QA_KICKOFF_MESSAGE =
 // with QA_RERUN_MESSAGE in harness-server's routes/coordinator.ts.
 const QA_RERUN_MESSAGE =
   'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
+
+// Sent to the QA lead once its team has finished; the server puts every
+// reviewer's findings and the check results ahead of it (qa-agent.ts).
+const QA_TEAM_WRAPUP_MESSAGE = 'Your reviewers have finished. Write the QA report from their findings.';
+// Module-level, like kickedOffForApproval: `${sessionId}:${round}` of team
+// rounds whose wrap-up was already sent.
+const wrappedUpRounds = new Set<string>();
 
 function parseFrontmatterField(markdown: string, field: string): string | null {
   const match = new RegExp(`^${field}:\\s*(.+)$`, 'm').exec(markdown);
@@ -93,7 +102,21 @@ export function QaStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] });
+    queryClient.invalidateQueries({ queryKey: teamStatusKey('qa', sessionId) });
   };
+
+  // Team mode: the QA lead (Tess) split the review across reviewers who
+  // check the branch in parallel (see harness-server agents/team/qa-team.ts).
+  const qaTeam = session.qaTeam;
+  const teamMode = Boolean(qaTeam);
+  const {
+    run: team,
+    active: teamActive,
+    status: teamStatus,
+    finished: teamFinished,
+    start: startTeam,
+    entriesFor,
+  } = useTeamBoard({ sessionId, kind: 'qa', team: qaTeam, leadBusy: streaming, refresh });
 
   const approveMutation = useMutation({ mutationFn: () => api.approveQa(sessionId), onSuccess: refresh });
   const rejectMutation = useMutation({ mutationFn: () => api.rejectQa(sessionId), onSuccess: refresh });
@@ -128,6 +151,17 @@ export function QaStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.stage, session.qaRerunPending, session.codingApprovedAt]);
 
+  // Every reviewer reported: hand the findings to the lead, once per round.
+  // A round that needs attention waits for the human (resume, or ask the lead).
+  useEffect(() => {
+    if (!qaTeam || qaTeam.status !== 'done' || qaTeam.relayed || streaming || teamActive) return;
+    const key = `${sessionId}:${qaTeam.round}`;
+    if (wrappedUpRounds.has(key)) return;
+    wrappedUpRounds.add(key);
+    void handleSend(QA_TEAM_WRAPUP_MESSAGE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qaTeam?.status, qaTeam?.relayed, qaTeam?.round, streaming, teamActive]);
+
   const entries = streaming ? [...session.transcripts.qa, ...overlay] : session.transcripts.qa;
   const reviewed = session.qaStatus === 'reviewed';
   // Once merged or an MR is open, fixes on the branch no longer reach anything.
@@ -135,30 +169,64 @@ export function QaStage({ session }: { session: SessionRecord }) {
   const markdown = report?.markdown ?? null;
   const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
 
+  const busy = streaming || teamActive;
+  const canStartTeam =
+    teamMode &&
+    !teamActive &&
+    !reviewed &&
+    (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
+  const earlierRounds = <EarlierQaRounds rounds={session.qaTeamHistory ?? []} />;
+
+  const leadChat = (
+    <ChatPane
+      entries={entries}
+      onSend={handleSend}
+      disabled={busy || reviewed}
+      streaming={streaming}
+      runningTool={runningTool}
+      agent={teamMode ? QA_LEAD_PERSONA : AGENT}
+      emptyHint={`${AGENT.name} reviews the branch against the requirements, splitting it across reviewers when it's big enough, and runs the checks.`}
+      placeholder={
+        reviewed
+          ? 'QA reviewed — read only.'
+          : teamActive
+            ? `${AGENT.name} takes messages once the reviewers have finished…`
+            : `Ask ${AGENT.name} to re-check something…`
+      }
+    />
+  );
+
   return (
     <StageLayout
       toolbar={<CoordinatorControl session={session} streaming={streaming} />}
       chat={
-        <>
-          <ChatPane
-            entries={entries}
-            onSend={handleSend}
-            disabled={streaming || reviewed}
-            streaming={streaming}
-            runningTool={runningTool}
-            agent={AGENT}
-            emptyHint={`${AGENT.name} reviews the branch against the requirements and runs the checks.`}
-            placeholder={reviewed ? 'QA reviewed — read only.' : `Ask ${AGENT.name} to re-check something…`}
-          />
-          <ErrorText>{error}</ErrorText>
-        </>
+        <div className="flex flex-col flex-1 min-h-0 gap-3">
+          {earlierRounds}
+          {qaTeam ? (
+            <QaTeamPanel
+              team={qaTeam}
+              teamStatus={teamStatus}
+              teamFinished={teamFinished}
+              entriesFor={entriesFor}
+              runningTools={team.runningTools}
+              canStart={canStartTeam}
+              starting={team.running}
+              onStart={startTeam}
+              leadChat={leadChat}
+              leadActive={streaming}
+            />
+          ) : (
+            leadChat
+          )}
+          <ErrorText>{team.error ?? error}</ErrorText>
+        </div>
       }
       document={
         <DocumentCard
           title="QA report"
           subtitle={markdown ? session.qaReportPath : null}
           markdown={markdown}
-          emptyText="Not written yet — QA is running…"
+          emptyText={teamActive ? 'Not written yet — the reviewers are still checking…' : 'Not written yet — QA is running…'}
           badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
           scrollFooter
           notices={
@@ -183,7 +251,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
                   variant="outline"
                   className="mt-3"
                   onClick={() => sendBackMutation.mutate()}
-                  disabled={streaming || sendBackMutation.isPending}
+                  disabled={busy || sendBackMutation.isPending}
                   title={
                     reviewed
                       ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
@@ -199,11 +267,11 @@ export function QaStage({ session }: { session: SessionRecord }) {
               <ApprovalBar
                 approveLabel={reviewed ? 'Reviewed' : 'Mark reviewed'}
                 onApprove={() => approveMutation.mutate()}
-                approveDisabled={reviewed || !session.qaReportPath || streaming}
+                approveDisabled={reviewed || !session.qaReportPath || busy}
                 approveDisabledReason={!session.qaReportPath ? 'No QA report yet' : undefined}
                 busy={approveMutation.isPending}
                 onReject={() => rejectMutation.mutate()}
-                rejectDisabled={reviewed || streaming}
+                rejectDisabled={reviewed || busy}
                 rejectBusy={rejectMutation.isPending}
               />
               {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}

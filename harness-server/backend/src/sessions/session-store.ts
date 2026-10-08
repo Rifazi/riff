@@ -62,6 +62,8 @@ function normalizeSession(session: SessionRecord): SessionRecord {
     session.codingTeam.kind ??= 'plan';
   }
   session.codingTeamHistory ??= [];
+  session.qaTeam ??= null;
+  session.qaTeamHistory ??= [];
   session.codingContext ??= null;
   session.delivery ??= null;
   session.splitProposal ??= null;
@@ -159,6 +161,8 @@ export async function createSession(input: {
     codingPlan: null,
     codingTeam: null,
     codingTeamHistory: [],
+    qaTeam: null,
+    qaTeamHistory: [],
     codingContext: null,
     qaReportPath: null,
     delivery: null,
@@ -275,12 +279,14 @@ export async function mutateSession(id: string, fn: (session: SessionRecord) => 
 export async function appendTeamTranscriptEntry(
   id: string,
   memberId: string,
-  entry: Omit<TranscriptEntry, 'id' | 'timestamp'>
+  entry: Omit<TranscriptEntry, 'id' | 'timestamp'>,
+  team: 'coding' | 'qa' = 'coding'
 ): Promise<TranscriptEntry> {
   const full: TranscriptEntry = { ...entry, id: uuidv4(), timestamp: new Date().toISOString() };
   await mutateSession(id, (session) => {
-    const member = session.codingTeam?.members.find((m) => m.id === memberId);
-    member?.transcript.push(full);
+    const members: { id: string; transcript: TranscriptEntry[] }[] =
+      (team === 'qa' ? session.qaTeam?.members : session.codingTeam?.members) ?? [];
+    members.find((m) => m.id === memberId)?.transcript.push(full);
   });
   return full;
 }

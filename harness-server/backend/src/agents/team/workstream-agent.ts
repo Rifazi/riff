@@ -245,7 +245,7 @@ export async function runWorkstreamAgent({
       onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
       readMemo,
     });
-    const { gitCommitTool } = createGitToolsClaude({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
+    const { gitCommitTool } = createGitToolsClaude({ ...scoped, onBranchCreated: noBranchCreation });
     const { runCheckedCommandToolClaude } = createQaToolsClaude({
       repoRoot: worktreePath,
       checkCommands: app.checkCommands,
@@ -320,7 +320,7 @@ export async function runWorkstreamAgent({
     onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
     readMemo,
   });
-  const { gitCommitTool } = createGitTools({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
+  const { gitCommitTool } = createGitTools({ ...scoped, onBranchCreated: noBranchCreation });
   const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
   const tools: ToolSet = {
     search_docs: searchDocsTool,

@@ -13,6 +13,8 @@ import { deliver, detectDelivery } from '../repo/delivery.js';
 import { buildDeliveryText } from '../repo/delivery-text.js';
 import { resolveBaseBranch } from '../repo/git.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
+import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
+import type { TeamEvent } from '../agents/team/coding-team.js';
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -22,6 +24,9 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       if (!session) return reply.code(404).send({ error: 'session not found' });
       if (!session.branch) {
         return reply.code(400).send({ error: 'coding must be approved (a branch must exist) before QA can run' });
+      }
+      if (isQaTeamRunning(session.id)) {
+        return reply.code(409).send({ error: 'the QA team is still reviewing — wait for it to finish before messaging the lead' });
       }
       const { message, attachments: rawAttachments } = request.body ?? {};
       if (!message || !message.trim()) return reply.code(400).send({ error: 'message is required' });
@@ -46,6 +51,32 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+
+  // SSE. Starts (or resumes) the review the QA lead split across a team —
+  // every reviewer's events are tagged with its memberId (same framing as
+  // /coding/team/run). Resuming re-runs only reviewers without findings.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/team/run', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (isQaTeamRunning(session.id)) return reply.code(409).send({ error: 'the QA team is already running' });
+    if (session.qaStatus === 'reviewed') return reply.code(400).send({ error: 'QA is already marked reviewed' });
+
+    startEventStream(reply);
+    const send = (event: TeamEvent) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    try {
+      await runQaTeam(session.id, send);
+    } catch (err) {
+      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/team', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    return { running: isQaTeamRunning(session.id) };
+  });
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/report', async (request, reply) => {
     const session = await getSession(request.params.id);
@@ -97,6 +128,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     if (session.delivery && session.delivery.kind !== 'pushed') {
       return reply.code(400).send({ error: `already delivered: ${session.delivery.detail}` });
     }
+    if (isQaTeamRunning(session.id)) return reply.code(409).send({ error: 'the QA team is still reviewing' });
     if (session.qaStatus === 'reviewed' && session.qaReportPath) {
       const filePath = path.join(config.harnessRoot, session.qaReportPath);
       const raw = await fs.readFile(filePath, 'utf8');

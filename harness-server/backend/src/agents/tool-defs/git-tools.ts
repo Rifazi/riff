@@ -50,7 +50,15 @@ export const gitCommitDescription =
  * agent has — no push, merge, rebase, or checkout-off-branch tool exists at
  * all, so those actions are structurally unavailable, not just discouraged.
  */
-export function createGitExecutors(deps: { repoRoot: string; baseBranch?: string; onBranchCreated: (branchName: string) => Promise<void> }) {
+export interface GitToolDeps {
+  repoRoot: string;
+  baseBranch?: string;
+  onBranchCreated: (branchName: string) => Promise<void>;
+  // A coding-team member's owned paths: commits can't include anything else.
+  writablePaths?: string[];
+}
+
+export function createGitExecutors(deps: GitToolDeps) {
   const gitCreateBranchExecute = async ({ branchName }: z.infer<typeof gitCreateBranchSchema>): Promise<string> => {
     await createBranch(deps.repoRoot, branchName, deps.baseBranch);
     await deps.onBranchCreated(branchName);
@@ -62,14 +70,14 @@ export function createGitExecutors(deps: { repoRoot: string; baseBranch?: string
     if (problem) {
       throw new Error(`Not committed: ${problem}. Message was: "${message.split('\n')[0]}"`);
     }
-    const hash = await stageAndCommit(deps.repoRoot, branchName, message, files);
+    const hash = await stageAndCommit(deps.repoRoot, branchName, message, files, deps.writablePaths);
     return `Committed ${hash.slice(0, 8)}: ${message}`;
   };
 
   return { gitCreateBranchExecute, gitCommitExecute };
 }
 
-export function createGitTools(deps: { repoRoot: string; baseBranch?: string; onBranchCreated: (branchName: string) => Promise<void> }) {
+export function createGitTools(deps: GitToolDeps) {
   const { gitCreateBranchExecute, gitCommitExecute } = createGitExecutors(deps);
   return {
     gitCreateBranchTool: tool({

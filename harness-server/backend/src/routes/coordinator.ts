@@ -10,6 +10,7 @@ import { runCodingAgentTurn } from '../agents/coding-agent.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning } from '../agents/team/coding-team.js';
+import { isQaTeamRunning } from '../agents/team/qa-team.js';
 
 // Hard cap so a stuck/looping coordinator can't run away unattended — it
 // always stops and hands back to a human rather than looping forever.
@@ -106,6 +107,18 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
         const lastEntryAt = transcript[transcript.length - 1]?.timestamp;
         if (group === 'coding' && team?.finishedAt && (!lastEntryAt || lastEntryAt < team.finishedAt)) {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team has finished — review the merged diff.' });
+          break;
+        }
+
+        // Same for QA's team: the QA tab runs it and hands its findings to
+        // the lead.
+        const qaTeam = session.qaTeam;
+        if (
+          group === 'qa' &&
+          !session.qaRerunPending &&
+          (isQaTeamRunning(session.id) || qaTeam?.status === 'assigned' || qaTeam?.status === 'running')
+        ) {
+          send({ type: 'coordinator_decision', action: 'ready', reason: 'The QA team runs on its own — start or watch it on the QA tab.' });
           break;
         }
 

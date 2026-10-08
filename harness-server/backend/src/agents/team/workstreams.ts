@@ -19,6 +19,9 @@ export const workstreamSchema = z.object({
     .describe('Ids of workstreams that must be finished and merged before this one starts. Empty to start immediately.'),
 });
 
+// The longest dependency chain may be at most this share of all the work.
+export const MAX_CRITICAL_SHARE = 0.75;
+
 export class InvalidWorkstreamsError extends Error {
   constructor(message: string) {
     super(message);
@@ -44,10 +47,15 @@ function overlaps(a: string, b: string): boolean {
  * file tools enforce ownership, so disjoint paths mean merges can't
  * conflict), dependencies known and acyclic, and at least two workstreams
  * that can genuinely run at the same time — a pure chain is just the normal
- * sequential mode with extra overhead. Returns them with owned paths
- * normalized.
+ * sequential mode with extra overhead — and enough of the work off the
+ * longest chain to pay for the worktrees and merges (MAX_CRITICAL_SHARE).
+ * Returns them with owned paths normalized.
  */
-export function validateWorkstreams(stepIds: string[], workstreams: Workstream[]): Workstream[] {
+export function validateWorkstreams(
+  stepIds: string[],
+  workstreams: Workstream[],
+  efforts: Map<string, 'light' | 'standard'> = new Map()
+): Workstream[] {
   if (workstreams.length < 2) {
     throw new InvalidWorkstreamsError('A team needs at least two workstreams — if the work doesn\'t split, build it yourself instead of calling assign_team.');
   }
@@ -119,6 +127,28 @@ export function validateWorkstreams(stepIds: string[], workstreams: Workstream[]
   if (!parallelPair) {
     throw new InvalidWorkstreamsError(
       'Every workstream waits on another, so nothing would run in parallel — build it yourself, one step at a time, instead.'
+    );
+  }
+
+  // Wall-clock is the longest dependency chain. Steps are weighed by plan
+  // effort (light = half); if that chain is most of the work, a team only
+  // adds worktrees, merges and lost context for a small saving.
+  const weight = (ws: Workstream) => ws.stepIds.reduce((sum, id) => sum + (efforts.get(id) === 'light' ? 0.5 : 1), 0);
+  const total = normalized.reduce((sum, ws) => sum + weight(ws), 0);
+  const chain = new Map<string, number>();
+  const chainOf = (id: string): number => {
+    const cached = chain.get(id);
+    if (cached !== undefined) return cached;
+    const ws = byId.get(id)!;
+    const value = weight(ws) + Math.max(0, ...ws.dependsOn.map(chainOf));
+    chain.set(id, value);
+    return value;
+  };
+  const critical = Math.max(...normalized.map((ws) => chainOf(ws.id)));
+  if (critical > total * MAX_CRITICAL_SHARE) {
+    throw new InvalidWorkstreamsError(
+      `The longest chain of workstreams is ${critical} of ${total} steps' work, so running them as a team would barely ` +
+        "save any time. Build it yourself, or split it so more of the work runs alongside that chain."
     );
   }
 

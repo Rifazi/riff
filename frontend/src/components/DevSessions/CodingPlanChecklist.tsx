@@ -1,13 +1,18 @@
-import { CheckCircle2, Circle, CircleDot } from 'lucide-react';
+import { CheckCircle2, Circle, CircleDot, XCircle } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import type { CodingPlanStep } from '@/lib/dev-sessions/types';
+
+/** A checklist row: a plan step, or anything shaped like one (a QA reviewer's criteria, where "failed" = not met). */
+export type ChecklistItem = Omit<CodingPlanStep, 'status'> & { status: CodingPlanStep['status'] | 'failed' };
 
 export function CodingPlanChecklist({
   steps,
   title = 'Coding checklist',
+  countLabel = (done, total) => `${done} of ${total} step${total === 1 ? '' : 's'} done`,
 }: {
-  steps: CodingPlanStep[];
+  steps: ChecklistItem[];
   title?: string;
+  countLabel?: (done: number, total: number) => string;
 }) {
   const doneCount = steps.filter((s) => s.status === 'done').length;
 
@@ -16,7 +21,7 @@ export function CodingPlanChecklist({
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold text-foreground">{title}</div>
         <div className="text-xs text-muted-foreground">
-          {doneCount} of {steps.length} step{steps.length === 1 ? '' : 's'} done
+          {countLabel(doneCount, steps.length)}
         </div>
       </div>
       <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-3">
@@ -34,11 +39,15 @@ export function CodingPlanChecklist({
                 ? 'text-muted-foreground'
                 : step.status === 'in_progress'
                   ? 'text-primary font-medium'
-                  : 'text-foreground'
+                  : step.status === 'failed'
+                    ? 'text-destructive'
+                    : 'text-foreground'
             }`}
           >
             {step.status === 'done' ? (
               <CheckCircle2 className="w-4 h-4 mt-0.5 text-success flex-shrink-0" />
+            ) : step.status === 'failed' ? (
+              <XCircle className="w-4 h-4 mt-0.5 text-destructive flex-shrink-0" />
             ) : step.status === 'in_progress' ? (
               <CircleDot className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" />
             ) : (

@@ -1,3 +1,4 @@
+import type { TeamKind } from './useTeamRun';
 import type {
   AppConfig,
   AppPrompts,
@@ -224,8 +225,8 @@ export const api = {
   deliver: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/delivery`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
-  getTeamStatus: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/coding/team`)).then((r) => json<{ running: boolean }>(r)),
+  getTeamStatus: (id: string, team: TeamKind = 'coding') =>
+    fetch(apiUrl(`/api/sessions/${id}/${team}/team`)).then((r) => json<{ running: boolean }>(r)),
 
   getCodingDiff: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/diff`)).then((r) =>

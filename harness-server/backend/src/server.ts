@@ -16,6 +16,7 @@ import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { recoverInterruptedTeams } from './agents/team/coding-team.js';
+import { recoverInterruptedQaTeams } from './agents/team/qa-team.js';
 import { stopLocalModel } from './agents/local-llm.js';
 
 // How long in-flight requests (e.g. a streaming agent turn) get to finish on
@@ -56,6 +57,7 @@ async function main() {
   }
 
   await recoverInterruptedTeams();
+  await recoverInterruptedQaTeams();
   await registerSessionRoutes(app);
   await registerRequirementsRoutes(app);
   await registerPlanRoutes(app);

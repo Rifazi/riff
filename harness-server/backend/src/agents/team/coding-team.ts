@@ -6,26 +6,40 @@ import { baseBranchFor } from '../../apps/apps.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
 import { getRoleModelConfig } from '../../settings/settings-store.js';
 import { lightModelFor, planStepEfforts } from '../model-routing.js';
-import type { CodingTeamMember, CodingTeamState, SessionRecord, TeamMemberStatus } from '../../sessions/session.js';
+import type {
+  CodingTeamMember,
+  CodingTeamState,
+  QaCheckCommand,
+  QaReviewerStatus,
+  QaTeamCheck,
+  SessionRecord,
+  TeamMemberStatus,
+} from '../../sessions/session.js';
 import {
   addWorktree,
   assertOnBranch,
   commitAll,
   commitCount,
+  committedPathsOutside,
   createBranch,
   deleteBranch,
+  discardPaths,
   hasUncommittedChanges,
   mergeBranch,
   removeWorktree,
+  uncommittedPathsOutside,
   withRepoLock,
 } from '../../repo/git.js';
 import { suggestedBranchName } from '../coding-agent.js';
 import type { AgentEvent } from '../sdk-client.js';
 import { runWorkstreamAgent } from './workstream-agent.js';
 
+// Shared by the coding team and the QA team (qa-team.ts): one SSE stream
+// carrying every member's events, tagged by memberId.
 export type TeamEvent =
   | { type: 'team_member_event'; memberId: string; event: AgentEvent }
-  | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus; note: string | null }
+  | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus | QaReviewerStatus; note: string | null }
+  | { type: 'team_check'; command: QaCheckCommand; status: QaTeamCheck['status'] }
   | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
   | { type: 'error'; message: string };
 
@@ -169,9 +183,21 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     const linked = path.join(worktreePath, 'node_modules');
     if (existsSync(modules) && !existsSync(linked)) await fs.symlink(modules, linked, 'dir');
 
-    await setStatus(member.id, 'running');
     const latest = (await getSession(sessionId))!;
     const fresh = latest.codingTeam!.members.find((m) => m.id === member.id)!;
+    // Already built, only the merge failed (e.g. the main checkout was on
+    // another branch): resuming goes straight back to the merge.
+    const finished =
+      fresh.transcript.length > 0 &&
+      fresh.stepIds.every((id) => latest.codingPlan?.find((s) => s.id === id)?.status === 'done') &&
+      !(await hasUncommittedChanges(worktreePath)) &&
+      (await commitCount(worktreePath, sessionBranch, member.branch)) > 0;
+    if (!finished) await build(member, latest, fresh, worktreePath);
+    return finish(member, worktreePath);
+  };
+
+  const build = async (member: CodingTeamMember, latest: SessionRecord, fresh: CodingTeamMember, worktreePath: string) => {
+    await setStatus(member.id, 'running');
     const onEvent = (event: AgentEvent) => emit({ type: 'team_member_event', memberId: member.id, event });
 
     // Light-model routing: a workstream whose steps are all tagged light
@@ -216,18 +242,42 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     } else {
       await runWorkstreamAgent({ session: latest, app, member: fresh, teammates: latest.codingTeam!.members, worktreePath, onEvent });
     }
+  };
 
+  const finish = async (member: CodingTeamMember, worktreePath: string): Promise<boolean> => {
+    // Checks and formatters can touch files the member doesn't own (lint
+    // --fix, snapshots, a lockfile). Those belong to a teammate or nobody,
+    // and would collide at merge, so they're thrown away, not committed.
+    const stray = await uncommittedPathsOutside(worktreePath, member.ownedPaths);
+    if (stray.length) {
+      await discardPaths(worktreePath, stray);
+      await appendTeamTranscriptEntry(sessionId, member.id, {
+        role: 'system',
+        text: `Discarded uncommitted changes outside this workstream's owned paths: ${stray.join(', ')}.`,
+      });
+    }
     if (await hasUncommittedChanges(worktreePath)) {
-      await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`);
+      await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`, member.ownedPaths);
     }
     if ((await commitCount(worktreePath, sessionBranch, member.branch)) === 0) {
       await setStatus(member.id, 'failed', 'Finished without committing anything — see its log.');
       return false;
     }
+    // git_commit can't commit outside the owned paths, so this only catches
+    // a commit made some other way (a hook, a check command running git).
+    const foreign = await committedPathsOutside(worktreePath, sessionBranch, member.branch, member.ownedPaths);
+    if (foreign.length) {
+      await setStatus(
+        member.id,
+        'failed',
+        `Its commits change files outside its owned paths (${foreign.slice(0, 5).join(', ')}${foreign.length > 5 ? ', …' : ''}), so it wasn't merged.`
+      );
+      return false;
+    }
 
     await setStatus(member.id, 'merging');
     const merged = await withRepoLock(app.repoRoot, () =>
-      mergeBranch(app.repoRoot, member.branch, `chore: merge ${member.id} workstream — ${member.title}`)
+      mergeBranch(app.repoRoot, member.branch, `chore: merge ${member.id} workstream — ${member.title}`, sessionBranch)
     );
     if (!merged.ok) {
       await setStatus(member.id, 'failed', `Couldn't merge ${member.branch} into ${sessionBranch}: ${merged.error.split('\n')[0]}`);
