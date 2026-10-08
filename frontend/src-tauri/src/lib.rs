@@ -527,10 +527,24 @@ fn build_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .quit()
         .build()?;
 
+    // WKWebView only gets Cmd+C/V/X/A/Z through these menu items; without an
+    // Edit menu, copying needs the right-click menu.
+    #[cfg(target_os = "macos")]
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .item(&PredefinedMenuItem::separator(app)?)
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
     #[cfg(target_os = "macos")]
     let menu = MenuBuilder::new(app)
         .item(&app_menu)
         .item(&file_menu)
+        .item(&edit_menu)
         .build()?;
 
     #[cfg(not(target_os = "macos"))]

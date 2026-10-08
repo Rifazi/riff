@@ -67,6 +67,12 @@ function contentHash(s: string): string {
   return h.toString(16);
 }
 
+// Qwen sometimes wraps its output in a markdown fence despite being told not to.
+export function stripCodeFence(text: string): string {
+  const fenced = /^\s*```[\w-]*\n([\s\S]*?)\n```\s*$/.exec(text);
+  return fenced ? fenced[1] : text;
+}
+
 /**
  * Tries to compress `content` using the built-in Qwen model.
  * Returns the original string unchanged on any error or if compression
@@ -86,14 +92,14 @@ export async function tryCompressCode(filePath: string, content: string): Promis
   try {
     const input = content.length > MAX_INPUT_CHARS ? content.slice(0, MAX_INPUT_CHARS) : content;
     const truncated = content.length > MAX_INPUT_CHARS;
-    const compressed = await generateLocal({
+    const compressed = stripCodeFence(await generateLocal({
       system: SYSTEM,
       prompt: `// ${filePath}\n${input}`,
       // Give Qwen enough room to output most of the signatures, but no more
       // than half the input — if it needs more than that, compression isn't
       // happening and we should just use the original.
       maxTokens: Math.max(600, Math.round(input.length / 2)),
-    });
+    }));
 
     if (!compressed || compressed.length >= input.length * (1 - MIN_SAVINGS_RATIO)) {
       cache.set(key, content);

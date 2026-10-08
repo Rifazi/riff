@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/dev-sessions/api';
@@ -20,6 +20,11 @@ import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.requirements;
+
+// Module-level: persists across tab-switch remounts so auto-kickoff effects
+// don't fire twice when the user navigates away and back before the server
+// clears the pending flag. Keys are `${sessionId}:${flagName}`.
+const kicked = new Set<string>();
 
 export function RequirementsStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
@@ -86,24 +91,24 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
   // Started from a Riff meeting: open the conversation with the
   // transcript automatically. The server attaches the transcript to
   // whichever requirements message comes first and clears the flag.
-  const kickedOffMeeting = useRef(false);
   useEffect(() => {
     if (!session.meetingKickoffPending) return;
     if (streaming) return;
-    if (kickedOffMeeting.current) return;
-    kickedOffMeeting.current = true;
+    const key = `${sessionId}:meetingKickoff`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void handleSend(meetingKickoffMessage(session));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.meetingKickoffPending, streaming]);
 
   // Created by accepting a split: open with the part's brief, which the
   // server attaches to the first message and then clears.
-  const kickedOffSplit = useRef(false);
   useEffect(() => {
     if (!session.splitKickoffPending) return;
     if (streaming) return;
-    if (kickedOffSplit.current) return;
-    kickedOffSplit.current = true;
+    const key = `${sessionId}:splitKickoff`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void handleSend(splitKickoffMessage(session));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.splitKickoffPending, streaming]);
@@ -111,38 +116,42 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
   // Started from an app's Theme page to migrate the app onto its theme:
   // open with the migration brief. Only into an empty conversation, so a
   // reload of the same URL never sends it twice.
-  const kickedOffThemeMigration = useRef(false);
   useEffect(() => {
     if (kickoff !== THEME_MIGRATION_KICKOFF) return;
     if (session.transcripts.requirements.length > 0 || streaming) return;
-    if (kickedOffThemeMigration.current) return;
-    kickedOffThemeMigration.current = true;
+    const key = `${sessionId}:themeMigrationKickoff`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void api.getAppTheme(session.appId).then((state) => handleSend(themeMigrationKickoffMessage(state.current?.theme.name ?? 'current')));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, kickoff, session.transcripts.requirements.length, streaming]);
 
   // Coordinator auto-start: the moment this stage is reached with
   // coordinator mode on and nothing said yet, drive it automatically.
-  const kickedOffCoordinator = useRef(false);
   useEffect(() => {
     if (!session.coordinatorEnabled) return;
     if (session.meetingKickoffPending || session.splitKickoffPending) return;
     if (session.transcripts.requirements.length > 0) return;
     if (streaming) return;
-    if (kickedOffCoordinator.current) return;
-    kickedOffCoordinator.current = true;
+    const key = `${sessionId}:requirementsCoordinator`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void runCoordinator(sessionId, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.coordinatorEnabled, session.transcripts.requirements.length, streaming]);
 
+  useEffect(() => {
+    if (!session.requirementsRelayPending) kicked.delete(`${sessionId}:requirementsRelay`);
+  }, [session.requirementsRelayPending, sessionId]);
+
   // Coding sent this back for a revision — relay the human's note as the
   // opening message of the reopened conversation. Clears server-side.
-  const kickedOffRequirementsRelay = useRef(false);
   useEffect(() => {
     if (!session.requirementsRelayPending) return;
     if (streaming) return;
-    if (kickedOffRequirementsRelay.current) return;
-    kickedOffRequirementsRelay.current = true;
+    const key = `${sessionId}:requirementsRelay`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void handleSend(
       `Coding sent this back for a requirements revision. Here's the note:\n\n${session.pendingRequirementsRelayNote ?? '(no note provided)'}`
     );

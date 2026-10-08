@@ -137,6 +137,7 @@ export async function createSession(input: {
   title: string;
   sessionKey?: string;
   appId: string;
+  branch?: string | null;
   sourceMeeting?: SessionMeetingSource | null;
   splitFrom?: SessionSplitOrigin | null;
   splitBrief?: string | null;
@@ -153,7 +154,7 @@ export async function createSession(input: {
     requirementsStatus: null,
     planPath: null,
     planStatus: null,
-    branch: null,
+    branch: input.branch ?? null,
     codingApprovedAt: null,
     codingPlan: null,
     codingTeam: null,

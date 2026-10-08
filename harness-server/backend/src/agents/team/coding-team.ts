@@ -99,6 +99,15 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     for (const m of team.members) {
       if (m.status === 'merged') continue;
       m.branch = `${sessionBranch}--${memberKey(team, m)}`;
+      // A previously failed member likely ran out of steps or context — resuming
+      // with the same large history will hit the same wall. Clear it so the next
+      // run opens with a handoff summary instead (workstream-agent.ts detects the
+      // cleared state and builds one from the transcript).
+      if (m.status === 'failed') {
+        m.history = [];
+        m.claudeSessionId = null;
+        m.contextStartEntryId = null;
+      }
       m.status = 'waiting';
       m.note = null;
       m.startedAt = null;

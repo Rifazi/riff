@@ -40,13 +40,16 @@ export interface TranscriptEntry {
   toolInput?: unknown;
   toolResult?: unknown;
   isError?: boolean;
+  // Pairs a tool_result with its tool_call: parallel calls can finish out
+  // of order. Absent on entries from before it was stored.
+  toolCallId?: string;
   timestamp: string;
   // A system entry recording one local helper run (agents/helpers/): what
   // it did and saved. The chat shows it inside that tool call's result card.
   helper?: HelperRunStats;
 }
 
-export type HelperName = 'research' | 'classifier';
+export type HelperName = 'research' | 'classifier' | 'runner';
 
 export interface HelperRunStats {
   helper: HelperName;

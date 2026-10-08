@@ -637,71 +637,106 @@ function LocalTeamModelRow({
   );
 }
 
+/** Magic model ID that routes to Riff's built-in Qwen (no Ollama needed). */
+const BUILTIN_MODEL_ID = 'builtin';
+
 /**
- * Coding only: the Ollama model the delegate tool's read-only helpers run on.
- * The coding agent hands them exploration questions and gets back only the
- * answers, so the files they read never enter its paid context.
+ * Research helper: all stages hand read-only questions (where is X, who calls Y)
+ * to helpers on a local model — either Riff's built-in Qwen or an Ollama model.
  */
 function DelegateModelRow({
   value,
   ollamaModels,
+  localModel,
   onSave,
   saving,
 }: {
   value: RoleModelConfig;
   ollamaModels: string[];
+  localModel: SettingsResponse['localModel'];
   onSave: (config: RoleModelConfig) => void;
   saving: boolean;
 }) {
   const current = value.delegateModel ?? '';
+  const usingBuiltin = current === BUILTIN_MODEL_ID;
   const enabled = current !== '';
-  const [model, setModel] = useState(current);
+  const [model, setModel] = useState(usingBuiltin ? '' : current);
 
-  useEffect(() => setModel(current), [current]);
+  useEffect(() => setModel(usingBuiltin ? '' : current), [current, usingBuiltin]);
 
-  const dirty = model.trim() !== current;
+  const dirty = model.trim() !== (usingBuiltin ? '' : current);
 
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
         <div className="font-medium text-foreground">Research helper</div>
         <div className="text-xs text-muted-foreground">
-          The coding agent hands read-only questions (where is X, who calls Y) to helpers on this Ollama model, which
-          read the files for free and return only the answer. Needs a model that can call tools, e.g. qwen3:8b or
-          larger. Savings show under Token usage.
+          All agents hand read-only questions (where is X, who calls Y) to helpers on a local model, which read the
+          files and return only the answer. Use the built-in Qwen (no extra setup) or a tool-capable Ollama model like
+          qwen3:8b for more thorough searches. Savings show under Token usage.
         </div>
       </div>
-      <div className="flex gap-2 items-center">
-        <Switch
-          checked={enabled}
-          disabled={saving || (!enabled && !model.trim() && ollamaModels.length === 0)}
-          onCheckedChange={(on) => {
-            const next = on ? (model.trim() || ollamaModels[0] || '') : '';
-            if (next !== current) onSave({ ...value, delegateModel: next });
-            setModel(next);
-          }}
-          aria-label="Let the coding agent delegate exploration to local helpers"
-        />
-        <Input
-          list="dev-agent-delegate-models"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={enabled ? 'Ollama model ID' : 'Pick a tool-capable Ollama model to enable'}
-          className="flex-1 font-mono text-xs"
-        />
-        <datalist id="dev-agent-delegate-models">
-          {ollamaModels.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-        <Button
-          size="sm"
-          className="h-9"
-          disabled={!enabled || !dirty || !model.trim() || saving}
-          onClick={() => onSave({ ...value, delegateModel: model.trim() })}
-        >
-          Save
-        </Button>
+      <div className="space-y-2">
+        <div className="flex gap-2 items-center">
+          <Switch
+            checked={enabled}
+            disabled={saving || (!enabled && !model.trim() && ollamaModels.length === 0 && !localModel.available)}
+            onCheckedChange={(on) => {
+              if (!on) {
+                onSave({ ...value, delegateModel: '' });
+                setModel('');
+              } else {
+                const next = localModel.available ? BUILTIN_MODEL_ID : (model.trim() || ollamaModels[0] || '');
+                if (next) onSave({ ...value, delegateModel: next });
+              }
+            }}
+            aria-label="Let agents delegate exploration to local helpers"
+          />
+          <Input
+            list="dev-agent-delegate-models"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={usingBuiltin}
+            placeholder={usingBuiltin ? '' : enabled ? 'Ollama model ID' : 'Ollama model ID (or use built-in Qwen)'}
+            className="flex-1 font-mono text-xs"
+          />
+          <datalist id="dev-agent-delegate-models">
+            {ollamaModels.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
+          {!usingBuiltin && (
+            <Button
+              size="sm"
+              className="h-9"
+              disabled={!enabled || !dirty || !model.trim() || saving}
+              onClick={() => onSave({ ...value, delegateModel: model.trim() })}
+            >
+              Save
+            </Button>
+          )}
+        </div>
+        {localModel.available && (
+          <div className="flex gap-2 items-center">
+            <Button
+              size="sm"
+              variant={usingBuiltin ? 'default' : 'outline'}
+              className="h-7 text-xs"
+              disabled={saving}
+              onClick={() => {
+                const next = usingBuiltin ? '' : BUILTIN_MODEL_ID;
+                onSave({ ...value, delegateModel: next });
+              }}
+            >
+              {usingBuiltin ? `Using built-in ${localModel.model}` : `Use built-in ${localModel.model}`}
+            </Button>
+            {usingBuiltin && (
+              <span className="text-xs text-muted-foreground">
+                Single-shot answers from Qwen — no Ollama needed. For deeper searches, pick an Ollama model instead.
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -838,6 +873,7 @@ export function DevAgentSettings() {
               <DelegateModelRow
                 value={settings.models.coding}
                 ollamaModels={ollamaModels?.models.filter((m) => m.tools).map((m) => m.name) ?? []}
+                localModel={settings.localModel}
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />

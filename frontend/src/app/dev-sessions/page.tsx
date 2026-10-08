@@ -38,10 +38,11 @@ export default function DevSessionsPage() {
   const [title, setTitle] = useState('');
   const [sessionKey, setSessionKey] = useState('');
   const [appId, setAppId] = useState('');
+  const [existingBranch, setExistingBranch] = useState('');
   const [pendingDelete, setPendingDelete] = useState<SessionRecord | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: () => api.createSession({ title, sessionKey: sessionKey || undefined, appId }),
+    mutationFn: () => api.createSession({ title, sessionKey: sessionKey || undefined, appId, existingBranch: existingBranch || undefined }),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       router.push(sessionHref(session.id, stageGroupFor(session)));
@@ -108,6 +109,12 @@ export default function DevSessionsPage() {
                   placeholder="Ticket ID (optional)"
                   value={sessionKey}
                   onChange={(e) => setSessionKey(e.target.value)}
+                />
+                <Input
+                  className="w-52"
+                  placeholder="Existing branch (optional)"
+                  value={existingBranch}
+                  onChange={(e) => setExistingBranch(e.target.value)}
                 />
                 <Button variant="default" type="submit" disabled={!title.trim() || !appId || createMutation.isPending}>
                   {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}

@@ -36,6 +36,8 @@ import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-t
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
+import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
@@ -70,6 +72,9 @@ export async function runRequirementsAgentTurn(
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('requirements');
+  const { delegateModel } = await getRoleModelConfig('coding');
+  const helperContext = stageHelperContext(session.id, 'requirements');
+  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext });
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'requirements');
@@ -125,6 +130,8 @@ export async function runRequirementsAgentTurn(
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
+  if (researchDeps) systemPrompt += DELEGATE_NOTE;
+
   // Per-turn, so it rides in the prompt rather than systemPrompt (same
   // resume reason as above) — and an app's prompt override can't drop it.
   if (webAccess) prompt = `${WEB_ACCESS_TURN_NOTE}\n\n---\n\n${prompt}`;
@@ -162,13 +169,14 @@ export async function runRequirementsAgentTurn(
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'requirements')),
           createFetchUrlToolClaude({ enabled: webAccess }),
+          ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
         ],
       });
 
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: TOOL_NAMES,
+      toolNames: researchDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
       model,
       resumeSessionId: session.claudeSessionIds.requirements,
       prompt,
@@ -198,6 +206,7 @@ export async function runRequirementsAgentTurn(
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'requirements')),
       fetch_url: createFetchUrlTool({ enabled: webAccess }),
+      ...delegateToolEntry(researchDeps, session.histories.requirements),
     };
 
     const { updatedHistory } = await runAgentTurn({
@@ -252,12 +261,14 @@ async function persistEvent(sessionId: string, event: AgentEvent, resultToolName
   } else if (event.type === 'tool_call') {
     await appendTranscriptEntry(sessionId, 'requirements', {
       role: 'tool_call',
+      toolCallId: event.toolCallId,
       toolName: event.name,
       toolInput: event.input,
     });
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'requirements', {
       role: 'tool_result',
+      toolCallId: event.toolCallId,
       toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,

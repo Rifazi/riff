@@ -21,13 +21,15 @@ export interface TranscriptEntry {
   toolInput?: unknown;
   toolResult?: unknown;
   isError?: boolean;
+  // Pairs a tool_result with its tool_call; absent on older entries.
+  toolCallId?: string;
   timestamp: string;
   // A system entry recording one local helper run (harness-server
   // agents/helpers/), shown inside that tool call's result card.
   helper?: HelperRunStats;
 }
 
-export type HelperName = 'research' | 'classifier';
+export type HelperName = 'research' | 'classifier' | 'runner';
 
 export interface HelperRunStats {
   helper: HelperName;

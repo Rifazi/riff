@@ -47,8 +47,9 @@ function subtract(a: TokenUsage, b: TokenUsage): TokenUsage {
 
 function stageTimestamps(session: SessionRecord, stage: UsageStage): string[] {
   const own = session.transcripts[stage].map((e) => e.timestamp);
-  if (stage !== 'coding' || !session.codingTeam) return own;
-  return [...own, ...session.codingTeam.members.flatMap((m) => m.transcript.map((e) => e.timestamp))];
+  if (stage !== 'coding') return own;
+  const teams = [...session.codingTeamHistory, ...(session.codingTeam ? [session.codingTeam] : [])];
+  return [...own, ...teams.flatMap((t) => t.members.flatMap((m) => m.transcript.map((e) => e.timestamp)))];
 }
 
 /** Local calendar day, YYYY-MM-DD — the server runs on the user's own machine. */
@@ -133,7 +134,7 @@ export async function registerUsageRoutes(app: FastifyInstance): Promise<void> {
     for (const e of log) {
       if (!e.helper || new Date(e.at) < start) continue;
       const h = (byHelper[e.helper.name] ??= { calls: 0, tasks: 0, useful: 0, usage: ZERO_USAGE, savedTokens: 0 });
-      h.calls += 1;
+      if (!e.helper.redo) h.calls += 1;
       h.tasks += e.helper.tasks;
       h.useful += e.helper.useful;
       h.usage = addUsage(h.usage, e.usage);

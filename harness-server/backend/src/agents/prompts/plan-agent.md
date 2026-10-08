@@ -150,13 +150,12 @@ full; read the sections you need.
      ### 2. <title>
      ...
      ```
-   - `steps`: the same steps as a minimal `{id, title, effort}` list, **in the
+   - `steps`: the same steps as a minimal `{id, title}` list, **in the
      same dependency-respecting order** — the coding agent's checklist is
      seeded verbatim from this, so keep `id` short and stable and `title`
-     matching the step's heading above. Set `effort: "light"` only on steps
-     that are mechanical and fully specified by the plan (see the tool's
-     description); those run on a cheaper model. Everything else is
-     `"standard"`.
+     matching the step's heading above. Step effort (`light`/`standard`) is
+     auto-classified by an on-device model from the title — you do not need
+     to set it.
 8. You can call `write_plan_doc` more than once as the plan evolves during
    the conversation — always pass the complete plan, not a diff. Nothing is
    "final" until the human clicks Approve in the UI.

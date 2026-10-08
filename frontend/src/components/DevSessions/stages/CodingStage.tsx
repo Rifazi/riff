@@ -17,13 +17,20 @@ import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
-import { CodingTeamPanel } from '../CodingTeam';
+import { CodingTeamPanel, EarlierTeamRounds } from '../CodingTeam';
 import { DiffViewer } from '../DiffViewer';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.coding;
+
+// Module-level: persists across tab-switch remounts so auto-kickoff effects
+// don't fire twice when the user navigates away and back before the server
+// clears the pending flag. Keys are `${sessionId}:${flagName}`.
+const kicked = new Set<string>();
+// Tracks which team round was last started per session.
+const startedRounds = new Map<string, number>();
 
 // Generous cap on consecutive auto-continues. A turn that makes no progress
 // already stops auto-run (see autoRunStopReason) — this only bounds a plan
@@ -66,6 +73,22 @@ function compactQaReport(markdown: string): string {
   }
   return text;
 }
+
+
+// Tools that change nothing the Coding tab shows (see handleSend).
+const READ_ONLY_TOOLS = new Set([
+  'read_file',
+  'outline_file',
+  'search_code',
+  'search_docs',
+  'read_doc',
+  'delegate',
+  'classify_text',
+  'audit_theme',
+  'run_checked_command',
+  'get_diff',
+  'fetch_url',
+]);
 
 export function CodingStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
@@ -114,21 +137,22 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   // Watching a run started elsewhere (another window, or before a reload):
   // poll instead of streaming.
+  // Not once the server says no run is going: a run cut off by a restart
+  // stays "running" on disk and would otherwise be polled forever.
   useEffect(() => {
-    if (team.running || codingTeam?.status !== 'running') return;
+    if (team.running || !teamActive) return;
     const timer = setInterval(refresh, 3000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team.running, codingTeam?.status]);
+  }, [team.running, teamActive]);
 
   const startTeam = () => void team.start(sessionId, refresh);
 
   // Jack assigned a team: start it once Jack's turn has ended, once per round.
-  const startedRound = useRef<number | null>(null);
   useEffect(() => {
     if (codingTeam?.status !== 'assigned' || team.running || streaming) return;
-    if (startedRound.current === codingTeam.round) return;
-    startedRound.current = codingTeam.round;
+    if (startedRounds.get(sessionId) === codingTeam.round) return;
+    startedRounds.set(sessionId, codingTeam.round);
     startTeam();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [codingTeam?.status, codingTeam?.round, team.running, streaming]);
@@ -163,14 +187,14 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     },
   });
 
-  const kickedOffCoordinator = useRef(false);
   useEffect(() => {
     if (teamMode) return;
     if (!session.coordinatorEnabled) return;
     if (session.transcripts.coding.length > 0) return;
     if (streaming) return;
-    if (kickedOffCoordinator.current) return;
-    kickedOffCoordinator.current = true;
+    const key = `${sessionId}:codingCoordinator`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void runCoordinator(sessionId, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.coordinatorEnabled, session.transcripts.coding.length, streaming]);
@@ -180,14 +204,18 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // model when the step is tagged light. Anything the human types isn't one.
   const handleSend = (message: string, attachments?: AttachmentInput[], stepTurn = false) => {
     setAutoRunStopped(null);
+    const toolNames = new Map<string, string>();
     return send(
       `/api/sessions/${sessionId}/coding/message`,
       message,
       refresh,
       (event) => {
-        // Refresh on every tool result so the branch, diff and commits appear
-        // as the agent works instead of only when the whole turn finishes.
-        if (event.type === 'tool_result') {
+        // Refresh after each tool that can change the branch, diff, commits or
+        // checklist, so they appear as the agent works instead of only when
+        // the turn finishes. Reads are skipped: the session is megabytes, and
+        // refetching it after every read was most of the server's traffic.
+        if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name.replace(/^mcp__[^_]+(-[^_]+)?__/, ''));
+        if (event.type === 'tool_result' && !READ_ONLY_TOOLS.has(toolNames.get(event.toolCallId) ?? '')) {
           queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
           queryClient.invalidateQueries({
             queryKey: ['coding-diff', sessionId],
@@ -201,26 +229,32 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   // Kick off automatically when reached with no branch and nothing said —
   // Jack's first turn decides whether to build it solo or split it across a team.
-  const kickedOff = useRef(false);
   useEffect(() => {
     if (teamMode) return;
     if (session.branch) return;
     if (session.transcripts.coding.length > 0) return;
     if (streaming) return;
-    if (kickedOff.current) return;
-    kickedOff.current = true;
+    const key = `${sessionId}:codingKickoff`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     if (session.coordinatorEnabled) return;
     void handleSend(CODING_KICKOFF_MESSAGE, undefined, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.branch, session.coordinatorEnabled, session.transcripts.coding.length, streaming, teamMode]);
 
+  // Clear the qaFix guard when the server confirms the flag was processed, so
+  // the next QA send-back cycle can fire correctly.
+  useEffect(() => {
+    if (!session.qaFindingsPending) kicked.delete(`${sessionId}:qaFix`);
+  }, [session.qaFindingsPending, sessionId]);
+
   // QA sent this back for fixes — relay the report as the next message.
-  const kickedOffQaFix = useRef(false);
   useEffect(() => {
     if (!session.qaFindingsPending) return;
     if (streaming) return;
-    if (kickedOffQaFix.current) return;
-    kickedOffQaFix.current = true;
+    const key = `${sessionId}:qaFix`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void (async () => {
       // Only what needs fixing — the full report stays in the QA tab. If the
       // findings can't be fetched (e.g. an agent server started before
@@ -243,14 +277,18 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.qaFindingsPending, streaming]);
 
+  useEffect(() => {
+    if (!session.codingReconciliationPending) kicked.delete(`${sessionId}:reconciliation`);
+  }, [session.codingReconciliationPending, sessionId]);
+
   // Requirements/plan were revised and reconciled after a mid-coding
   // send-back — pick the conversation back up on the same branch.
-  const kickedOffReconciliation = useRef(false);
   useEffect(() => {
     if (!session.codingReconciliationPending) return;
     if (streaming) return;
-    if (kickedOffReconciliation.current) return;
-    kickedOffReconciliation.current = true;
+    const key = `${sessionId}:reconciliation`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
     void handleSend(
       `Requirements and/or the plan were revised and reconciled — see the updated documents above.\n\n` +
         `Original note: ${session.pendingRequirementsRelayNote ?? '(no note provided)'}\n\n` +
@@ -342,6 +380,12 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     !approved &&
     (teamStatus === 'not_started' || teamStatus === 'interrupted' || teamStatus === 'needs_attention');
 
+  // Rounds that are over — e.g. the team QA's send-back retired, while Jack
+  // works the fixes alone or with a new team.
+  const earlierRounds = (
+    <EarlierTeamRounds rounds={session.codingTeamHistory ?? []} steps={plan ?? []} branch={session.branch} />
+  );
+
   const leadChat = (
     <ChatPane
       entries={entries}
@@ -377,6 +421,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       chat={
         teamMode ? (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
+            {earlierRounds}
             <CodingTeamPanel
               round={codingTeam?.round ?? 1}
               kind={codingTeam?.kind ?? 'plan'}
@@ -397,6 +442,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
           </div>
         ) : (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
+            {earlierRounds}
             {plan && plan.length > 0 && (
               <div className="flex-shrink-0 space-y-2">
                 <CodingPlanChecklist steps={plan} />

@@ -37,9 +37,43 @@ export async function assertCleanBaseForNewBranch(repoRoot: string, baseBranch =
   }
 }
 
-export async function createBranch(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<void> {
-  await assertCleanBaseForNewBranch(repoRoot, baseBranch);
+export async function checkoutExistingBranch(repoRoot: string, branchName: string): Promise<void> {
   const git = client(repoRoot);
+  const branches = await git.branchLocal();
+  if (!branches.all.includes(branchName)) {
+    throw new GitPreconditionError(`Branch "${branchName}" does not exist locally in this repo.`);
+  }
+  if (branches.current !== branchName) {
+    await git.checkout(branchName);
+  }
+}
+
+export async function createBranch(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<void> {
+  const git = client(repoRoot);
+  const status = await git.status();
+
+  if (status.current !== baseBranch) {
+    if (!status.isClean()) {
+      throw new GitPreconditionError(
+        `Working tree is on "${status.current}" with uncommitted changes. Commit or stash them, then switch to ${baseBranch} before starting the coding stage.`
+      );
+    }
+    const branches = await git.branchLocal();
+    if (!branches.all.includes(baseBranch)) {
+      throw new GitPreconditionError(
+        `Base branch "${baseBranch}" does not exist locally. Create it or update the app's base branch setting.`
+      );
+    }
+    await git.checkout(baseBranch);
+  }
+
+  const baseStatus = await git.status();
+  if (!baseStatus.isClean()) {
+    throw new GitPreconditionError(
+      `${baseBranch} has uncommitted changes. Commit or stash them before starting the coding stage.`
+    );
+  }
+
   const existing = await git.branchLocal();
   if (existing.all.includes(branchName)) {
     throw new GitPreconditionError(`Branch ${branchName} already exists.`);

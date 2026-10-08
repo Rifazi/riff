@@ -7,10 +7,19 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
 import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
+import { reportHelperRun, type HelperContext } from '../helpers/helper.js';
+import { generateLocal } from '../local-llm.js';
+import {
+  RUNNER_INPUT_CHARS,
+  RUNNER_SUMMARIZE_SYSTEM,
+  buildFailureReport,
+  groundSummary,
+  shouldSummarizeLog,
+} from '../helpers/runner/core.js';
 
 const execFileAsync = promisify(execFile);
 
-type CheckCommand = 'lint' | 'test' | 'test:integration';
+export type CheckCommand = 'lint' | 'test' | 'test:integration';
 
 // Legacy defaults — the original Customer-EDI-shaped repo's own script
 // names. An app can override any of these (see apps/apps.ts's
@@ -38,6 +47,20 @@ const OVERVIEW_CONTEXT_LINES = 1;
 // still show up in the stat, and `path` fetches any of them on request.
 const DIFF_NOISE_EXCLUDES = NOISE_PATHSPECS;
 
+// The first line of a junit <failure>/<error>: its message attribute, else
+// its text (the assertion line in vitest/jest output), cut to 200 chars.
+function firstFailureLine(failure: unknown): string {
+  const node = Array.isArray(failure) ? failure[0] : failure;
+  const text =
+    typeof node === 'string'
+      ? node
+      : typeof node === 'object' && node !== null
+        ? String((node as Record<string, unknown>)['@_message'] ?? (node as Record<string, unknown>)['#text'] ?? '')
+        : '';
+  const line = text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+}
+
 function parseJunitSummary(xml: string): string {
   try {
     const parser = new XMLParser({ ignoreAttributes: false });
@@ -55,8 +78,10 @@ function parseJunitSummary(xml: string): string {
     for (const suite of testsuiteList) {
       const cases = Array.isArray(suite?.testcase) ? suite.testcase : [suite?.testcase].filter(Boolean);
       for (const testcase of cases) {
-        if (testcase?.failure || testcase?.error) {
-          failingNames.push(`${suite['@_name'] ?? ''} > ${testcase['@_name'] ?? ''}`);
+        const failure = testcase?.failure ?? testcase?.error;
+        if (failure) {
+          const reason = firstFailureLine(failure);
+          failingNames.push(`${suite['@_name'] ?? ''} > ${testcase['@_name'] ?? ''}${reason ? ` — ${reason}` : ''}`);
         }
       }
     }
@@ -68,6 +93,20 @@ function parseJunitSummary(xml: string): string {
     return summary;
   } catch {
     return 'Could not parse junit.xml summary.';
+  }
+}
+
+// The junit summary of this run, or null when the run didn't write one. A
+// junit.xml older than the run is a previous run's and would report its
+// results as this one's.
+async function readJunitSummary(repoRoot: string, startedAt: number): Promise<string | null> {
+  const file = path.join(repoRoot, 'junit.xml');
+  try {
+    const stat = await fs.stat(file);
+    if (stat.mtimeMs < startedAt) return null;
+    return parseJunitSummary(await fs.readFile(file, 'utf8'));
+  } catch {
+    return null;
   }
 }
 
@@ -93,10 +132,12 @@ export const getDiffDescription =
  * about, not a tool-execution error, so this always returns normally
  * (pass/fail is embedded in the text) rather than throwing.
  */
-export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
+export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
   const runCheckedCommandExecute = async ({ command }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
     const script = deps.checkCommands?.[command] ?? DEFAULT_SCRIPTS[command];
     const timeoutMs = TIMEOUTS_MS[command];
+    // Whole seconds: some filesystems store mtimes that coarsely.
+    const startedAt = Math.floor(Date.now() / 1000) * 1000;
     try {
       const { stdout, stderr } = await execFileAsync('npm', ['run', script], {
         cwd: deps.repoRoot,
@@ -105,12 +146,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
       });
       let text = `${script} succeeded.`;
       if (command === 'test') {
-        try {
-          const junit = await fs.readFile(path.join(deps.repoRoot, 'junit.xml'), 'utf8');
-          text += `\n\n${parseJunitSummary(junit)}`;
-        } catch {
-          text += '\n\n(no junit.xml found to summarize)';
-        }
+        text += `\n\n${(await readJunitSummary(deps.repoRoot, startedAt)) ?? '(no junit.xml found to summarize)'}`;
       }
       // A passing run's log is noise the model re-reads on every later step —
       // the pass/fail line (and junit summary) is all it needs.
@@ -120,15 +156,43 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
       const timedOut = e.killed ? ' (TIMED OUT)' : '';
       let text = `${script} failed${timedOut}.`;
       if (command === 'test') {
+        const junit = await readJunitSummary(deps.repoRoot, startedAt);
+        if (junit) text += `\n\n${junit}`;
+      }
+      const stdout = e.stdout ?? '';
+      const stderr = e.stderr ?? e.message ?? '';
+      const rawLog = compactOutput(stdout, stderr);
+
+      // A long log is shortened by the local Qwen, which reads far more of
+      // it than the agent's 3k excerpt. The pass/fail line and junit summary
+      // above it always go through unchanged, and only the summary lines the
+      // log backs up are kept — see helpers/runner/core.ts.
+      const fullLog = compactOutput(stdout, stderr, RUNNER_INPUT_CHARS);
+      if (deps.helperContext && shouldSummarizeLog(fullLog)) {
         try {
-          const junit = await fs.readFile(path.join(deps.repoRoot, 'junit.xml'), 'utf8');
-          text += `\n\n${parseJunitSummary(junit)}`;
+          const answer = (await generateLocal({ system: RUNNER_SUMMARIZE_SYSTEM, prompt: fullLog, maxTokens: 600 })).trim();
+          const summary = answer ? groundSummary(answer, fullLog) : null;
+          if (summary) {
+            await reportHelperRun(
+              deps.helperContext,
+              { helper: 'runner', model: 'builtin', tasks: 1, useful: 1, readChars: fullLog.length, returnedChars: summary.length, savedTokens: Math.max(0, Math.round((fullLog.length - summary.length) / 4)) },
+              `Runner helper: summarized ${command} output (${fullLog.length} → ${summary.length} chars)`,
+            );
+            return buildFailureReport(text, fullLog, summary);
+          }
+          if (answer) {
+            await reportHelperRun(
+              deps.helperContext,
+              { helper: 'runner', model: 'builtin', tasks: 1, useful: 0, readChars: fullLog.length, returnedChars: 0, savedTokens: 0 },
+              `Runner helper: its ${command} summary didn't match the log, so the log excerpt was sent instead`,
+            );
+          }
         } catch {
-          // no junit.xml — fall through to raw output
+          // Qwen unavailable — fall through to the compacted log
         }
       }
-      text += `\n\noutput (errors and summary):\n${compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
-      return text;
+
+      return buildFailureReport(text, rawLog, null);
     }
   };
 
@@ -154,7 +218,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
   return { runCheckedCommandExecute, getDiffExecute };
 }
 
-export function createQaTools(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>> }) {
+export function createQaTools(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
   const { runCheckedCommandExecute, getDiffExecute } = createQaExecutors(deps);
   return {
     runCheckedCommandTool: tool({

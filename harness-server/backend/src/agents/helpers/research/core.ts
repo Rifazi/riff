@@ -15,7 +15,7 @@ import { z } from 'zod';
 export const MAX_DELEGATE_TASKS = 4;
 // One GPU serves every Ollama request; more than this at once just queues.
 export const DELEGATE_PARALLEL = 2;
-export const MAX_ANSWER_CHARS = 1_200;
+export const MAX_ANSWER_CHARS = 2_400;
 export const NOTHING_FOUND = 'NOTHING_FOUND';
 // Tool-result characters per token, the same estimate as the Token usage panel.
 export const CHARS_PER_TOKEN = 4;
@@ -27,8 +27,9 @@ export const delegateSchema = z.object({
         task: z
           .string()
           .describe(
-            'One precise, self-contained question about this repo, e.g. "Where is the retry delay for failed invoice ' +
-              'uploads set? Give path:line." or "List the callers of parseEdiSegment with path:line."',
+            'One precise question. Ask exactly what you need: a path:line for locations, a complete list ' +
+              'for enumerations ("list all files under X", "does Y exist"), a name or short snippet for content. ' +
+              'E.g. "Where is retryDelay for failed uploads set?" or "List all files under backend/src/db/."',
           ),
         paths: z
           .array(z.string())
@@ -44,39 +45,178 @@ export const delegateSchema = z.object({
 export type DelegateInput = z.infer<typeof delegateSchema>;
 
 export const delegateDescription =
-  `Hand up to ${MAX_DELEGATE_TASKS} read-only questions about the repo to local helper agents, which run in ` +
-  'parallel on this machine at no cost. Each one searches and reads files itself and returns only the answer ' +
-  '(path:line facts, short snippets), so the files never enter your context. Use it for exploration: where ' +
-  'something is defined or handled, who calls a function, whether a helper or pattern already exists, what a file ' +
-  "or module does, which files a change will touch. Don't use it for text you are about to edit (read that range " +
-  'yourself, since edit_file needs it verbatim), or for anything that needs judgment about the plan. Ask precise ' +
-  'questions and ask for path:line. A task that finds nothing comes back as one line; then look yourself. The ' +
-  'helpers are smaller models: check a surprising answer with a ranged read_file before relying on it.';
+  `Hand up to ${MAX_DELEGATE_TASKS} read-only questions to local helpers running in parallel on this machine. ` +
+  'They search and read the repo themselves; only the answer enters your context, not the files they read. ' +
+  'Use for exploration: where something is defined, who calls a function, does a pattern already exist, ' +
+  "which files a change touches, whether a file or directory exists, listing what's under a path. " +
+  "Don't use for text you're about to edit (edit_file needs it verbatim — read that range yourself), " +
+  'or for anything that needs judgment about the plan. ' +
+  'Ask each task as a precise question: ask for a path:line, a complete list, or a yes/no with the path — ' +
+  'whatever the question actually needs. A task that finds nothing comes back as one line. ' +
+  'Verify a surprising answer with ranged read_file before acting.';
+
+// How an answer is shaped, shared by the tool-loop helper and the built-in
+// one-shot helper.
+const ANSWER_RULES = [
+  'Your answer is pasted directly into the coding agent\'s paid context. Give exactly what the question needs — no more, no less:',
+  '- Location question ("where is X"): one path:line.',
+  '- Caller question ("who calls X"): a list of path:line entries.',
+  '- Existence question ("does X exist"): yes/no with the path.',
+  '- Multi-file existence ("do these files exist: A, B, C"): one line per file — "A: missing", "B: 42 lines (path/A)", etc.',
+  '- List question ("list files under Y", "list exported functions"): the complete list — every item, nothing omitted.',
+  '- Verbatim quote ("quote X"): the exact text of the lines, with their line numbers.',
+  '- Content question ("what does X do", "show the Y field"): one short sentence or the exact text, plus the key path:line.',
+  '- Code snippet: only when the exact text was asked for, ≤8 lines unless the question asks for more.',
+  '- No preamble, no restating the question, no account of how you searched, no advice.',
+  `- If you genuinely find nothing after trying, reply with exactly ${NOTHING_FOUND} and nothing else. Never guess.`,
+  '',
+  'Completeness first: if the question asks for a list, return every item found — a truncated list is wrong.',
+  'Brevity second: omit anything the question did not ask for.',
+];
 
 export const DELEGATE_SYSTEM_PROMPT = [
-  'You are a research helper for a coding agent working in a code repository. You have read-only tools.',
-  'Answer the one question you are given, using the tools to find the facts in the repo.',
+  'You are a research helper for a coding agent working in a code repository. You have read-only tools plus run_checked_command.',
+  'Answer the one question you are given by USING THE TOOLS to find the facts in the repo, then write your answer.',
+  'If the question asks about test or lint status, use run_checked_command and report only the failures (file, line, message) and a pass/fail count — never include raw stdout.',
   '',
-  'Your answer is pasted into the coding agent\'s context, where every character costs money. So:',
-  '- Give only the facts that answer the question: file paths with line numbers (path:line), names, and a short',
-  '  code snippet (at most 10 lines) only when the exact text matters.',
-  '- No preamble, no restating the question, no account of how you searched, no advice unless asked.',
-  `- If you find nothing relevant, reply with exactly ${NOTHING_FOUND} and nothing else. Never guess.`,
-  '- Stay under 150 words unless the question asks for a list.',
+  'CRITICAL: Your answer must contain ONLY the facts you found. Never mention tool names (search_code, read_file, outline_file, etc.) in your answer — those are how you find the answer, not what you say.',
   '',
-  'Start with search_code or search_docs. Use outline_file before read_file on a large file, and read only the',
-  'line ranges you need.',
+  ...ANSWER_RULES,
+  'Start with search_code or search_docs to locate the right file, then use outline_file before read_file on a large file.',
+  'For existence questions, check the file directly with read_file, not just grep.',
+  'For verbatim quotes, always read the file — do not report only the grep match line.',
+  'Read only the line range that answers the question.',
 ].join('\n');
+
+// The built-in Qwen has no tool calling: tool.ts reads the files up front and
+// pastes excerpts below this prompt. Told about tools, it writes out the call
+// it would make ("read_file: path") instead of an answer, so it isn't.
+export const BUILTIN_SYSTEM_PROMPT = [
+  'You are a research helper for a coding agent working in a code repository.',
+  'You cannot open files or run anything. Answer the one question you are given using ONLY the "Repository context" below.',
+  '',
+  'How the context is shown:',
+  '- Each file starts with "=== path (N lines) ===". Every line is prefixed with its line number and "|".',
+  '- A file marked [complete] is shown in full.',
+  '- In any other file, "… lines A-B not shown …" marks text you have NOT seen.',
+  '',
+  'CRITICAL:',
+  '- Never say something is absent, missing or unused unless the file is marked [complete].',
+  `- If the answer could be in lines not shown, or in a file not shown, reply with exactly ${NOTHING_FOUND}.`,
+  '- Quote only text you can see. Use the line numbers shown; don\'t count lines yourself.',
+  '- Never write "N/A", and never describe reading or searching — only the facts.',
+  '',
+  ...ANSWER_RULES,
+].join('\n');
+
+const QUOTED_RE = /`([^`\n]{1,80})`|'([^'\n]{1,80})'|"([^"\n]{1,80})"/g;
+// A file path, or a file name with an extension: settings.test.ts, ../store.
+const PATH_RE = /(?:[\w.-]*\/[\w./-]*|\b[\w-]+(?:\.[\w-]+)*\.(?:[jt]sx?|mjs|cjs|json|md|ya?ml|toml|rs|py|go|css|html|sh)\b)/g;
+
+/**
+ * Whether a question is about test or lint status, so the built-in helper
+ * should run the check. File names ("settings.test.ts") and quoted text (a
+ * test called '…reports an error') don't count — only the question's own
+ * words, and only when they ask about passing, failing or running.
+ */
+export function wantsCheckRun(task: string): boolean {
+  const words = task.replace(/\n\nStart from: .*$/s, '').replace(QUOTED_RE, ' ').replace(PATH_RE, ' ');
+  if (!/\b(tests?|lint|linter|typecheck)\b/i.test(words)) return false;
+  return /\b(pass(es|ing)?|fail(s|ing|ures?)?|green|broken|run)\b/i.test(words);
+}
+
+/**
+ * What to look for inside a file: quoted strings ('../secure-store/store',
+ * 'returns 404 when…') and code-shaped identifiers (appClient,
+ * MOBILINK_DATA_DIR, Fn.importValue). File paths in the question aren't
+ * terms — they say which file, not what to find in it.
+ */
+export function searchTerms(task: string): string[] {
+  const question = task.replace(/\n\nStart from: .*$/s, '');
+  const terms = new Set<string>();
+  for (const m of question.matchAll(QUOTED_RE)) {
+    const t = (m[1] ?? m[2] ?? m[3]).trim();
+    if (t.length >= 3) terms.add(t);
+  }
+  const rest = question.replace(QUOTED_RE, ' ').replace(PATH_RE, ' ');
+  for (const [word] of rest.matchAll(/\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g)) {
+    const codeShaped =
+      word.includes('.') || word.includes('_') || /[a-z][A-Z]/.test(word) || /^[A-Z][a-z]+[A-Z]/.test(word) || /^[A-Z]{2,}\d*$/.test(word);
+    if (codeShaped && word.length >= 3) terms.add(word);
+  }
+  return [...terms].slice(0, 12);
+}
+
+const HEAD_LINES = 40;
+const WINDOW_LINES = 6;
+
+/**
+ * A file for the built-in helper: line-numbered, in full when it fits
+ * maxChars ([complete]), otherwise its first lines plus a window around every
+ * line that mentions a term, with each gap marked so the model knows what it
+ * hasn't seen.
+ */
+export function excerptFile(label: string, text: string, terms: string[], maxChars: number): string {
+  const lines = text.split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  const numbered = lines.map((l, i) => `${i + 1}| ${l}`);
+  const full = `=== ${label} (${lines.length} lines) [complete] ===\n${numbered.join('\n')}`;
+  if (full.length <= maxChars) return full;
+
+  const keep = new Array<boolean>(lines.length).fill(false);
+  for (let i = 0; i < Math.min(HEAD_LINES, lines.length); i++) keep[i] = true;
+  const needles = terms.map((t) => t.toLowerCase());
+  lines.forEach((line, i) => {
+    const lower = line.toLowerCase();
+    if (!needles.some((n) => lower.includes(n))) return;
+    for (let j = Math.max(0, i - WINDOW_LINES); j <= Math.min(lines.length - 1, i + WINDOW_LINES); j++) keep[j] = true;
+  });
+
+  const header = `=== ${label} (${lines.length} lines) ===`;
+  const out: string[] = [header];
+  let size = header.length;
+  let i = 0;
+  while (i < lines.length) {
+    if (!keep[i]) {
+      const start = i;
+      while (i < lines.length && !keep[i]) i++;
+      out.push(`… lines ${start + 1}-${i} not shown …`);
+      continue;
+    }
+    if (size + numbered[i].length + 1 > maxChars - 40) {
+      out.push(`… lines ${i + 1}-${lines.length} not shown …`);
+      break;
+    }
+    out.push(numbered[i]);
+    size += numbered[i].length + 1;
+    i++;
+  }
+  return out.join('\n');
+}
+
+// A reply that is only the tool call a model would have made, or a line of
+// "N/A: not found" in place of the NOTHING_FOUND sentinel.
+const TOOL_CALL_LINE_RE = /^(\[\d+\]\s*)?[`*]*(read_file|read_doc|search_code|search_docs|outline_file|run_checked_command)\b/i;
+const NA_LINE_RE = /^(\[\d+\]\s*)?[`*]*N\/A\b/i;
+// excerptFile's file header, copied into a quote.
+const FILE_HEADER_RE = /^=== .+ \(\d+ lines\)( \[complete\])? ===$/;
 
 // Appended to the coding agent's system prompt when it has the tool. The
 // tool description carries the same guidance, since an app's prompt
 // override replaces the base prompt and a resumed Claude session keeps its
 // first system prompt.
 export const DELEGATE_NOTE =
-  '\n\n# Delegating exploration\n\nYou have `delegate`: local helper agents that search and read the repo for free ' +
-  'and return only the answer. Everything you read yourself stays in your context and is re-read on every later ' +
-  'step, so delegate exploration (where is X, who calls Y, does Z already exist, what does this module do), with ' +
-  'independent questions batched into one call, and read_file yourself only the ranges you are about to edit.';
+  '\n\n# Delegating exploration\n\n' +
+  'You have `delegate`: local helpers that search and read the repo for free and hand back only the answer.\n\n' +
+  '**Use it as your first move** for any exploration you would otherwise start a tool loop for: where is X ' +
+  'defined, who calls Y, does this pattern or helper already exist, what does a module do, which files does a ' +
+  'change touch.\n\n' +
+  '**Batch independent questions into one call** — they run in parallel and the combined cost is one tool result ' +
+  'instead of many. Group unrelated lookups that can happen at the same time.\n\n' +
+  "**Don't delegate** text you are about to edit (you need it verbatim for edit_file — read that range yourself), " +
+  'facts you already have in the conversation, or questions that need judgment about the plan.\n\n' +
+  'A task that finds nothing comes back as one short line. Check a surprising answer with a ranged read_file ' +
+  'before acting on it — the helpers are smaller models.';
 
 export function delegatePrompt(task: { task: string; paths?: string[] }): string {
   const paths = task.paths?.filter((p) => p.trim()) ?? [];
@@ -131,7 +271,12 @@ export function cleanAnswer(raw: string, maxChars = MAX_ANSWER_CHARS): string | 
   const lines = text.split('\n');
   while (lines.length > 1 && PREAMBLE_RE.test(lines[0].trim())) lines.shift();
   while (lines.length > 1 && (SIGN_OFF_RE.test(lines.at(-1)!.trim()) || !lines.at(-1)!.trim())) lines.pop();
-  text = lines.join('\n').trim();
+  // "read_file: path" and "N/A: …" lines aren't findings; an answer made only
+  // of them found nothing.
+  text = lines
+    .filter((l) => ![TOOL_CALL_LINE_RE, NA_LINE_RE, FILE_HEADER_RE].some((re) => re.test(l.trim())))
+    .join('\n')
+    .trim();
   if (!text) return null;
 
   if (text.length > maxChars) {
@@ -204,6 +349,9 @@ export interface HelperRun {
   error: string | null;
   usage: LocalUsage;
   readChars: number;
+  // Repo-relative files the helper read, to spot the paid agent reading
+  // them again (RedoLedger).
+  paths?: string[];
 }
 
 export interface DelegateReport {
@@ -217,6 +365,8 @@ export interface DelegateReport {
   // Characters the helpers' tools returned, and the text handed back.
   readChars: number;
   returnedChars: number;
+  // Files the helpers read, across every task.
+  paths: string[];
 }
 
 export function shortError(message: string): string {
@@ -266,8 +416,37 @@ export async function runDelegation(
       savedTokens: savedTokens(results, text),
       readChars: results.reduce((acc, r) => acc + r.readChars, 0),
       returnedChars: text.length,
+      paths: [...new Set(runs.flatMap((r) => (r.error ? [] : (r.paths ?? []))))],
     },
   };
+}
+
+const normalizePath = (p: string) => p.replace(/^\.\//, '');
+
+/**
+ * Keeps delegation stats honest. A delegation's answer only saved the paid
+ * agent anything if the agent didn't go and read the same files anyway; in
+ * the logs it mostly did. Each delegation that came back with an answer is
+ * remembered with the files its helpers read; the first paid read of one of
+ * them hands its stats back, once, so the caller can log a correction that
+ * cancels them.
+ */
+export class RedoLedger {
+  private open: { paths: Set<string>; useful: number; savedTokens: number }[] = [];
+
+  record(paths: string[], useful: number, savedTokens: number): void {
+    if (useful <= 0 || paths.length === 0) return;
+    this.open.push({ paths: new Set(paths.map(normalizePath)), useful, savedTokens });
+  }
+
+  /** Delegations the paid agent just redid by reading `filePath`; each is returned at most once. */
+  noteRead(filePath: string): { useful: number; savedTokens: number }[] {
+    const p = normalizePath(filePath);
+    const redone = this.open.filter((d) => d.paths.has(p));
+    if (redone.length === 0) return [];
+    this.open = this.open.filter((d) => !d.paths.has(p));
+    return redone.map(({ useful, savedTokens }) => ({ useful, savedTokens }));
+  }
 }
 
 const approxTokens = (chars: number) => {

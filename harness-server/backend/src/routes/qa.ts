@@ -102,11 +102,18 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       const raw = await fs.readFile(filePath, 'utf8');
       await fs.writeFile(filePath, raw.replace(/^status:\s*\S+/m, 'status: pending-review'), 'utf8');
     }
+    // The team that built what QA reviewed is done: it moves to history so
+    // the fix pass starts with Jack alone, until he assigns a new round.
+    const retireTeam = session.codingTeam && session.codingTeam.status !== 'assigned';
     return updateSession(session.id, {
       codingApprovedAt: null,
       stage: 'coding-review',
       qaFindingsPending: Boolean(session.qaReportPath),
       qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
+      ...(retireTeam && {
+        codingTeam: null,
+        codingTeamHistory: [...session.codingTeamHistory, session.codingTeam!],
+      }),
     });
   });
 

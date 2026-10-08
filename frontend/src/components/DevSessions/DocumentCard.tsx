@@ -17,6 +17,8 @@ interface DocumentCardProps {
   badge?: React.ReactNode;
   notices?: React.ReactNode;
   footer?: React.ReactNode;
+  /** Scroll the footer with the document instead of pinning it, so a tall footer can't squeeze the document. */
+  scrollFooter?: boolean;
   /** Omit to make the document read-only. */
   editing?: {
     canEdit: boolean;
@@ -40,6 +42,7 @@ export function DocumentCard({
   badge,
   notices,
   footer,
+  scrollFooter,
   editing,
 }: DocumentCardProps) {
   return (
@@ -73,6 +76,7 @@ export function DocumentCard({
         ) : (
           <div className="py-8 text-center text-sm text-muted-foreground">{emptyText}</div>
         )}
+        {scrollFooter && footer}
       </div>
 
       <div className="flex-shrink-0 px-4 pb-4">
@@ -90,7 +94,7 @@ export function DocumentCard({
             </div>
           </div>
         )}
-        {footer}
+        {!scrollFooter && footer}
       </div>
     </Card>
   );

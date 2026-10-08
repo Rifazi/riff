@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { createSession, deleteSession, getSession, listSessions, updateSession } from '../sessions/session-store.js';
+import { checkoutExistingBranch, GitPreconditionError } from '../repo/git.js';
 import { slugify, type SessionRecord } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
 import { isSessionKeyInUse } from '../sessions/session-keys.js';
@@ -33,8 +34,8 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     return Promise.all(sessions.map(withAppName));
   });
 
-  app.post<{ Body: { title: string; sessionKey?: string; appId: string; source?: MeetingSourceInput } }>('/api/sessions', async (request, reply) => {
-    const { title, sessionKey, appId, source } = request.body ?? {};
+  app.post<{ Body: { title: string; sessionKey?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput } }>('/api/sessions', async (request, reply) => {
+    const { title, sessionKey, appId, existingBranch, source } = request.body ?? {};
     if (!title || !title.trim()) {
       return reply.code(400).send({ error: 'title is required' });
     }
@@ -50,6 +51,19 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       if (sourceError) return reply.code(400).send({ error: sourceError });
     }
 
+    const branch = existingBranch?.trim() || null;
+    if (branch) {
+      const app = apps.find((a) => a.id === appId);
+      if (app) {
+        try {
+          await checkoutExistingBranch(app.repoRoot, branch);
+        } catch (err) {
+          const msg = err instanceof GitPreconditionError ? err.message : String(err);
+          return reply.code(400).send({ error: msg });
+        }
+      }
+    }
+
     // Reject a key collision here, once, before two sessions can merge onto
     // the same docs (see session-keys.ts).
     const effectiveKey = sessionKey?.trim() || slugify(title);
@@ -61,7 +75,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
 
     const id = uuidv4();
     const sourceMeeting = source ? await writeMeetingSource(id, source) : null;
-    const session = await createSession({ id, title, sessionKey, appId, sourceMeeting });
+    const session = await createSession({ id, title, sessionKey, appId, branch, sourceMeeting });
     return reply.code(201).send(await withAppName(session));
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, TriangleAlert, Wrench, XCircle } from 'lucide-react';
@@ -20,6 +20,11 @@ import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
 const AGENT = AGENT_PERSONAS.qa;
+
+// Module-level: persists across tab-switch remounts. Maps sessionId → the
+// codingApprovedAt value for which QA was last kicked off, so re-approval
+// after a send-back still triggers a new pass even without unmounting.
+const kickedOffForApproval = new Map<string, string>();
 const QA_KICKOFF_MESSAGE =
   'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.';
 // Sent instead when coding was re-approved after a send-back. Keep in sync
@@ -83,10 +88,6 @@ export function QaStage({ session }: { session: SessionRecord }) {
   });
 
   const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
-  // Which coding approval QA was last kicked off for — a send-back and
-  // re-approval gives a new codingApprovedAt, so a second pass can start
-  // even if this component never unmounted.
-  const kickedOff = useRef<string | null>(null);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
@@ -117,8 +118,8 @@ export function QaStage({ session }: { session: SessionRecord }) {
     const rerun = session.qaRerunPending;
     if (!rerun && session.transcripts.qa.length > 0) return;
     const approvalKey = session.codingApprovedAt ?? '';
-    if (kickedOff.current === approvalKey) return;
-    kickedOff.current = approvalKey;
+    if (kickedOffForApproval.get(sessionId) === approvalKey) return;
+    kickedOffForApproval.set(sessionId, approvalKey);
     if (session.coordinatorEnabled) {
       void runCoordinator(sessionId, refresh);
     } else {
@@ -159,6 +160,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
           markdown={markdown}
           emptyText="Not written yet — QA is running…"
           badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
+          scrollFooter
           notices={
             markdown && (
               <>

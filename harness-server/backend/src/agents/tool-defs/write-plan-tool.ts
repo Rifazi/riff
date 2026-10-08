@@ -4,20 +4,27 @@ import matter from 'gray-matter';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { config } from '../../config.js';
+import { classifyText } from '../helpers/classifier/classifier.js';
+
+// Labels fed to the on-device NLI classifier to auto-determine step effort.
+const EFFORT_LABELS = [
+  'light: mechanical change — closely follows an existing pattern, no design decisions (docs, config, rename, test copy)',
+  'standard: requires judgment — new logic, architecture, security, migrations, cross-cutting or ambiguous scope',
+];
+
+async function classifyEffort(title: string): Promise<'light' | 'standard'> {
+  try {
+    const result = await classifyText({ text: title, labels: EFFORT_LABELS, mode: 'single' });
+    return result.selected[0]?.label.startsWith('light') ? 'light' : 'standard';
+  } catch {
+    return 'standard';
+  }
+}
 
 export const planStepSchema = z.object({
   id: z.string().describe('Short stable slug, e.g. "schema", "primary-adapter", "cdk-stateful"'),
   title: z.string().describe('Short human-readable title, e.g. "Add the acme-inventory JSON schema"'),
-  effort: z
-    .enum(['light', 'standard'])
-    .optional()
-    .describe(
-      'Which model this step needs. "light" runs it on a cheaper model: only for mechanical, fully-specified work ' +
-        'that closely follows an existing pattern — docs or README updates, config/wiring, renames, adding a test ' +
-        'modelled on a neighbouring one, a copy of an existing adapter with the differences spelled out. "standard" ' +
-        '(the default) for anything with design decisions, new logic, security, data migrations, cross-cutting or ' +
-        'ambiguous changes. When in doubt, standard — a wrong "light" costs a retry, a wrong "standard" only money.'
-    ),
+  // effort is auto-classified by the on-device NLI model — omit it here
 });
 
 export const writePlanSchema = z.object({
@@ -56,6 +63,13 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessio
       // no existing file — use today's date, no prior jira record
     }
 
+    // Auto-classify effort for each step using the on-device NLI classifier.
+    // The plan agent no longer needs to reason about light vs standard — the
+    // classifier tags it for free, and model-routing.ts reads these tags.
+    const stepsWithEffort = await Promise.all(
+      steps.map(async (step) => ({ ...step, effort: await classifyEffort(step.title) })),
+    );
+
     const frontmatter = {
       ticket: sessionInfo.sessionKey,
       status: 'draft',
@@ -63,14 +77,19 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessio
       'author-agent': 'plan',
       session: sessionInfo.sessionId,
       'requirements-doc': sessionInfo.requirementsPath,
-      steps,
+      steps: stepsWithEffort,
       ...(existingJira ? { jira: existingJira } : {}),
     };
 
     const fileContents = matter.stringify(`\n${markdownBody.trim()}\n`, frontmatter);
     await fs.writeFile(filePath, fileContents, 'utf8');
 
-    return `Wrote ${path.relative(config.harnessRoot, filePath)} (status: draft). Awaiting human approval.`;
+    const lightCount = stepsWithEffort.filter((s) => s.effort === 'light').length;
+    return (
+      `Wrote ${path.relative(config.harnessRoot, filePath)} (status: draft). ` +
+      `${stepsWithEffort.length} steps (${lightCount} light, ${stepsWithEffort.length - lightCount} standard). ` +
+      `Awaiting human approval.`
+    );
   };
 }
 

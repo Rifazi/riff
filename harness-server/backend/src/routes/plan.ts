@@ -12,6 +12,7 @@ import type { AgentEvent } from '../agents/sdk-client.js';
 import { getJiraSettings } from '../settings/settings-store.js';
 import { createTicketsFromPlan, type JiraPlanRecord } from '../jira/create-tickets-from-plan.js';
 import { JiraError } from '../jira/jira-client.js';
+import { tryCompressPlanPreamble } from '../agents/helpers/compress.js';
 
 export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
   // Streams the plan agent's turn back over SSE as it happens.
@@ -142,8 +143,22 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
     } catch {
       return reply.code(400).send({ error: `${session.planPath} doesn't exist on disk — write or restore its content before approving.` });
     }
-    const updated = raw.replace(/^status:\s*\w+/m, 'status: approved');
-    await fs.writeFile(filePath, updated, 'utf8');
+    // Parse with matter so we can update frontmatter properly (adding
+    // preambleSummary) while also flipping status to approved.
+    const parsed = matter(raw);
+    parsed.data.status = 'approved';
+
+    // Compress the preamble (everything before ## Steps) once at approval
+    // time. planExcerpt() uses this on every coding hop instead of the full
+    // text, saving 5k–10k chars per hop on large plans.
+    const stepsIdx = parsed.content.search(/^##\s+(\S+\s+)?steps\b/im);
+    if (stepsIdx >= 0) {
+      const preamble = parsed.content.slice(0, stepsIdx);
+      const summary = await tryCompressPlanPreamble(preamble).catch(() => null);
+      if (summary) parsed.data.preambleSummary = summary;
+    }
+
+    await fs.writeFile(filePath, matter.stringify(parsed.content, parsed.data), 'utf8');
 
     // A plan re-approved as part of a mid-coding send-back round trip
     // resumes the SAME branch — it jumps straight back to coding-review

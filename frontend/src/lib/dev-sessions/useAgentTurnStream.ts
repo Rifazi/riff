@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { postSSE } from './sse-client';
 import type { AgentEvent, AttachmentInput, TranscriptEntry } from './types';
@@ -37,6 +37,10 @@ export function useAgentTurnStream() {
   const queryClient = useQueryClient();
   // Each call's tool, so a result can be shown for its tool (the delegate card).
   const toolNames = useRef(new Map<string, string>());
+  // Aborted when the component unmounts (tab switch / navigation) so the
+  // in-flight SSE stream is released — the server-side agent keeps running.
+  const abortCtrl = useRef<AbortController | null>(null);
+  useEffect(() => () => { abortCtrl.current?.abort(); }, []);
 
   const consume = (onEvent?: (event: AgentEvent) => void) => (event: AgentEvent) => {
     onEvent?.(event);
@@ -47,7 +51,14 @@ export function useAgentTurnStream() {
       toolNames.current.set(event.toolCallId, event.name);
       setOverlay((prev) => [
         ...prev,
-        { id: nextId(), role: 'tool_call', toolName: event.name, toolInput: event.input, timestamp: new Date().toISOString() },
+        {
+          id: nextId(),
+          role: 'tool_call',
+          toolCallId: event.toolCallId,
+          toolName: event.name,
+          toolInput: event.input,
+          timestamp: new Date().toISOString(),
+        },
       ]);
     } else if (event.type === 'tool_result') {
       setRunningTool(null);
@@ -56,6 +67,7 @@ export function useAgentTurnStream() {
         {
           id: nextId(),
           role: 'tool_result',
+          toolCallId: event.toolCallId,
           toolName: toolNames.current.get(event.toolCallId),
           toolResult: event.content,
           isError: event.isError,
@@ -111,23 +123,29 @@ export function useAgentTurnStream() {
       else if (event.type === 'error') outcome.error = event.message;
       onEvent?.(event);
     };
+    const ctrl = new AbortController();
+    abortCtrl.current = ctrl;
     setError(null);
     setStreaming(true);
     setRunningTool(null);
     setOverlay([{ id: nextId(), role: 'user', text: message, timestamp: new Date().toISOString() }]);
 
     try {
-      await postSSE(url, { message, ...(attachments?.length ? { attachments } : {}), ...extraBody }, consume(track));
+      await postSSE(url, { message, ...(attachments?.length ? { attachments } : {}), ...extraBody }, consume(track), ctrl.signal);
     } catch (err) {
-      outcome.error = err instanceof Error ? err.message : String(err);
-      setError(outcome.error);
+      if (!ctrl.signal.aborted) {
+        outcome.error = err instanceof Error ? err.message : String(err);
+        setError(outcome.error);
+      }
     } finally {
       setStreaming(false);
       setRunningTool(null);
       setOverlay([]);
-      // The server saves a message's attachments as the session's reference docs.
-      if (attachments?.length) void queryClient.invalidateQueries({ queryKey: ['reference-docs'] });
-      onDone();
+      if (!ctrl.signal.aborted) {
+        // The server saves a message's attachments as the session's reference docs.
+        if (attachments?.length) void queryClient.invalidateQueries({ queryKey: ['reference-docs'] });
+        onDone();
+      }
     }
     return outcome;
   };
@@ -139,20 +157,22 @@ export function useAgentTurnStream() {
   // turn's run*AgentTurn function appends it, picked up on the next
   // session refetch via onDone/onEvent.
   const runCoordinator = async (sessionId: string, onDone: () => void, onEvent?: (event: AgentEvent) => void) => {
+    const ctrl = new AbortController();
+    abortCtrl.current = ctrl;
     setError(null);
     setStreaming(true);
     setRunningTool(null);
     setOverlay([]);
 
     try {
-      await postSSE(`/api/sessions/${sessionId}/coordinator/run`, {}, consume(onEvent));
+      await postSSE(`/api/sessions/${sessionId}/coordinator/run`, {}, consume(onEvent), ctrl.signal);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!ctrl.signal.aborted) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setStreaming(false);
       setRunningTool(null);
       setOverlay([]);
-      onDone();
+      if (!ctrl.signal.aborted) onDone();
     }
   };
 

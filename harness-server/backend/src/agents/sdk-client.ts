@@ -147,6 +147,11 @@ export interface RunAgentTurnParams {
   compaction?: CompactionOptions;
   // Cancels the model calls, e.g. a delegate helper's time limit.
   abortSignal?: AbortSignal;
+  // Optional: compress accumulated tool results in the history before each
+  // hop to reduce the payload sent to the model. The canonical history
+  // (used for compaction/handoff and returned in updatedHistory) is never
+  // modified — only the copy sent to the model is compressed.
+  compressHistory?: (history: ModelMessage[]) => Promise<ModelMessage[]>;
 }
 
 export interface RunAgentTurnResult {
@@ -296,7 +301,9 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   let currentHistory = params.history;
   let currentPrompt = params.prompt;
   let systemPrompt = params.systemPrompt;
-  let result = await runAgentTurnOnce({ ...params, history: currentHistory, prompt: currentPrompt });
+  const compress = params.compressHistory;
+  const sendHistory = compress ? await compress(currentHistory) : currentHistory;
+  let result = await runAgentTurnOnce({ ...params, history: sendHistory, prompt: currentPrompt });
   let usage = result.usage;
   let conversationStart = result.startTokens;
   const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
@@ -312,10 +319,13 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
       currentHistory = [];
       currentPrompt = `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`;
     } else {
+      // currentHistory stays as the canonical (uncompressed) history for
+      // compaction/handoff decisions and the final updatedHistory return.
       currentHistory = result.updatedHistory;
       currentPrompt = CONTINUATION_PROMPT;
     }
-    result = await runAgentTurnOnce({ ...params, systemPrompt, history: currentHistory, prompt: currentPrompt });
+    const hopHistory = compress ? await compress(currentHistory) : currentHistory;
+    result = await runAgentTurnOnce({ ...params, systemPrompt, history: hopHistory, prompt: currentPrompt });
     usage = addUsage(usage, result.usage);
     if (compacting) conversationStart = result.startTokens;
   }
@@ -353,6 +363,14 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
 // message array.
 
 const CLAUDE_MCP_SERVER_NAME = 'harness-tools';
+
+// The prompts name tools bare (`read_file`), which is what the AI SDK engine
+// calls them, but here they're served as mcp__harness-tools__read_file. A
+// fresh conversation's first calls sometimes used the bare names and each
+// came back "No such tool available" (up to 10 per session).
+const CLAUDE_TOOL_NAMES_NOTE =
+  `\n\n# Tool names\n\nYour tools are served with the prefix \`mcp__${CLAUDE_MCP_SERVER_NAME}__\`. Where these ` +
+  `instructions name a tool like \`read_file\`, call \`mcp__${CLAUDE_MCP_SERVER_NAME}__read_file\`.`;
 
 // Left to its defaults, each query() boots a Claude Code instance with this
 // machine's whole setup — ~/.claude settings and plugins, skills, user and
@@ -426,7 +444,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   const stream = query({
     prompt,
     options: {
-      systemPrompt: { type: 'custom', prompt: systemPrompt },
+      systemPrompt: { type: 'custom', prompt: systemPrompt + CLAUDE_TOOL_NAMES_NOTE },
       cwd,
       tools: [], // disable every built-in tool — only the MCP tools below are available
       mcpServers: { [CLAUDE_MCP_SERVER_NAME]: createMcpServer() },

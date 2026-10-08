@@ -19,7 +19,9 @@ import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { delegateToolEntry } from './helpers/research/tool.js';
 import { stageHelperContext } from './helpers/helper.js';
+import { tryCompressCode, compressMessages } from './helpers/compress.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
@@ -100,6 +102,7 @@ export async function runQaAgentTurn(
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('qa');
+  const helperContext = stageHelperContext(session.id, 'qa');
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'qa');
@@ -140,11 +143,12 @@ export async function runQaAgentTurn(
       appId: app.id,
       sessionId: session.id,
     });
-    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
+    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot, compress: tryCompressCode });
     const { runCheckedCommandToolClaude, getDiffToolClaude } = createQaToolsClaude({
       repoRoot: app.repoRoot,
       baseBranch: baseBranchFor(app),
       checkCommands: app.checkCommands,
+      helperContext,
     });
     const createMcpServer = () =>
       createSdkMcpServer({
@@ -156,7 +160,7 @@ export async function runQaAgentTurn(
           createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          createClassifyTextToolClaude(stageHelperContext(session.id, 'qa')),
+          createClassifyTextToolClaude(helperContext),
           readFileToolClaude,
           getDiffToolClaude,
           runCheckedCommandToolClaude,
@@ -193,11 +197,12 @@ export async function runQaAgentTurn(
     }
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
-    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
+    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot, compress: tryCompressCode });
     const { runCheckedCommandTool, getDiffTool } = createQaTools({
       repoRoot: app.repoRoot,
       baseBranch: baseBranchFor(app),
       checkCommands: app.checkCommands,
+      helperContext,
     });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
@@ -205,8 +210,11 @@ export async function runQaAgentTurn(
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: createClassifyTextTool(stageHelperContext(session.id, 'qa')),
+      classify_text: createClassifyTextTool(helperContext),
       read_file: readFileTool,
+      // QA has no delegate: it re-checked every helper answer itself, so the
+      // calls only added time. The stub keeps older histories that called it valid.
+      ...delegateToolEntry(null, session.histories.qa),
       get_diff: getDiffTool,
       run_checked_command: runCheckedCommandTool,
       write_qa_report: createWriteQaReportTool({
@@ -228,6 +236,7 @@ export async function runQaAgentTurn(
       history: session.histories.qa,
       prompt,
       onEvent: wrappedOnEvent,
+      compressHistory: compressMessages,
     });
 
     await setHistory(session.id, 'qa', updatedHistory);
@@ -249,10 +258,11 @@ async function persistEvent(sessionId: string, event: AgentEvent, resultToolName
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'qa', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {
-    await appendTranscriptEntry(sessionId, 'qa', { role: 'tool_call', toolName: event.name, toolInput: event.input });
+    await appendTranscriptEntry(sessionId, 'qa', { role: 'tool_call', toolCallId: event.toolCallId, toolName: event.name, toolInput: event.input });
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'qa', {
       role: 'tool_result',
+      toolCallId: event.toolCallId,
       toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,

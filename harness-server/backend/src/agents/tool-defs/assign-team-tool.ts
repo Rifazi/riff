@@ -98,7 +98,12 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
       // Re-assigning before the team started replaces that split; anything
       // else becomes history and this is the next round.
       if (previous && previous.status !== 'assigned') s.codingTeamHistory.push(previous);
-      round = previous ? (previous.status === 'assigned' ? previous.round : previous.round + 1) : 1;
+      // With no current team (QA retired the last one) it follows the history.
+      round = previous
+        ? previous.status === 'assigned'
+          ? previous.round
+          : previous.round + 1
+        : (s.codingTeamHistory[s.codingTeamHistory.length - 1]?.round ?? 0) + 1;
       s.codingTeam = {
         status: 'assigned',
         round,

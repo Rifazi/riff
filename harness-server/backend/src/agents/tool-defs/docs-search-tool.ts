@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
@@ -11,6 +10,7 @@ import { searchIndex } from '../../search/search-engine.js';
 import { SESSION_PLAN_DOC, SESSION_REQUIREMENTS_DOC } from '../plan-excerpt.js';
 import { readRepoInstructions, REPO_INSTRUCTIONS_FILE } from '../repo-instructions.js';
 import { getApp } from '../../apps/apps-store.js';
+import { ReadMemo } from './read-memo.js';
 
 export const searchDocsSchema = z.object({
   query: z.string().describe('Keywords or a question, e.g. "square d cash sale format" or "how are invoices retried?"'),
@@ -41,9 +41,16 @@ export const readDocDescription =
   `(${SESSION_PLAN_DOC}, ${SESSION_REQUIREMENTS_DOC}). Only those paths are allowed.`;
 
 // sessionId adds that session's own reference documents to the app's.
-export function createDocsSearchExecutors(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
-  const notedRepeats = new Map<string, string>();
-  const lastReads = new Map<string, string>();
+export interface DocsSearchDeps {
+  appId: string;
+  sessionId?: string;
+  repoRoot?: string;
+  /** Shared with the agent's other read tools and cleared on compaction; a fresh one when unset. */
+  readMemo?: ReadMemo;
+}
+
+export function createDocsSearchExecutors(deps: DocsSearchDeps) {
+  const readMemo = deps.readMemo ?? new ReadMemo();
 
   const searchDocsExecute = async ({ query }: z.infer<typeof searchDocsSchema>): Promise<string> => {
     const [referenceScopes] = await Promise.all([
@@ -84,14 +91,9 @@ export function createDocsSearchExecutors(deps: { appId: string; sessionId?: str
       content = raw;
     }
 
-    const key = `${requestedPath}\u0000${heading ?? ''}`;
-    const hash = createHash('sha1').update(content).digest('hex');
-    if (lastReads.get(key) === hash && notedRepeats.get(key) !== hash) {
-      notedRepeats.set(key, hash);
+    if (readMemo.isRepeat(`doc\u0000${requestedPath}\u0000${heading ?? ''}`, content)) {
       return `[${requestedPath}${heading ? ` > ${heading}` : ''} is unchanged since you last read it — use that copy. Call again to get the text.]`;
     }
-    notedRepeats.delete(key);
-    lastReads.set(key, hash);
     return content;
   };
 
@@ -111,7 +113,7 @@ async function readSessionDoc(sessionId: string | undefined, requestedPath: stri
   return matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
 }
 
-export function createDocsSearchTools(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
+export function createDocsSearchTools(deps: DocsSearchDeps) {
   const { searchDocsExecute, readDocExecute } = createDocsSearchExecutors(deps);
   return {
     searchDocsTool: tool({ description: searchDocsDescription, inputSchema: searchDocsSchema, execute: searchDocsExecute }),

@@ -15,18 +15,32 @@ const NOISE_RES = [
   /^npm (notice|WARN deprecated|warn deprecated)/i,
   /^npm ERR! (A complete log of this run|\s*$)/,
   /^npm error (A complete log of this run|\s*$)/,
+  // npm's exit report after a failed script: the lifecycle and workspace
+  // lines say what failed, these only repeat it.
+  /^npm (error|ERR!) (code|path|location|command) /,
   /^\s*(✓|√|✔)\s/, // a passing test
   /^\s*PASS\s/, // jest's per-file pass line
   /^ok \d+ /, // TAP pass
   /^\s*[-\\|/]\s*$/, // spinner frame
 ];
 
+// A location is `file.ext:line` — not any `:\d+:\d+`, which every ISO
+// timestamp in a test's log output also matches.
 const IMPORTANT_RE =
-  /\b(error|errors|failed|failing|failure|fail|exception|assert(ion)?|expected|received|cannot|unable|not found|timed? ?out|panic)\b|✗|✕|×|✘|^\s*at .+:\d+:\d+\)?$|\(\d+,\d+\)|:\d+:\d+/i;
+  /\b(error|errors|failed|failing|failure|fail|exception|assert(ion)?|expected|received|cannot|unable|not found|timed? ?out|panic)\b|✗|✕|×|✘|^\s*at .+:\d+:\d+\)?$|\(\d+,\d+\)|[\w@-]\.[a-z]{1,5}:\d+/i;
+
+// vitest echoes each console call a test makes as a block headed
+// "stdout | file > test" (or "stderr | …") and ended by a blank line. It's
+// the code under test talking, not the runner, and it can fill a failed
+// run's log with lines that look like errors.
+const CONSOLE_BLOCK_RE = /^(stdout|stderr) \| \S/;
 
 const CONTEXT_BEFORE = 2;
 const CONTEXT_AFTER = 6;
-const SUMMARY_LINES = 15;
+// Kept from the end of each stream: runners print their totals to stdout
+// and their failure details (and npm its exit report) to stderr.
+const SUMMARY_LINES_PER_STREAM = 10;
+const MAX_LINE_CHARS = 400;
 
 /** Strip colour codes and carriage-return progress redraws, drop noise, collapse repeats. */
 export function cleanLog(text: string): string[] {
@@ -61,37 +75,73 @@ export function cleanLog(text: string): string[] {
  * skipped.
  */
 export function compactOutput(stdout: string, stderr: string, maxChars = 3000): string {
-  const lines = [...cleanLog(stdout), ...cleanLog(stderr)];
+  const out = cleanLog(stdout);
+  const err = cleanLog(stderr);
+  const lines = [...out, ...err];
   const whole = lines.join('\n');
   if (whole.length <= maxChars) return whole;
 
-  const keep = new Uint8Array(lines.length);
-  lines.forEach((line, i) => {
-    if (!IMPORTANT_RE.test(line)) return;
-    for (let j = Math.max(0, i - CONTEXT_BEFORE); j <= Math.min(lines.length - 1, i + CONTEXT_AFTER); j++) keep[j] = 1;
-  });
-  for (let j = Math.max(0, lines.length - SUMMARY_LINES); j < lines.length; j++) keep[j] = 1;
+  const isConsole = consoleBlockLines(lines);
+  const shown = lines.map((line) => (line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)} […]` : line));
 
-  const summaryStart = Math.max(0, lines.length - SUMMARY_LINES);
-  const summary = lines.slice(summaryStart).join('\n');
-  const budget = Math.max(0, maxChars - summary.length - 40);
+  // Each stream's last non-console lines, stdout's totals first and newest
+  // first within a stream, in the order a tight budget keeps them.
+  const summary: number[] = [];
+  for (const [start, end] of [[0, out.length], [out.length, lines.length]]) {
+    let taken = 0;
+    for (let i = end - 1; i >= start && taken < SUMMARY_LINES_PER_STREAM; i--) {
+      if (isConsole[i] || lines[i] === '') continue;
+      summary.push(i);
+      taken++;
+    }
+  }
+
+  const windows = new Uint8Array(lines.length);
+  lines.forEach((line, i) => {
+    if (isConsole[i] || !IMPORTANT_RE.test(line)) return;
+    for (let j = Math.max(0, i - CONTEXT_BEFORE); j <= Math.min(lines.length - 1, i + CONTEXT_AFTER); j++) {
+      if (!isConsole[j]) windows[j] = 1;
+    }
+  });
+
+  // Room for the "[… N lines skipped]" markers between kept runs.
+  const budget = Math.max(0, maxChars - 200);
+  const chosen = new Uint8Array(lines.length);
+  let used = 0;
+  const take = (i: number) => {
+    if (chosen[i] || used + shown[i].length + 1 > budget) return;
+    chosen[i] = 1;
+    used += shown[i].length + 1;
+  };
+  summary.forEach(take);
+  windows.forEach((inWindow, i) => inWindow && take(i));
 
   const excerpt: string[] = [];
-  let used = 0;
   let skipped = 0;
-  for (let i = 0; i < summaryStart; i++) {
-    if (!keep[i] || used + lines[i].length + 1 > budget) {
+  lines.forEach((_, i) => {
+    if (!chosen[i]) {
       skipped++;
-      continue;
+      return;
     }
     if (skipped) excerpt.push(`[… ${skipped} lines skipped]`);
     skipped = 0;
-    const line = lines[i].length > 400 ? `${lines[i].slice(0, 400)} […]` : lines[i];
-    excerpt.push(line);
-    used += line.length + 1;
-  }
+    excerpt.push(shown[i]);
+  });
   if (skipped) excerpt.push(`[… ${skipped} lines skipped]`);
-  return [...excerpt, summary].join('\n').slice(-maxChars);
+  return excerpt.join('\n');
+}
+
+// Which lines belong to a vitest console block (see CONSOLE_BLOCK_RE).
+function consoleBlockLines(lines: string[]): Uint8Array {
+  const mask = new Uint8Array(lines.length);
+  let inBlock = false;
+  lines.forEach((line, i) => {
+    if (CONSOLE_BLOCK_RE.test(line)) inBlock = true;
+    if (!inBlock) return;
+    mask[i] = 1;
+    if (line === '') inBlock = false;
+  });
+  return mask;
 }
 
 const MATCH_LINE_CHARS = 200;

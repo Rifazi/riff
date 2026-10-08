@@ -14,6 +14,7 @@ import {
 } from '../sessions/session-store.js';
 import type { CodingTeamKind, SessionRecord } from '../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
+import type { Provider } from '../settings/settings.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
@@ -33,6 +34,7 @@ import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from './tool-defs/outline-tool.js';
 import { createFileTools } from './tool-defs/file-tools.js';
+import { ReadMemo } from './tool-defs/read-memo.js';
 import { createGitTools } from './tool-defs/git-tools.js';
 import { createGenerateTools } from './tool-defs/generate-tools.js';
 import { createWriteCodingPlanTool } from './tool-defs/coding-plan-tool.js';
@@ -51,9 +53,12 @@ import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
-import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry } from './helpers/research/tool.js';
+import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
+// No read_file compression here: this agent edits what it reads, and a
+// compressed read only sent it back for a ranged re-read (helpers/compress.ts).
+import { compressMessages } from './helpers/compress.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TOOL_NAMES = [
@@ -66,6 +71,7 @@ const TOOL_NAMES = [
   'outline_file',
   'write_file',
   'edit_file',
+  'delete_file',
   'git_create_branch',
   'git_commit',
   'run_generate_paths',
@@ -96,13 +102,18 @@ const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
 // the last one ended at or above FRESH_CONTEXT_AT_TOKENS, and a continuation
 // hop inside a turn compacts at COMPACT_AT_TOKENS (sdk-client.ts). Every
 // request re-reads the whole context, so a turn's cache reads are its
-// request count times its average size: hops of HOP_STEPS tool-call steps
-// let compaction act every 10 steps instead of every 20, and HOP_COUNT of
-// them keep the per-turn ceiling where it was (3 continuations of 20).
+// request count times its average size: hops of 10 tool-call steps let
+// compaction act every 10 steps instead of every 20, and 7 continuations
+// keep the per-turn ceiling at 80 steps. On the Claude engine every hop is a
+// new query(), which boots a Claude Code subprocess and reconnects the MCP
+// server, so it takes hops of 20 (same 80-step ceiling) and checks for
+// compaction half as often.
 const FRESH_CONTEXT_AT_TOKENS = 60_000;
 export const COMPACT_AT_TOKENS = 70_000;
-export const HOP_STEPS = 10;
-export const HOP_COUNT = 7;
+
+export function hopLimits(provider: Provider): { stepsPerHop: number; maxHops: number } {
+  return provider === 'claude' ? { stepsPerHop: 20, maxHops: 3 } : { stepsPerHop: 10, maxHops: 7 };
+}
 
 export interface CodingTurnOptions {
   // An automatic "do the next checklist step" turn (kickoff, Continue,
@@ -140,6 +151,7 @@ export async function runCodingAgentTurn(
     repoRoot: app.repoRoot,
     appId: app.id,
     context: helperContext,
+    checkCommands: app.checkCommands,
   });
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
@@ -271,10 +283,12 @@ export async function runCodingAgentTurn(
     void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
+  // read_file/read_doc's repeat notes describe this conversation only, so
+  // compaction's fresh one starts with an empty memo.
+  const readMemo = new ReadMemo();
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
-    stepsPerHop: HOP_STEPS,
-    maxHops: HOP_COUNT,
+    ...hopLimits(provider),
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
@@ -286,6 +300,7 @@ export async function runCodingAgentTurn(
         checklist: latest?.codingPlan ?? session.codingPlan,
       });
       contextLog.reset();
+      readMemo.clear();
       const marker = await appendTranscriptEntry(session.id, 'coding', {
         role: 'system',
         text: '⟲ New conversation — this one had grown large, so it was summarized into a handoff note to save tokens.',
@@ -365,9 +380,12 @@ export async function runCodingAgentTurn(
       const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
         appId: app.id,
         sessionId: session.id,
+        readMemo,
       });
-      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude({
+      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
         repoRoot: app.repoRoot,
+        onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+        readMemo,
       });
       const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({
         repoRoot: app.repoRoot,
@@ -381,6 +399,7 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         checkCommands: app.checkCommands,
+        helperContext,
       });
       const createMcpServer = () =>
         createSdkMcpServer({
@@ -396,6 +415,7 @@ export async function runCodingAgentTurn(
             readFileToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
+            deleteFileToolClaude,
             gitCreateBranchTool,
             gitCommitTool,
             runGeneratePathsToolClaude,
@@ -438,8 +458,12 @@ export async function runCodingAgentTurn(
         return { isError: true };
       }
 
-      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
-      const { readFileTool, writeFileTool, editFileTool } = createFileTools({ repoRoot: app.repoRoot });
+      const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, readMemo });
+      const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
+        repoRoot: app.repoRoot,
+        onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+        readMemo,
+      });
       const { gitCreateBranchTool, gitCommitTool } = createGitTools({
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
@@ -450,6 +474,7 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         checkCommands: app.checkCommands,
+        helperContext,
       });
 
       const tools: ToolSet = {
@@ -462,6 +487,7 @@ export async function runCodingAgentTurn(
         read_file: readFileTool,
         write_file: writeFileTool,
         edit_file: editFileTool,
+        delete_file: deleteFileTool,
         git_create_branch: gitCreateBranchTool,
         git_commit: gitCommitTool,
         run_generate_paths: runGeneratePathsTool,
@@ -488,6 +514,7 @@ export async function runCodingAgentTurn(
         prompt: turnPrompt,
         onEvent: wrappedOnEvent,
         compaction,
+        compressHistory: compressMessages,
       });
       contextTokens = tokens;
 
@@ -646,12 +673,14 @@ async function persistEvent(sessionId: string, event: AgentEvent, resultToolName
   } else if (event.type === 'tool_call') {
     await appendTranscriptEntry(sessionId, 'coding', {
       role: 'tool_call',
+      toolCallId: event.toolCallId,
       toolName: event.name,
       toolInput: event.input,
     });
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'coding', {
       role: 'tool_result',
+      toolCallId: event.toolCallId,
       toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,

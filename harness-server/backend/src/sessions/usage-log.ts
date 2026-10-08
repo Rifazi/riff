@@ -28,6 +28,9 @@ export interface UsageLogEntry {
     useful: number;
     // Paid-context tokens the run avoided (0 where not estimated).
     savedTokens: number;
+    // A correction, not a run: the paid agent redid an earlier run's work,
+    // so `useful` and `savedTokens` are negative and cancel that run's.
+    redo?: true;
   };
 }
 

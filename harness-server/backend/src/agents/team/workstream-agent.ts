@@ -15,8 +15,8 @@ import { createClassifyTextTool } from '../helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
-import { COMPACT_AT_TOKENS, HOP_COUNT, HOP_STEPS, loadApprovedDocsForCoding } from '../coding-agent.js';
-import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry } from '../helpers/research/tool.js';
+import { COMPACT_AT_TOKENS, hopLimits, loadApprovedDocsForCoding } from '../coding-agent.js';
+import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from '../helpers/research/tool.js';
 import { createDelegateToolClaude } from '../helpers/research/tool-claude.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
@@ -25,6 +25,7 @@ import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from '../tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from '../tool-defs/outline-tool.js';
 import { createFileTools } from '../tool-defs/file-tools.js';
+import { ReadMemo } from '../tool-defs/read-memo.js';
 import { createGitTools } from '../tool-defs/git-tools.js';
 import { createQaTools } from '../tool-defs/qa-tools.js';
 import { createRunPrettierTool } from '../tool-defs/format-tool.js';
@@ -39,6 +40,9 @@ import { createQaToolsClaude } from '../tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from '../tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from '../tool-defs-claude/npm-install-tool.js';
 import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-tool.js';
+// No read_file compression here: a team member edits what it reads, and a
+// compressed read only sent it back for a ranged re-read (helpers/compress.ts).
+import { compressMessages } from '../helpers/compress.js';
 
 const CODING_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-agent.md');
 const TEAM_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/coding-team-member.md');
@@ -98,6 +102,7 @@ export async function runWorkstreamAgent({
     repoRoot: worktreePath,
     appId: app.id,
     context: helperContext,
+    checkCommands: app.checkCommands,
   });
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
@@ -137,26 +142,61 @@ export async function runWorkstreamAgent({
     (referenceDocs ? `\n\n${referenceDocs}` : '');
 
   const resuming = member.transcript.length > 0;
+  // A failed member's history is cleared before re-run (coding-team.ts) so it
+  // doesn't replay the same exhausted context. Detect that here: transcript
+  // exists (we've run before) but no conversation state remains.
+  const hasContext = provider === 'claude' ? Boolean(member.claudeSessionId) : member.history.length > 0;
+  const freshAfterFailure = resuming && !hasContext;
+
+  let handoffNote = '';
+  let contextStartEntryId = member.contextStartEntryId ?? null;
+  if (freshAfterFailure) {
+    handoffNote = await buildHandoff({
+      reason: 'The previous run ran out of steps and was restarted fresh.',
+      entries: entriesSince(member.transcript, contextStartEntryId),
+      repoRoot: worktreePath,
+      branch: member.branch,
+      baseBranch: session.branch ?? undefined,
+      checklist: (session.codingPlan ?? []).filter((s) => member.stepIds.includes(s.id)),
+    });
+    const marker = await appendTeamTranscriptEntry(session.id, member.id, {
+      role: 'system',
+      text: '⟲ New conversation — previous run ran out of steps, restarting with a handoff summary.',
+    });
+    contextStartEntryId = marker.id;
+    await mutateSession(session.id, (s) => {
+      const m = s.codingTeam?.members.find((x) => x.id === member.id);
+      if (m) m.contextStartEntryId = marker.id;
+    });
+  }
+
   const prompt =
     promptOverride ??
-    (resuming
-      ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
-        'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
-        'remaining steps and leave nothing uncommitted.'
-      : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`);
+    (freshAfterFailure
+      ? 'Your previous run on this workstream ran out of steps. The summary above shows what was done. ' +
+        'Check what is already committed on your branch, then finish any remaining steps and leave nothing uncommitted.'
+      : resuming
+        ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
+          'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
+          'remaining steps and leave nothing uncommitted.'
+        : `Implement your workstream "${member.title}" now: all of your steps, in order, then summarize.`);
 
-  await appendTeamTranscriptEntry(session.id, member.id, { role: 'user', text: prompt });
+  const fullPrompt = handoffNote ? `${handoffNote}\n\n---\n\n${prompt}` : prompt;
+
+  await appendTeamTranscriptEntry(session.id, member.id, { role: 'user', text: fullPrompt });
 
   // A workstream runs as one long turn, so it compacts at continuation hops
   // (agents/handoff.ts) rather than re-sending every earlier step.
   const contextLog = new ContextLog([
-    ...entriesSince(member.transcript, member.contextStartEntryId),
-    { role: 'user', text: prompt },
+    ...entriesSince(member.transcript, contextStartEntryId),
+    { role: 'user', text: fullPrompt },
   ]);
+  // read_file/read_doc's repeat notes describe this conversation only, so
+  // compaction's fresh one starts with an empty memo.
+  const readMemo = new ReadMemo();
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
-    stepsPerHop: HOP_STEPS,
-    maxHops: HOP_COUNT,
+    ...hopLimits(provider),
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
@@ -168,6 +208,7 @@ export async function runWorkstreamAgent({
         checklist: (latest?.codingPlan ?? []).filter((s) => member.stepIds.includes(s.id)),
       });
       contextLog.reset();
+      readMemo.clear();
       const marker = await appendTeamTranscriptEntry(session.id, member.id, {
         role: 'system',
         text: '⟲ New conversation — this one had grown large, so it was summarized into a handoff note to save tokens.',
@@ -197,12 +238,18 @@ export async function runWorkstreamAgent({
       appId: app.id,
       sessionId: session.id,
       repoRoot: worktreePath,
+      readMemo,
     });
-    const { readFileToolClaude, writeFileToolClaude, editFileToolClaude } = createFileToolsClaude(scoped);
+    const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
+      ...scoped,
+      onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+      readMemo,
+    });
     const { gitCommitTool } = createGitToolsClaude({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
     const { runCheckedCommandToolClaude } = createQaToolsClaude({
       repoRoot: worktreePath,
       checkCommands: app.checkCommands,
+      helperContext,
     });
     const tools = [
       searchDocsToolClaude,
@@ -214,6 +261,7 @@ export async function runWorkstreamAgent({
       readFileToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
+      deleteFileToolClaude,
       gitCommitTool,
       runCheckedCommandToolClaude,
       createRunPrettierToolClaude(scoped),
@@ -231,6 +279,7 @@ export async function runWorkstreamAgent({
       'outline_file',
       'write_file',
       'edit_file',
+      'delete_file',
       'git_commit',
       'run_checked_command',
       'run_prettier',
@@ -245,7 +294,7 @@ export async function runWorkstreamAgent({
       toolNames,
       model,
       resumeSessionId: member.claudeSessionId,
-      prompt,
+      prompt: fullPrompt,
       cwd: worktreePath,
       onEvent: wrappedOnEvent,
       compaction,
@@ -264,10 +313,15 @@ export async function runWorkstreamAgent({
     appId: app.id,
     sessionId: session.id,
     repoRoot: worktreePath,
+    readMemo,
   });
-  const { readFileTool, writeFileTool, editFileTool } = createFileTools(scoped);
+  const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
+    ...scoped,
+    onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+    readMemo,
+  });
   const { gitCommitTool } = createGitTools({ repoRoot: worktreePath, onBranchCreated: noBranchCreation });
-  const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands });
+  const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
   const tools: ToolSet = {
     search_docs: searchDocsTool,
     read_doc: readDocTool,
@@ -278,6 +332,7 @@ export async function runWorkstreamAgent({
     read_file: readFileTool,
     write_file: writeFileTool,
     edit_file: editFileTool,
+    delete_file: deleteFileTool,
     git_commit: gitCommitTool,
     run_checked_command: runCheckedCommandTool,
     run_prettier: createRunPrettierTool(scoped),
@@ -293,9 +348,10 @@ export async function runWorkstreamAgent({
     model,
     apiKey,
     history: member.history,
-    prompt,
+    prompt: fullPrompt,
     onEvent: wrappedOnEvent,
     compaction,
+    compressHistory: compressMessages,
   });
   await mutateSession(session.id, (s) => {
     const m = s.codingTeam?.members.find((x) => x.id === member.id);
@@ -310,12 +366,14 @@ async function persistEvent(sessionId: string, memberId: string, event: AgentEve
   } else if (event.type === 'tool_call') {
     await appendTeamTranscriptEntry(sessionId, memberId, {
       role: 'tool_call',
+      toolCallId: event.toolCallId,
       toolName: event.name,
       toolInput: event.input,
     });
   } else if (event.type === 'tool_result') {
     await appendTeamTranscriptEntry(sessionId, memberId, {
       role: 'tool_result',
+      toolCallId: event.toolCallId,
       toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,

@@ -5,10 +5,11 @@ import {
   readDocSchema,
   readDocDescription,
   createDocsSearchExecutors,
+  type DocsSearchDeps,
 } from '../tool-defs/docs-search-tool.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createDocsSearchToolsClaude(deps: { appId: string; sessionId?: string; repoRoot?: string }) {
+export function createDocsSearchToolsClaude(deps: DocsSearchDeps) {
   const { searchDocsExecute, readDocExecute } = createDocsSearchExecutors(deps);
   return {
     searchDocsToolClaude: tool(

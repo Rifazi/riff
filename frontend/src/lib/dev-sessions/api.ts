@@ -145,7 +145,7 @@ export const api = {
 
   getSession: (id: string) => fetch(apiUrl(`/api/sessions/${id}`)).then((r) => json<SessionRecord>(r)),
 
-  createSession: (input: { title: string; sessionKey?: string; appId: string; source?: MeetingSourceInput }) =>
+  createSession: (input: { title: string; sessionKey?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput }) =>
     fetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

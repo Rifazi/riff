@@ -32,7 +32,11 @@ const normalize = (s: string) =>
  * matched to the frontmatter's steps.
  */
 export function planExcerpt(planRaw: string, planSteps: PlanStepRef[], focusStepIds: string[]): string {
-  const body = matter(planRaw).content.trim();
+  const parsed = matter(planRaw);
+  const body = parsed.content.trim();
+  // Use the pre-computed preamble summary (written at plan-approval time)
+  // instead of the full preamble text — saves 5k–10k chars per coding hop.
+  const preambleSummary = typeof parsed.data.preambleSummary === 'string' ? parsed.data.preambleSummary : null;
   const lines = body.split('\n');
 
   const h1 = lines.find((l) => /^#\s+/.test(l))?.replace(/^#\s+/, '').trim();
@@ -72,8 +76,12 @@ export function planExcerpt(planRaw: string, planSteps: PlanStepRef[], focusStep
     `with read_doc({ path: "${SESSION_PLAN_DOC}", heading: "${headingPrefix} > <step heading>" }), or the whole ` +
     `plan with just the path.`;
 
+  const preamble = preambleSummary
+    ? `[Plan overview — key decisions and constraints]\n${preambleSummary}`
+    : lines.slice(0, stepsStart).join('\n').trimEnd();
+
   return [
-    lines.slice(0, stepsStart).join('\n').trimEnd(),
+    preamble,
     lines[stepsStart],
     note,
     stepParts.join('\n').trim(),

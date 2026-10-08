@@ -3,11 +3,15 @@ import { describe, expect, test } from 'bun:test';
 import {
   cleanAnswer,
   delegateSchema,
+  excerptFile,
   formatResults,
   NOTHING_FOUND,
+  RedoLedger,
   runDelegation,
   runLimited,
   savedTokens,
+  searchTerms,
+  wantsCheckRun,
   type DelegateTaskResult,
   type HelperRun,
 } from '../../../harness-server/backend/src/agents/helpers/research/core';
@@ -155,5 +159,111 @@ describe('delegate schema', () => {
   test('takes 1 to 4 tasks', () => {
     expect(delegateSchema.safeParse({ tasks: [] }).success).toBe(false);
     expect(delegateSchema.safeParse({ tasks: Array(5).fill({ task: 'q' }) }).success).toBe(false);
+  });
+});
+
+// The exact questions that came back as "read_file: path" and false "N/A"s
+// from the built-in helper.
+const SETTINGS_Q =
+  "In backend/src/routes/settings.test.ts, does it mock '../secure-store/store' with vi.mock, and does the string " +
+  'MOBILINK_DATA_DIR appear anywhere in the file? Quote the first 40 lines verbatim.';
+const HISTORY_Q =
+  "In backend/src/entry-files/history/history.test.ts, find the test named 'returns 404 when the handler reports an error' " +
+  'and quote the getRunDetailHandler mock value used in it verbatim, with line numbers. Does it include a `status` field?';
+const STACK_Q =
+  'In infra/lib/stateless-stack.ts: (a) is the UserPoolClient variable `appClient` referenced anywhere after creation, ' +
+  "e.g. in a CfnOutput? (b) quote the line(s) using Fn.importValue verbatim with line numbers. (c) Do any comments " +
+  "containing 'Placeholder' or 'pending confirmation' still exist?";
+
+describe('cleanAnswer drops non-answers', () => {
+  test('a written-out tool call is nothing', () => {
+    expect(cleanAnswer('read_file: backend/src/routes/settings.test.ts')).toBeNull();
+    expect(cleanAnswer('`search_code`: appClient')).toBeNull();
+  });
+
+  test('N/A lines are nothing; real lines next to them stay', () => {
+    expect(cleanAnswer('N/A: No `appClient` variable found.\nN/A: No comments found.')).toBeNull();
+    expect(cleanAnswer('infra/lib/stateless-stack.ts:88\nN/A: no comments')).toBe('infra/lib/stateless-stack.ts:88');
+  });
+
+  test("a file header copied into a quote is dropped", () => {
+    expect(cleanAnswer('```\n=== a.ts (382 lines) [complete] ===\n1| import x\n```')).toBe('```\n1| import x\n```');
+  });
+});
+
+describe('wantsCheckRun', () => {
+  test('test file names and quoted test names are not a status question', () => {
+    expect(wantsCheckRun(SETTINGS_Q)).toBe(false);
+    expect(wantsCheckRun(HISTORY_Q)).toBe(false);
+    expect(wantsCheckRun(`${HISTORY_Q}\n\nStart from: backend/src/entry-files/history/history.test.ts`)).toBe(false);
+  });
+
+  test('asking whether tests or lint pass is', () => {
+    expect(wantsCheckRun('Do the tests pass?')).toBe(true);
+    expect(wantsCheckRun('Which tests are failing in backend?')).toBe(true);
+    expect(wantsCheckRun('Run lint and list the errors.')).toBe(true);
+  });
+});
+
+describe('searchTerms', () => {
+  test('quoted strings and code-shaped names, not file paths or plain words', () => {
+    expect(searchTerms(SETTINGS_Q)).toEqual(['../secure-store/store', 'vi.mock', 'MOBILINK_DATA_DIR']);
+    expect(searchTerms(HISTORY_Q)).toEqual(['returns 404 when the handler reports an error', 'status', 'getRunDetailHandler']);
+    expect(searchTerms(STACK_Q)).toEqual(
+      expect.arrayContaining(['appClient', 'Placeholder', 'pending confirmation', 'UserPoolClient', 'CfnOutput', 'Fn.importValue']),
+    );
+  });
+});
+
+describe('excerptFile', () => {
+  const big = Array.from({ length: 600 }, (_, i) => `const line${i + 1} = ${i + 1};`);
+  big[449] = 'new CfnOutput(this, "ClientId", { value: appClient.userPoolClientId });';
+  const text = big.join('\n');
+
+  test('a small file is shown whole, numbered and marked complete', () => {
+    const out = excerptFile('a.ts', 'one\ntwo\n', [], 1_000);
+    expect(out).toBe('=== a.ts (2 lines) [complete] ===\n1| one\n2| two');
+  });
+
+  test('a big file keeps its head and a window around each term, and marks every gap', () => {
+    const out = excerptFile('stack.ts', text, ['appClient'], 3_000);
+    expect(out).not.toContain('[complete]');
+    expect(out).toContain('1| const line1');
+    expect(out).toContain('450| new CfnOutput');
+    expect(out).toContain('… lines 41-443 not shown …');
+    expect(out).toContain('… lines 457-600 not shown …');
+  });
+
+  test('a budget too small for every window says where it stopped', () => {
+    const out = excerptFile('stack.ts', text, ['appClient'], 600);
+    expect(out.length).toBeLessThanOrEqual(600);
+    expect(out).toMatch(/… lines \d+-600 not shown …$/);
+  });
+});
+
+describe('RedoLedger', () => {
+  test('hands a delegation back once, when the agent reads one of its files', () => {
+    const ledger = new RedoLedger();
+    ledger.record(['src/a.ts', './src/b.ts'], 2, 1500);
+    expect(ledger.noteRead('src/other.ts')).toEqual([]);
+    expect(ledger.noteRead('src/b.ts')).toEqual([{ useful: 2, savedTokens: 1500 }]);
+    expect(ledger.noteRead('src/a.ts')).toEqual([]);
+  });
+
+  test('ignores delegations that answered nothing or read nothing', () => {
+    const ledger = new RedoLedger();
+    ledger.record(['src/a.ts'], 0, 0);
+    ledger.record([], 1, 300);
+    expect(ledger.noteRead('src/a.ts')).toEqual([]);
+  });
+
+  test('runDelegation reports the files every successful task read', async () => {
+    const runs: HelperRun[] = [
+      { text: 'src/a.ts:3 does it', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 900, paths: ['src/a.ts'] },
+      { text: '', error: 'timed out', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 0, paths: ['src/c.ts'] },
+    ];
+    let i = 0;
+    const { report } = await runDelegation({ tasks: [{ task: 'one' }, { task: 'two' }] }, async () => runs[i++], 1);
+    expect(report.paths).toEqual(['src/a.ts']);
   });
 });

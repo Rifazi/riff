@@ -1,4 +1,4 @@
-import type { TranscriptEntry, HelperRunStats } from '../../sessions/session.js';
+import type { TranscriptEntry, HelperName, HelperRunStats } from '../../sessions/session.js';
 import { appendUsageLog, type UsageStage } from '../../sessions/usage-log.js';
 import { appendTranscriptEntry } from '../../sessions/session-store.js';
 import { ZERO_USAGE, type TokenUsage } from '../sdk-client.js';
@@ -49,6 +49,31 @@ export async function reportHelperRun(
     await context.record({ role: 'system', text: summary, helper: stats });
   } catch (err) {
     console.warn(`[helpers] could not report a ${stats.helper} run —`, err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * Takes back an earlier run's `useful` and `savedTokens` once the paid agent
+ * has redone its work (research/core.ts RedoLedger). Usage log only: the
+ * chat already showed the run, and the agent's own read shows the redo.
+ */
+export async function reportHelperRedo(
+  context: HelperContext | undefined,
+  name: HelperName,
+  useful: number,
+  savedTokens: number,
+): Promise<void> {
+  if (!context) return;
+  try {
+    await appendUsageLog({
+      at: new Date().toISOString(),
+      sessionId: context.sessionId,
+      stage: context.stage,
+      usage: ZERO_USAGE,
+      helper: { name, tasks: 0, useful: -useful, savedTokens: -savedTokens, redo: true },
+    });
+  } catch (err) {
+    console.warn(`[helpers] could not log a ${name} redo —`, err instanceof Error ? err.message : err);
   }
 }
 

@@ -3,14 +3,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, ChevronRight, Paperclip, Send, Wrench, X } from 'lucide-react';
+import { Check, ChevronRight, FileCode, FileText, GitBranch, Package, Paperclip, Search, Send, Terminal, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentInput, HelperRunStats, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona } from '@/lib/dev-sessions/agents';
 import { ACCEPTED_ATTACHMENT_TYPES, readAttachments } from '@/lib/dev-sessions/attachments';
-import { HelperCallBubble, HelperResultBubble, helperFor, helperStatsBefore } from './HelperBubbles';
+import { HelperBubble, helperFor, helperStatsBefore } from './HelperBubbles';
 
 interface ChatPaneProps {
   entries: TranscriptEntry[];
@@ -33,6 +33,149 @@ interface ChatPaneProps {
   agent: AgentPersona;
   /** Shown instead of the default when there are no messages yet. */
   emptyHint?: string;
+}
+
+/** Pull plain text out of a tool result regardless of which engine produced it. */
+function resultText(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (Array.isArray(result))
+    return result.map((b) => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n');
+  return JSON.stringify(result ?? '');
+}
+
+type ToolIcon = typeof Wrench;
+function toolIcon(name: string): ToolIcon {
+  if (name === 'search_code' || name === 'search_docs') return Search;
+  if (name === 'read_file' || name === 'outline_file' || name === 'read_doc') return FileText;
+  if (name === 'write_file' || name === 'edit_file') return FileCode;
+  if (name.startsWith('run_') || name === 'get_diff') return Terminal;
+  if (name === 'git_create_branch') return GitBranch;
+  if (name === 'run_npm_install') return Package;
+  return Wrench;
+}
+
+function resultBadge(name: string, input: unknown, text: string, isError: boolean): string | null {
+  if (isError) return '✗ error';
+  if (!text.trim()) return null;
+  switch (name) {
+    case 'search_code': {
+      // Grouped output: file headers are non-indented lines
+      const files = text.split('\n').filter((l) => l && !l.startsWith(' ')).length;
+      return files === 0 ? 'no results' : `${files} file${files === 1 ? '' : 's'}`;
+    }
+    case 'read_file': {
+      const lines = text.split('\n').length;
+      return `${lines} line${lines === 1 ? '' : 's'}`;
+    }
+    case 'outline_file': {
+      const items = text.split('\n').filter(Boolean).length;
+      return `${items} items`;
+    }
+    case 'edit_file': {
+      const inp = input as Record<string, unknown> | null;
+      const n = Array.isArray(inp?.edits) ? inp.edits.length : null;
+      return n !== null ? `${n} edit${n === 1 ? '' : 's'}` : '✓';
+    }
+    case 'write_file': return '✓ written';
+    case 'run_npm_install': return '✓ installed';
+    case 'run_prettier': return '✓ formatted';
+    case 'git_create_branch': return '✓ created';
+    case 'write_plan_doc': return '✓ saved';
+    case 'run_checked_command': {
+      const lower = text.toLowerCase();
+      return lower.includes(' failed') || lower.includes('error') || lower.includes('✗') ? '✗ failed' : '✓ passed';
+    }
+    case 'get_diff': {
+      const files = (text.match(/^### /gm) ?? []).length;
+      return files ? `${files} file${files === 1 ? '' : 's'}` : null;
+    }
+    case 'assign_team': {
+      const inp = input as Record<string, unknown> | null;
+      const n = Array.isArray(inp?.workstreams) ? inp.workstreams.length : null;
+      return n !== null ? `${n} workstreams` : '✓';
+    }
+    default: return null;
+  }
+}
+
+// Key input fields shown in the expanded body — readable labels, not raw JSON.
+function ToolInputRows({ name, input }: { name: string; input: unknown }) {
+  const obj = input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+  if (!obj) return null;
+  const rows: [string, string][] = [];
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  const num = (v: unknown) => (typeof v === 'number' ? String(v) : null);
+
+  switch (name) {
+    case 'search_code':
+      if (str(obj.query)) rows.push(['Query', str(obj.query)!]);
+      if (str(obj.glob)) rows.push(['In', str(obj.glob)!]);
+      if (num(obj.context)) rows.push(['Context', num(obj.context)!]);
+      break;
+    case 'search_docs':
+    case 'read_doc':
+      if (str(obj.query ?? obj.path)) rows.push(['Query', str(obj.query ?? obj.path)!]);
+      break;
+    case 'read_file':
+      if (str(obj.path)) rows.push(['File', str(obj.path)!]);
+      if (num(obj.offset)) rows.push(['From line', num(obj.offset)!]);
+      if (num(obj.limit)) rows.push(['Lines', num(obj.limit)!]);
+      break;
+    case 'outline_file':
+    case 'write_file':
+      if (str(obj.path)) rows.push(['File', str(obj.path)!]);
+      break;
+    case 'edit_file':
+      if (str(obj.path)) rows.push(['File', str(obj.path)!]);
+      if (Array.isArray(obj.edits)) rows.push(['Edits', String(obj.edits.length)]);
+      break;
+    case 'run_checked_command':
+      if (str(obj.command)) rows.push(['Command', str(obj.command)!]);
+      break;
+    case 'git_create_branch':
+      if (str(obj.branchName)) rows.push(['Branch', str(obj.branchName)!]);
+      break;
+    case 'fetch_url':
+      if (str(obj.url)) rows.push(['URL', str(obj.url)!]);
+      break;
+    case 'write_qa_report':
+      if (str(obj.result)) rows.push(['Result', str(obj.result)!]);
+      break;
+    default:
+      for (const [k, v] of Object.entries(obj).slice(0, 3)) {
+        const s = str(v) ?? num(v);
+        if (s) rows.push([k, s]);
+      }
+  }
+
+  if (!rows.length) return null;
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+      {rows.map(([k, v]) => (
+        <React.Fragment key={k}>
+          <dt className="text-muted-foreground/60 whitespace-nowrap">{k}</dt>
+          <dd className="font-mono break-all truncate">{v}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
+}
+
+function ResultPreview({ text, name }: { text: string; name: string }) {
+  const [showFull, setShowFull] = useState(false);
+  const PREVIEW = 600;
+  const trimmed = showFull ? text : text.slice(0, PREVIEW);
+  const isCode = ['read_file', 'get_diff', 'search_code', 'outline_file', 'run_checked_command', 'run_npm_install', 'read_doc'].includes(name);
+  return (
+    <div className={`${isCode ? 'font-mono' : 'font-sans'} whitespace-pre-wrap break-all`}>
+      {trimmed}
+      {text.length > PREVIEW && (
+        <button type="button" onClick={() => setShowFull((v) => !v)} className="ml-1 text-primary hover:underline not-italic font-sans">
+          {showFull ? 'show less' : `… +${(text.length - PREVIEW).toLocaleString()} chars`}
+        </button>
+      )}
+    </div>
+  );
 }
 
 const ASK_MULTIPLE_CHOICE_TOOL = 'ask_multiple_choice';
@@ -79,65 +222,51 @@ export function AgentAvatar({ agent, size = 'md' }: { agent: AgentPersona; size?
   );
 }
 
-const RESULT_PREVIEW_CHARS = 800;
-
 // Long chats render only their most recent entries until the human asks for
 // more: a few hundred markdown bubbles make every update slow.
 const VISIBLE_ENTRIES_STEP = 120;
 
-function ToolCallBody({ entry }: { entry: TranscriptEntry }) {
-  const [showFull, setShowFull] = useState(false);
-  const result = entry.toolResult !== undefined ? JSON.stringify(entry.toolResult) : null;
-  return (
-    <div className="px-2.5 pb-2 space-y-1 break-all whitespace-pre-wrap">
-      {entry.toolInput !== undefined && <div>in: {JSON.stringify(entry.toolInput)}</div>}
-      {result !== null && (
-        <div>
-          out: {showFull ? result : result.slice(0, RESULT_PREVIEW_CHARS)}
-          {result.length > RESULT_PREVIEW_CHARS && (
-            <button
-              type="button"
-              onClick={() => setShowFull((v) => !v)}
-              className="ml-1 font-sans text-primary hover:underline"
-            >
-              {showFull ? 'show less' : `… show full output (${result.length.toLocaleString()} chars)`}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolCallBubble({ entry }: { entry: TranscriptEntry }) {
-  // Live SSE overlay entries (id "overlay-N", see useAgentTurnStream) open
-  // by default so a running turn is visible; historical ones stay collapsed.
-  // The body (which stringifies the whole input and output) is only built
-  // while open.
+function ToolCallBubble({ entry, result }: { entry: TranscriptEntry; result?: TranscriptEntry }) {
+  // Live SSE overlay entries open by default; historical ones stay collapsed.
   const [open, setOpen] = useState(() => entry.id.startsWith('overlay-'));
   const name = stripToolPrefix(entry.toolName);
-  const summary = entry.role === 'tool_call' ? summarizeToolInput(entry.toolInput) : null;
+  const isError = result?.isError ?? entry.isError ?? false;
+  const keyArg = summarizeToolInput(entry.toolInput);
+  const rText = result ? resultText(result.toolResult) : null;
+  const badge = rText !== null ? resultBadge(name, entry.toolInput, rText, isError) : null;
+  const Icon = toolIcon(name);
 
   return (
     <details
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
       className={`group rounded-md border text-xs font-mono ${
-        entry.isError
+        isError
           ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'border-border bg-muted text-muted-foreground'
+          : 'border-border bg-muted/60 text-muted-foreground'
       }`}
     >
       <summary className="flex items-center gap-1.5 px-2.5 py-1.5 cursor-pointer select-none list-none">
-        <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90 flex-shrink-0" />
-        <Wrench className="w-3 h-3 flex-shrink-0" />
-        <span className="truncate">
-          {entry.role === 'tool_call' ? name || 'tool call' : 'result'}
-          {summary ? ` — ${summary}` : ''}
-          {entry.isError ? ' (error)' : ''}
-        </span>
+        <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90 flex-shrink-0 opacity-50" />
+        <Icon className="w-3 h-3 flex-shrink-0 opacity-70" />
+        <span className="font-medium">{name}</span>
+        {keyArg && <span className="opacity-50 truncate">{keyArg}</span>}
+        {badge && (
+          <span className={`ml-auto pl-2 flex-shrink-0 text-[10px] font-mono ${isError ? 'text-destructive' : 'opacity-50'}`}>
+            {badge}
+          </span>
+        )}
       </summary>
-      {open && <ToolCallBody entry={entry} />}
+      {open && (
+        <div className="px-3 pb-2.5 pt-1 font-sans space-y-2">
+          <ToolInputRows name={name} input={entry.toolInput} />
+          {rText && (
+            <div className={`${rText && entry.toolInput !== undefined ? 'border-t border-border/30 pt-2' : ''} text-xs ${isError ? 'text-destructive' : 'text-muted-foreground'}`}>
+              <ResultPreview text={rText} name={name} />
+            </div>
+          )}
+        </div>
+      )}
     </details>
   );
 }
@@ -283,8 +412,14 @@ interface ChatEntryProps {
   answer?: DraftAnswer;
   onAnswer: (id: string, answer: DraftAnswer) => void;
   disabled: boolean;
+  /** For a helper tool_call: the matching result entry (looked up ahead). */
+  helperResult?: TranscriptEntry;
   /** For a local helper's result: the stats of that run, recorded just before it. */
   helperStats?: HelperRunStats | null;
+  /** For an assistant message: true when helpers ran during this turn. */
+  usedHelpers?: boolean;
+  /** For a regular tool_call: its paired tool_result (absorbed into this bubble). */
+  toolResult?: TranscriptEntry;
 }
 
 // Memoized so typing in the composer, or one more streamed event, only
@@ -297,7 +432,10 @@ const ChatEntry = React.memo(function ChatEntry({
   answer,
   onAnswer,
   disabled,
+  helperResult,
   helperStats,
+  usedHelpers,
+  toolResult,
 }: ChatEntryProps) {
   if (entry.role === 'user') {
     return (
@@ -312,10 +450,19 @@ const ChatEntry = React.memo(function ChatEntry({
     return (
       <div className="flex gap-2 items-start">
         <AgentAvatar agent={agent} size="sm" />
-        <div className="max-w-[85%] min-w-0 rounded-2xl rounded-tl-sm bg-muted text-foreground px-3.5 py-2 text-sm break-words">
-          <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
+        <div className="flex flex-col gap-1 max-w-[85%] min-w-0">
+          <div
+            className={`rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm break-words ${
+              usedHelpers ? 'bg-success/10 text-foreground ring-1 ring-success/30' : 'bg-muted text-foreground'
+            }`}
+          >
+            <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
+            </div>
           </div>
+          {usedHelpers && (
+            <span className="text-[10px] text-success/70 font-medium px-1">↑ used local helpers</span>
+          )}
         </div>
       </div>
     );
@@ -333,11 +480,16 @@ const ChatEntry = React.memo(function ChatEntry({
     );
   }
   const helper = helperFor(stripToolPrefix(entry.toolName));
-  if (helper && entry.role === 'tool_call') return <HelperCallBubble helper={helper} entry={entry} />;
-  if (helper && entry.role === 'tool_result') {
-    return <HelperResultBubble helper={helper} entry={entry} stats={helperStats ?? null} />;
+  if (helper && entry.role === 'tool_call') {
+    return <HelperBubble helper={helper} callEntry={entry} resultEntry={helperResult} stats={helperStats ?? null} />;
   }
-  if (entry.role === 'tool_call' || entry.role === 'tool_result') {
+  // tool_result for helpers is rendered inside the call's dialog above; skip standalone.
+  if (helper && entry.role === 'tool_result') return null;
+  if (entry.role === 'tool_call') {
+    return <ToolCallBubble entry={entry} result={toolResult} />;
+  }
+  if (entry.role === 'tool_result') {
+    // Standalone (unabsorbed) result — rare, show generic chip
     return <ToolCallBubble entry={entry} />;
   }
   if (entry.role === 'system') {
@@ -491,36 +643,116 @@ export function ChatPane({
             </button>
           </div>
         )}
-        {entries.slice(firstVisible).map((entry, offset) => {
-          const i = firstVisible + offset;
-          if (duplicatePendingIds.has(entry.id)) return null;
-          // A local helper run's stats show inside its result card.
-          if (entry.helper) return null;
-          const helper = entry.role === 'tool_result' ? helperFor(stripToolPrefix(entry.toolName)) : null;
-          const helperStats = helper
-            ? helperStatsBefore(entries, i, helper, (e) => stripToolPrefix(e.toolName))
-            : undefined;
-          if (entry.role === 'tool_result') {
-            // A question tool's result is a trivial placeholder — the
-            // question bubble from the preceding tool_call already shows it.
-            const prev = entries[i - 1];
-            if (prev?.role === 'tool_call' && QUESTION_TOOL_NAMES.has(stripToolPrefix(prev.toolName))) return null;
+        {(() => {
+          // Pre-pass: mark assistant entries that followed helper tool calls in
+          // their turn (between the previous user/assistant boundary and this one).
+          const assistantWithHelpers = new Set<string>();
+          let turnHadHelper = false;
+          for (const e of entries) {
+            if (e.role === 'user') { turnHadHelper = false; continue; }
+            if (e.role === 'tool_result' && helperFor(stripToolPrefix(e.toolName ?? ''))) { turnHadHelper = true; }
+            if (e.role === 'assistant') {
+              if (turnHadHelper) assistantWithHelpers.add(e.id);
+              turnHadHelper = false;
+            }
           }
-          const questionIndex = pendingIds.indexOf(entry.id);
-          return (
-            <ChatEntry
-              key={entry.id}
-              entry={entry}
-              agent={agent}
-              questionIndex={questionIndex}
-              questionPending={batchOpen && questionIndex >= 0}
-              answer={answers[entry.id]}
-              onAnswer={setAnswer}
-              disabled={disabled}
-              helperStats={helperStats}
-            />
-          );
-        })}
+
+          // Pre-pass: pair each regular tool_call with its tool_result so both
+          // can be shown in a single chip. By toolCallId when both carry it —
+          // parallel calls can finish out of order — else in order per toolName
+          // (entries from before the id was stored).
+          const callToResult = new Map<string, TranscriptEntry>(); // call.id → result entry
+          const absorbedResultIds = new Set<string>();
+          {
+            const resultsById = new Map<string, TranscriptEntry>();
+            const resultQueues = new Map<string, TranscriptEntry[]>();
+            for (const e of entries) {
+              if (e.role === 'tool_result' && !helperFor(stripToolPrefix(e.toolName ?? ''))) {
+                if (e.toolCallId) {
+                  resultsById.set(e.toolCallId, e);
+                  continue;
+                }
+                const n = stripToolPrefix(e.toolName ?? '');
+                const q = resultQueues.get(n) ?? [];
+                q.push(e);
+                resultQueues.set(n, q);
+              }
+            }
+            for (const e of entries) {
+              if (
+                e.role === 'tool_call' &&
+                !QUESTION_TOOL_NAMES.has(stripToolPrefix(e.toolName ?? '')) &&
+                !helperFor(stripToolPrefix(e.toolName ?? ''))
+              ) {
+                const n = stripToolPrefix(e.toolName ?? '');
+                const q = resultQueues.get(n);
+                const r = e.toolCallId ? resultsById.get(e.toolCallId) : q?.shift();
+                if (r) {
+                  callToResult.set(e.id, r);
+                  absorbedResultIds.add(r.id);
+                }
+              }
+            }
+          }
+
+          return entries.slice(firstVisible).map((entry, offset) => {
+            const i = firstVisible + offset;
+            if (duplicatePendingIds.has(entry.id)) return null;
+            // A local helper run's stats show inside its result card.
+            if (entry.helper) return null;
+            // Tool_results absorbed into their call's chip.
+            if (absorbedResultIds.has(entry.id)) return null;
+
+            const helperName = helperFor(stripToolPrefix(entry.toolName));
+
+            // Helper tool_results are rendered inside their call's dialog; skip standalone.
+            if (helperName && entry.role === 'tool_result') return null;
+
+            // For a helper call, look ahead for the matching result and stats.
+            let helperResult: TranscriptEntry | undefined;
+            let helperStats: HelperRunStats | null | undefined;
+            if (helperName && entry.role === 'tool_call') {
+              for (let j = i + 1; j < entries.length; j++) {
+                const e = entries[j];
+                if (
+                  e.role === 'tool_result' &&
+                  helperFor(stripToolPrefix(e.toolName)) === helperName &&
+                  (!entry.toolCallId || !e.toolCallId || e.toolCallId === entry.toolCallId)
+                ) {
+                  helperResult = e;
+                  helperStats = helperStatsBefore(entries, j, helperName, (x) => stripToolPrefix(x.toolName));
+                  break;
+                }
+                // Stop at next user/assistant boundary
+                if (e.role === 'user' || e.role === 'assistant') break;
+              }
+            }
+
+            if (entry.role === 'tool_result') {
+              // A question tool's result is a trivial placeholder — the
+              // question bubble from the preceding tool_call already shows it.
+              const prev = entries[i - 1];
+              if (prev?.role === 'tool_call' && QUESTION_TOOL_NAMES.has(stripToolPrefix(prev.toolName))) return null;
+            }
+            const questionIndex = pendingIds.indexOf(entry.id);
+            return (
+              <ChatEntry
+                key={entry.id}
+                entry={entry}
+                agent={agent}
+                questionIndex={questionIndex}
+                questionPending={batchOpen && questionIndex >= 0}
+                answer={answers[entry.id]}
+                onAnswer={setAnswer}
+                disabled={disabled}
+                helperResult={helperResult}
+                helperStats={helperStats}
+                usedHelpers={entry.role === 'assistant' ? assistantWithHelpers.has(entry.id) : undefined}
+                toolResult={entry.role === 'tool_call' ? callToResult.get(entry.id) : undefined}
+              />
+            );
+          });
+        })()}
         {streaming && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />

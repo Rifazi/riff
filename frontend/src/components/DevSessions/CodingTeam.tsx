@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Clock,
   FolderLock,
   GitMerge,
@@ -187,6 +188,8 @@ export interface CodingTeamPanelProps {
   leadChat: React.ReactNode;
   /** The lead is mid-turn — e.g. still explaining the split it just made. */
   leadActive: boolean;
+  /** An earlier round, read only: no lead tab (Jack's chat is the current one). */
+  past?: boolean;
 }
 
 const LEAD_TAB = '__lead__';
@@ -212,6 +215,7 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
     onStart,
     leadChat,
     leadActive,
+    past,
   } = props;
   const lineup = members;
   // Keyed on the titles so each persona keeps its identity across refetches:
@@ -223,8 +227,10 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
   );
 
   const [picked, setPicked] = useState<string | null>(null);
-  const defaultTab =
-    teamFinished || leadActive
+  // An earlier round is opened to read its engineers' logs.
+  const defaultTab = past
+    ? (lineup[0]?.id ?? LEAD_TAB)
+    : teamFinished || leadActive
       ? LEAD_TAB
       : ((lineup.find((m) => m.status === 'running') ?? lineup[0])?.id ?? LEAD_TAB);
   const selected = picked ?? defaultTab;
@@ -301,9 +307,13 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
         </div>
         {teamFinished && (
           <div className={`text-xs ${teamStatus === 'done' ? 'text-success' : 'text-warning'}`}>
-            {teamStatus === 'done'
-              ? `Everyone's work is merged — review the diff, or ask ${TEAM_LEAD_PERSONA.name} for changes.`
-              : `Not everything merged — resume the team to retry, or ask ${TEAM_LEAD_PERSONA.name} to finish it.`}
+            {past
+              ? teamStatus === 'done'
+                ? "An earlier round — everyone's work was merged."
+                : 'An earlier round — not everything merged before the next one started.'
+              : teamStatus === 'done'
+                ? `Everyone's work is merged — review the diff, or ask ${TEAM_LEAD_PERSONA.name} for changes.`
+                : `Not everything merged — resume the team to retry, or ask ${TEAM_LEAD_PERSONA.name} to finish it.`}
           </div>
         )}
 
@@ -327,21 +337,23 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
               <StatusIcon status={m.status} className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           ))}
-          <button
-            role="tab"
-            type="button"
-            aria-selected={selected === LEAD_TAB}
-            onClick={() => setPicked(LEAD_TAB)}
-            className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
-              selected === LEAD_TAB
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border bg-card text-card-foreground hover:bg-muted'
-            }`}
-          >
-            <AgentAvatar agent={TEAM_LEAD_PERSONA} size="xs" />
-            <span className="font-medium">{TEAM_LEAD_PERSONA.name}</span>
-            <span className="text-xs text-muted-foreground">lead</span>
-          </button>
+          {!past && (
+            <button
+              role="tab"
+              type="button"
+              aria-selected={selected === LEAD_TAB}
+              onClick={() => setPicked(LEAD_TAB)}
+              className={`inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
+                selected === LEAD_TAB
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border bg-card text-card-foreground hover:bg-muted'
+              }`}
+            >
+              <AgentAvatar agent={TEAM_LEAD_PERSONA} size="xs" />
+              <span className="font-medium">{TEAM_LEAD_PERSONA.name}</span>
+              <span className="text-xs text-muted-foreground">lead</span>
+            </button>
+          )}
         </div>
       </Card>
 
@@ -362,10 +374,18 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
             <OwnedPaths paths={member.ownedPaths} />
             {member.note &&
               (member.status === 'failed' || member.status === 'blocked' || member.status === 'waiting') && (
-                <div
-                  className={`text-xs ${member.status === 'waiting' ? 'text-muted-foreground' : 'text-destructive'}`}
-                >
-                  {member.note}
+                <div className="space-y-1.5">
+                  <div
+                    className={`text-xs ${member.status === 'waiting' ? 'text-muted-foreground' : 'text-destructive'}`}
+                  >
+                    {member.note}
+                  </div>
+                  {member.status === 'failed' && canStart && (
+                    <Button size="sm" variant="outline" onClick={onStart} disabled={starting}>
+                      {starting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                      Retry this engineer
+                    </Button>
+                  )}
                 </div>
               )}
           </div>
@@ -382,5 +402,131 @@ export function CodingTeamPanel(props: CodingTeamPanelProps) {
         leadChat
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- earlier rounds
+
+const KIND_LABEL: Record<CodingTeamState['kind'], string> = {
+  plan: 'The plan',
+  'qa-fix': 'QA fixes',
+  'follow-up': 'Follow-ups',
+};
+
+const ROUND_STATUS: Record<
+  CodingTeamState['status'],
+  { label: string; variant: NonNullable<BadgeProps['variant']> }
+> = {
+  assigned: { label: 'Not started', variant: 'secondary' },
+  running: { label: 'Interrupted', variant: 'warning' },
+  done: { label: 'Merged', variant: 'success' },
+  needs_attention: { label: 'Needs attention', variant: 'warning' },
+  interrupted: { label: 'Interrupted', variant: 'warning' },
+};
+
+function roundWhen(iso: string): string | null {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * Team rounds that are over (SessionRecord.codingTeamHistory), collapsed so
+ * the Coding tab shows only who's working now. Each opens its engineers'
+ * logs, read only.
+ */
+export function EarlierTeamRounds({
+  rounds,
+  steps,
+  branch,
+}: {
+  rounds: CodingTeamState[];
+  steps: CodingPlanStep[];
+  branch: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [viewing, setViewing] = useState<CodingTeamState | null>(null);
+  if (rounds.length === 0) return null;
+  return (
+    <Card className="flex-shrink-0 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted transition-colors"
+      >
+        <ChevronDown
+          className={`w-4 h-4 flex-shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+        <Users className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+        <span className="font-medium text-foreground">Earlier team rounds</span>
+        <span className="text-xs text-muted-foreground">{rounds.length}</span>
+      </button>
+      {open && (
+        <div className="border-t border-border p-1.5 space-y-1">
+          {[...rounds].reverse().map((team) => {
+            const status = ROUND_STATUS[team.status];
+            const when = roundWhen(team.startedAt);
+            return (
+              <button
+                key={team.round}
+                type="button"
+                onClick={() => setViewing(team)}
+                className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-2 text-left hover:bg-muted transition-colors"
+                title={`Open round ${team.round}'s logs`}
+              >
+                <div className="flex -space-x-1.5 flex-shrink-0">
+                  {team.members.map((m, i) => (
+                    <div key={m.id} className="rounded-full ring-2 ring-card">
+                      <AgentAvatar agent={teamMemberPersona(i, m.title)} size="xs" />
+                    </div>
+                  ))}
+                </div>
+                <span className="text-sm font-semibold text-foreground whitespace-nowrap">Round {team.round}</span>
+                <span className="text-sm text-foreground whitespace-nowrap">{KIND_LABEL[team.kind]}</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {team.members.length} engineers{when ? ` · ${when}` : ''}
+                </span>
+                <Badge variant={status.variant} className="ml-auto">
+                  {status.label}
+                </Badge>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <Dialog open={viewing !== null} onOpenChange={(o) => !o && setViewing(null)}>
+        <DialogContent className="max-w-5xl w-[95vw] h-[88vh] p-4 gap-0 flex flex-col overflow-hidden">
+          <DialogTitle className="sr-only">Team round {viewing?.round}</DialogTitle>
+          {viewing && (
+            <CodingTeamPanel
+              key={viewing.round}
+              round={viewing.round}
+              kind={viewing.kind}
+              members={viewing.members}
+              teamStatus={
+                viewing.status === 'assigned'
+                  ? 'not_started'
+                  : viewing.status === 'running'
+                    ? 'interrupted'
+                    : viewing.status
+              }
+              teamFinished
+              steps={steps}
+              branch={branch}
+              entriesFor={(m) => m.transcript}
+              runningTools={{}}
+              canStart={false}
+              starting={false}
+              onStart={() => {}}
+              leadChat={null}
+              leadActive={false}
+              past
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

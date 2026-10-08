@@ -743,6 +743,87 @@ below) — never inside the target repo.
      usage, byHelper }`. Settings → Dev Agents has one "Local helpers"
      section (Research helper + Classifier helper).
 
+30. User asked where a session's logs showed wasted tokens and time, and
+   why agents in the app ran slower than Claude Code in VS Code. Session
+   `2c8f3fdc` showed the local helpers costing more than they saved, so:
+   - **Runner** (`helpers/runner/core.ts`): Qwen used to replace a failed
+     run's whole report, junit summary included. It listed 1 of 7 failures
+     and once ended "7 failures / All passed.", and the agent re-ran the
+     suite 3 times. Now the pass/fail line and junit summary (each failing
+     test now carries its first failure line) always go through unchanged,
+     and Qwen only shortens a raw log over 5k chars, listed under them.
+   - **read_file compression** is off for the coding agent and team members.
+     A compressed read cost 7-30s on the serialized Qwen and sent the agent
+     back for a ranged re-read (one file read 10 times in a turn). QA keeps
+     it, and Qwen's markdown fences are stripped.
+   - **delegate** is gone from QA, which redid every answer it got ("too
+     terse to trust", "contradictory"); a refusing stub keeps old histories
+     valid. For coding and team members, `RedoLedger` (research/core.ts)
+     remembers the files each answered delegation read. The first paid
+     `read_file` of one (`FileToolDeps.onRead` → `noteDelegateRead`) logs a
+     `redo: true` usage line that cancels that run's useful count and
+     saving, so "Saved by local helpers" no longer counts work done twice.
+   - **git_commit** says why it rejected a message (`commitMessageProblem`):
+     the agent sent three valid `fix:` messages whose subjects were over 72
+     chars before one passed. A body after a blank line is now accepted.
+   - **Hops**: the Claude engine runs 20-step hops × 4 (`hopLimits`), since
+     each hop's `query()` boots a Claude Code subprocess. The AI SDK engine
+     keeps 10 × 8.
+   - **Transcript/UI**: `tool_call`/`tool_result` entries store
+     `toolCallId`, and `ChatPane` pairs by it (older entries by name and
+     order), since parallel calls finish out of order. The Coding tab no
+     longer refetches the multi-MB session and diff after read-only tools,
+     and stops polling a team run the server says isn't running.
+   Not yet checked against a real coding run. To check, compare a coding
+   turn's request count, `run_checked_command` repeats and helper lines in
+   `state/usage-log.jsonl` against the numbers above.
+
+31. User asked again where the logs showed waste. In session `2c8f3fdc`'s
+   last coding turn (~150 requests, 4.3M cache reads) the agent ran the
+   tests 17 times and had a test write its call count to a file, because it
+   could never see why a test failed. Fixed:
+   - **`compactOutput`** (`tool-defs/output-compress.ts`): the
+     `:\d+:\d+` location pattern also matched every ISO timestamp, so a
+     vitest run's `stdout | file > test` console blocks filled the 3k
+     budget, first come first served, and the real failure (on stderr) was
+     skipped. The closing "last 15 lines" were npm's stderr exit report, and
+     a final `slice(-maxChars)` cut the first line in half. Now a location
+     must be `file.ext:line`, console blocks are never kept once a log is
+     over budget, npm's `code`/`path`/`location`/`command` lines are noise,
+     and the closing lines are the last 10 of each stream (stdout's totals
+     first). The budget is filled summary first and the result never cuts a
+     line (`frontend/tests/harness-server/output-compress.test.ts`).
+   - **Runner**: `compactOutput` capped the log at 3k, so step 30's 5k
+     threshold meant Qwen never ran. Qwen now reads the log compacted to
+     `RUNNER_INPUT_CHARS` (24k, inside llama-helper's 16k-token context),
+     and `groundSummary` keeps only lines the log backs up: every
+     `path:line` must be in it, as must `path > first test-name segment`,
+     and verdict/count lines are dropped. Earlier summaries had paired the
+     real test with another file and said "7 failures / All passed.". A
+     rejected summary logs a `useful: 0` runner line and sends the excerpt.
+     A `junit.xml` older than the run is ignored instead of reported as
+     this run's.
+   - **`search_code`** ran `git grep` with basic regex, so `a|b` searched for
+     a literal pipe: 79 of 94 such searches across all sessions found
+     nothing. It now uses `-E`, retries a pattern that isn't valid ERE
+     (exit 128) with `-F`, and when no line matches lists tracked paths that
+     match (`matchPaths`), since agents look files up by name with it too.
+     The path listing skips `NOISE_PATHSPECS`: `git ls-files` returns nothing
+     at all when a wildcard pathspec is combined with an exclude one.
+   - **Repeat-read notes** (`tool-defs/read-memo.ts`): `read_file`'s and
+     `read_doc`'s "unchanged since you last read it" memory lived as long as
+     the turn, so after a mid-turn compaction it answered reads from the
+     previous conversation with a note, and the agent had to call again (41
+     times in one session). The coding agent and team members now share one
+     `ReadMemo` across both tools and clear it in `compaction.handoff`.
+   - **Bare tool names**: on the Claude engine the first calls of a new
+     conversation were sometimes `read_file`/`search_code`, which the
+     prompts use, and came back "No such tool available" (up to 10 per
+     session; Claude Code's tool search wasn't involved). Every
+     `runClaudeAgentTurn` system prompt now ends with a note mapping bare
+     names to `mcp__harness-tools__<name>`.
+   Not yet checked against a real coding run.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

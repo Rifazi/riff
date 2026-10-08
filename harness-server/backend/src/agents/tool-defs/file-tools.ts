@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { assertPathAllowed, PathNotAllowedError } from '../../repo/guardrails.js';
 import { isGeneratedThemePath } from '../../themes/apply-theme.js';
+import { ReadMemo } from './read-memo.js';
 
 // Same "anything under repoRoot except the always-forbidden paths" scope as
 // read_file — target repos aren't all shaped like the original Customer-EDI
@@ -66,6 +66,13 @@ export const editFileDescription =
   'order, all or nothing. Fails if an oldText is not found or occurs more than once. On success it returns the ' +
   "line ranges the new text occupies; the file then matches what you sent, so don't re-read it to check.";
 
+export const deleteFileSchema = z.object({
+  path: z.string().describe('Repo-relative path of the file to delete, e.g. src/utils/legacy-helper.ts'),
+});
+export const deleteFileDescription =
+  'Delete a file from the repo. Subject to the same path restrictions as write_file — no .env, .git/, ' +
+  'node_modules/, or theme-generated files. The file must exist. Use git_commit afterwards to record the deletion.';
+
 /**
  * For a coding-team member: `writablePaths` are the paths its workstream
  * owns (sessions/plan-doc.ts guarantees no two members' paths overlap), so
@@ -95,29 +102,34 @@ export function assertWritable(requestedPath: string, repoRoot: string, writable
 export interface FileToolDeps {
   repoRoot: string;
   writablePaths?: string[];
+  /** Optional compressor applied to large full-file reads before they enter the agent's context. */
+  compress?: (filePath: string, content: string) => Promise<string>;
+  /** Told of every read the agent makes (the research helper's redo check). */
+  onRead?: (filePath: string) => void;
+  /** Shared with the agent's other read tools and cleared on compaction; a fresh one when unset. */
+  readMemo?: ReadMemo;
 }
 
 export function createFileExecutors(deps: FileToolDeps) {
-  // A read the model repeats with nothing changed is answered with a short
-  // note instead of the same text again, since the first copy is still in
-  // its context. The same read asked for once more gets the text, so a read
-  // that compaction dropped from the context can always be fetched again.
-  const notedRepeats = new Map<string, string>();
-  const lastReads = new Map<string, string>();
+  // A repeat of an unchanged read gets a note instead of the text — see ReadMemo.
+  const readMemo = deps.readMemo ?? new ReadMemo();
 
   const readFileExecute = async (args: z.infer<typeof readFileSchema>): Promise<string> => {
-    const result = await readFileText(args);
-    const key = `${args.path}:${args.offset ?? ''}:${args.limit ?? ''}`;
-    const hash = createHash('sha1').update(result).digest('hex');
-    if (lastReads.get(key) === hash && notedRepeats.get(key) !== hash) {
-      notedRepeats.set(key, hash);
+    const raw = await readFileText(args);
+    deps.onRead?.(args.path);
+    // Compress full-file reads (no offset/limit) — these are exploration reads.
+    // Ranged reads (offset or limit specified) are left verbatim: the agent is
+    // pinpointing text it's about to edit and needs it exact.
+    const result =
+      deps.compress && args.offset === undefined && args.limit === undefined
+        ? await deps.compress(args.path, raw)
+        : raw;
+    if (readMemo.isRepeat(`file\u0000${args.path}:${args.offset ?? ''}:${args.limit ?? ''}`, result)) {
       return (
         `[${args.path} is unchanged since you last read it in this conversation — use that copy. ` +
         'If it is no longer in your context, make the same read_file call again to get the text.]'
       );
     }
-    notedRepeats.delete(key);
-    lastReads.set(key, hash);
     return result;
   };
 
@@ -162,6 +174,12 @@ export function createFileExecutors(deps: FileToolDeps) {
       : `Wrote ${requestedPath} (${lineCount} lines)`;
   };
 
+  const deleteFileExecute = async ({ path: requestedPath }: z.infer<typeof deleteFileSchema>): Promise<string> => {
+    const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
+    await fs.unlink(absolute);
+    return `Deleted ${requestedPath}`;
+  };
+
   const editFileExecute = async ({ path: requestedPath, oldText, newText, edits }: z.infer<typeof editFileSchema>): Promise<string> => {
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     const replacements = [...(oldText !== undefined ? [{ oldText, newText: newText ?? '' }] : []), ...(edits ?? [])];
@@ -188,14 +206,15 @@ export function createFileExecutors(deps: FileToolDeps) {
     return `Edited ${requestedPath} (${ranges.join(', ')} of ${content.split('\n').length})`;
   };
 
-  return { readFileExecute, writeFileExecute, editFileExecute };
+  return { readFileExecute, writeFileExecute, editFileExecute, deleteFileExecute };
 }
 
 export function createFileTools(deps: FileToolDeps) {
-  const { readFileExecute, writeFileExecute, editFileExecute } = createFileExecutors(deps);
+  const { readFileExecute, writeFileExecute, editFileExecute, deleteFileExecute } = createFileExecutors(deps);
   return {
     readFileTool: tool({ description: readFileDescription, inputSchema: readFileSchema, execute: readFileExecute }),
     writeFileTool: tool({ description: writeFileDescription, inputSchema: writeFileSchema, execute: writeFileExecute }),
     editFileTool: tool({ description: editFileDescription, inputSchema: editFileSchema, execute: editFileExecute }),
+    deleteFileTool: tool({ description: deleteFileDescription, inputSchema: deleteFileSchema, execute: deleteFileExecute }),
   };
 }

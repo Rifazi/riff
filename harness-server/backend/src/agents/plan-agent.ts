@@ -20,6 +20,8 @@ import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
+import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
@@ -66,6 +68,9 @@ export async function runPlanAgentTurn(
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('plan');
+  const { delegateModel } = await getRoleModelConfig('coding');
+  const helperContext = stageHelperContext(session.id, 'plan');
+  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext });
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'plan');
@@ -124,6 +129,8 @@ export async function runPlanAgentTurn(
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 
+  if (researchDeps) systemPrompt += DELEGATE_NOTE;
+
   // What the human has already provided, so the agent reads it instead of
   // asking for it again (see sessions/reference-docs.ts).
   const referenceNote = await referenceDocsTurnNote(session, 'plan', isFirstTurn);
@@ -155,6 +162,7 @@ export async function runPlanAgentTurn(
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'plan')),
           readFileToolClaude,
+          ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
           createWritePlanToolClaude({
             sessionKey: session.sessionKey,
             sessionId: session.id,
@@ -168,7 +176,7 @@ export async function runPlanAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: TOOL_NAMES,
+      toolNames: researchDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
       model,
       resumeSessionId: session.claudeSessionIds.plan,
       prompt,
@@ -196,6 +204,7 @@ export async function runPlanAgentTurn(
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'plan')),
       read_file: readFileTool,
+      ...delegateToolEntry(researchDeps, session.histories.plan),
       write_plan_doc: createWritePlanTool({
         sessionKey: session.sessionKey,
         sessionId: session.id,
@@ -252,12 +261,14 @@ async function persistEvent(sessionId: string, event: AgentEvent, resultToolName
   } else if (event.type === 'tool_call') {
     await appendTranscriptEntry(sessionId, 'plan', {
       role: 'tool_call',
+      toolCallId: event.toolCallId,
       toolName: event.name,
       toolInput: event.input,
     });
   } else if (event.type === 'tool_result') {
     await appendTranscriptEntry(sessionId, 'plan', {
       role: 'tool_result',
+      toolCallId: event.toolCallId,
       toolName: resultToolName,
       toolResult: event.content,
       isError: event.isError,
