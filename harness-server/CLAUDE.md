@@ -205,8 +205,8 @@ below) — never inside the target repo.
    `/requirements/split/dismiss` or approving a doc clears the proposal. The
    when-to-split guidance lives mainly in the tool description, not just the
    base prompt, because a prompt override (e.g. customer-edi's) replaces the
-   base prompt wholesale. Dependencies are advisory only: each child still
-   branches off the app's base branch. Live-verified on a scratch server:
+   base prompt wholesale. Each child still branches off the app's base
+   branch; step 33 made the order and dependencies count. Live-verified on a scratch server:
    propose (incl. the ordering check), accept, dismiss, and the guards
    against a second accept and messages to a split parent. A real agent run
    of a child's kickoff has not been exercised.
@@ -881,6 +881,44 @@ below) — never inside the target repo.
    checks, a reviewer that didn't submit, resume, a second round and boot
    recovery; `frontend/tests/harness-server/qa-review-areas.test.ts` covers
    validation and the findings text. Not run with real agents yet.
+
+33. User asked for a split to be smart about build order, track what got
+   done, and let them go back to the original session to continue with the
+   smaller parts. `sessions/split-roadmap.ts` (pure, tested by
+   `frontend/tests/harness-server/split-roadmap.test.ts`) derives a roadmap
+   from the parent's `splitInto` + `splitProposal` and the children. It is
+   never stored, so it can't drift. Each part's status is `not-started`
+   (no requirements chat yet), `in-progress`, `shipped` (stage `done`),
+   `dropped` (abandoned) or `missing` (deleted). `blockedBy` lists its
+   unshipped dependencies, and `nextIndex` is the earliest unshipped part
+   with none. `split-roadmap-load.ts` loads it for the parent or any part:
+   - `GET /api/sessions/:id/roadmap`.
+   - A part's kickoff also attaches a progress note
+     (`roadmapProgressBrief`): every part's status in order, plus each
+     shipped part's outcome and acceptance criteria. The split-time brief
+     can't know what has shipped by the time the part starts.
+   - `plan/approve` answers 409 `dependencies_not_shipped` for a part whose
+     dependencies haven't shipped, since its branch would start without
+     their code. `{ ignoreDependencies: true }` overrides that, for when
+     the human merged the dependency by hand.
+
+   `propose_split` parts take a required `outcome` (what works once the
+   part ships). Its schema and the prompt now say how to order parts:
+   what other parts need first, then a thin end-to-end slice, riskiest
+   unknowns early, and `dependsOn` only for real needs.
+
+   UI: the parent's Requirements tab shows the roadmap (`ParentRoadmap` in
+   `SplitPanel.tsx`): progress bar, ordered parts with status, outcome,
+   what each is waiting on, delivery, and a "Continue: <next part>" button.
+   Every part shows `SplitPartStrip` under the stepper, with its place,
+   what it's waiting on, "Next part" once shipped, and the roadmap
+   expandable. The Plan tab disables Approve while dependencies are
+   unshipped and offers "Approve anyway". The sessions list shows "n of m
+   parts shipped" and "part n of m".
+
+   Verified on a scratch server copy: propose (incl. the ordering check),
+   accept, the roadmap, the 409, the progress note after a part shipped,
+   and approval once unblocked. Not run with real agents yet.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

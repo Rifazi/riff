@@ -20,6 +20,7 @@ import type {
   RoleModelConfig,
   SessionRecord,
   SettingsResponse,
+  SplitRoadmap,
   AppThemeState,
   ThemeApplyResult,
   ThemeAudit,
@@ -209,8 +210,14 @@ export const api = {
       body: JSON.stringify({ markdownBody }),
     }).then((r) => json<{ markdown: string }>(r)),
 
-  approvePlan: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/plan/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  /** `ignoreDependencies`: approve a split part whose foundations haven't shipped yet. */
+  approvePlan: (id: string, opts: { ignoreDependencies?: boolean } = {}) =>
+    fetch(apiUrl(`/api/sessions/${id}/plan/approve`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    }).then((r) => json<SessionRecord>(r)),
+  getRoadmap: (id: string) => fetch(apiUrl(`/api/sessions/${id}/roadmap`)).then((r) => json<SplitRoadmap>(r)),
 
   rejectPlan: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/plan/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),

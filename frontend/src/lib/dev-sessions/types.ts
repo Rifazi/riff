@@ -222,8 +222,36 @@ export interface SplitPart {
   title: string;
   sessionKey: string;
   brief: string;
+  /** What works once this part ships. Absent on older proposals. */
+  outcome?: string;
   /** Indexes of earlier parts in the same proposal. */
   dependsOn: number[];
+}
+
+/** GET /api/sessions/:id/roadmap — a split feature's build order and progress. */
+export type RoadmapPartStatus = 'not-started' | 'in-progress' | 'shipped' | 'dropped' | 'missing';
+
+export interface RoadmapPart {
+  index: number;
+  sessionId: string;
+  title: string;
+  sessionKey: string;
+  outcome: string | null;
+  stage: SessionStage | null;
+  status: RoadmapPartStatus;
+  dependsOn: number[];
+  /** Parts this one depends on that haven't shipped. */
+  blockedBy: number[];
+  branch: string | null;
+  delivery: SessionDelivery | null;
+}
+
+export interface SplitRoadmap {
+  parent: { sessionId: string; sessionKey: string; title: string; rationale: string | null };
+  parts: RoadmapPart[];
+  shipped: number;
+  /** The earliest unshipped part whose dependencies have all shipped. */
+  nextIndex: number | null;
 }
 
 export interface SplitProposal {

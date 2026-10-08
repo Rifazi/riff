@@ -31,6 +31,7 @@ export default function DevSessionsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { data: sessions, isLoading } = useQuery({ queryKey: ['sessions'], queryFn: () => api.listSessions() });
+  const sessionsById = new Map((sessions ?? []).map((s) => [s.id, s]));
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
   const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
   const noProviderConfigured = settings && !Object.values(settings.credentials).some((c) => c.hasKey);
@@ -136,6 +137,9 @@ export default function DevSessionsPage() {
           {!isLoading && sessions?.length === 0 && <EmptyState>No sessions yet — start one above or from a meeting.</EmptyState>}
           <div className="space-y-2">
             {sessions?.map((session) => {
+              const shipped = session.splitInto.filter((id) => sessionsById.get(id)?.stage === 'done').length;
+              const splitParent = session.splitFrom ? sessionsById.get(session.splitFrom.sessionId) : undefined;
+              const partIndex = splitParent ? splitParent.splitInto.indexOf(session.id) : -1;
               const busyReopen = reopenMutation.isPending && reopenMutation.variables === session.id;
               const busyDelete = deleteMutation.isPending && deleteMutation.variables === session.id;
               return (
@@ -153,6 +157,13 @@ export default function DevSessionsPage() {
                         <Badge variant="secondary" className="gap-1" title={`Split from "${session.splitFrom.title}"`}>
                           <GitFork className="w-3 h-3" />
                           {session.splitFrom.sessionKey}
+                          {partIndex >= 0 && ` · part ${partIndex + 1} of ${splitParent!.splitInto.length}`}
+                        </Badge>
+                      )}
+                      {session.splitInto.length > 0 && (
+                        <Badge variant={shipped === session.splitInto.length ? 'success' : 'secondary'} className="gap-1">
+                          <GitFork className="w-3 h-3" />
+                          {shipped} of {session.splitInto.length} parts shipped
                         </Badge>
                       )}
                       {session.sourceMeeting && (

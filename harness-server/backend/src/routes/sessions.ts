@@ -10,6 +10,7 @@ import { isSessionKeyInUse } from '../sessions/session-keys.js';
 import { cleanupTeamWorktrees } from '../agents/team/coding-team.js';
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { listApps } from '../apps/apps-store.js';
+import { loadSplitRoadmap } from '../sessions/split-roadmap-load.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
   removeMeetingSource,
@@ -83,6 +84,16 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     return withAppName(session);
+  });
+
+  // A split feature's build order and progress, for the parent or any of
+  // its parts (sessions/split-roadmap.ts). 404 for a session in no split.
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/roadmap', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    const roadmap = await loadSplitRoadmap(session);
+    if (!roadmap) return reply.code(404).send({ error: 'this session is not part of a split' });
+    return roadmap;
   });
 
   // Human-only, permanent. Removes this project's own records for the

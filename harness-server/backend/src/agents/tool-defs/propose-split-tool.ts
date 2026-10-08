@@ -19,6 +19,12 @@ export const proposeSplitSchema = z.object({
               'from ONLY this brief (plus the original meeting transcript, if any) — it never sees this conversation, ' +
               'so restate anything it needs.'
           ),
+        outcome: z
+          .string()
+          .describe(
+            'One sentence: what a user can do once this part ships, e.g. "Buyers can download the inventory report as CSV". ' +
+              'Shown on the roadmap the human tracks progress on, and told to later parts so they build on it.'
+          ),
         dependsOn: z
           .array(z.number().int().min(0))
           .describe('Zero-based indexes of EARLIER parts in this list that must be built first. Empty if independent.'),
@@ -26,7 +32,12 @@ export const proposeSplitSchema = z.object({
     )
     .min(2)
     .max(8)
-    .describe('The slices, in build order — foundations first.'),
+    .describe(
+      'The slices, in the order to build them. Put first what other parts need (data model, shared integration), then the ' +
+        'part that gets something usable in front of users soonest; make the first part a thin end-to-end slice that ' +
+        'works on its own. Riskiest unknowns early. Only list a dependsOn when the part truly needs that code, so ' +
+        'independent parts can proceed side by side.'
+    ),
 });
 
 export const proposeSplitDescription =
@@ -36,8 +47,10 @@ export const proposeSplitDescription =
   'that would need more than roughly 10-12 acceptance criteria spanning unrelated areas, or more than one reviewable ' +
   'branch. Do NOT split a feature that is merely detailed, or cut by layer (e.g. "backend" / "frontend") when each ' +
   'half is useless alone — slice by user-visible outcome. Ask enough questions first to know where the seams are, ' +
-  'then call this INSTEAD of write_requirements_doc. This only records a proposal: the human accepts it (which ' +
-  'creates the sessions) or keeps the feature as one in the UI, so after calling it end your turn with no further text.';
+  'then call this INSTEAD of write_requirements_doc. The order you give is the build order the human follows: a part ' +
+  "can't start coding until the parts it depends on have shipped, and each part is told what the earlier ones delivered. " +
+  'This only records a proposal: the human accepts it (which creates the sessions) or keeps the feature as one in the ' +
+  'UI, so after calling it end your turn with no further text.';
 
 /**
  * The agent can only propose a split — creating the child sessions is the
@@ -67,7 +80,13 @@ export function createProposeSplitExecute(sessionInfo: { sessionId: string; sess
       let key = `${sessionInfo.sessionKey}-${slugify(part.title).slice(0, 30) || i + 1}`.replace(/-+$/, '');
       while (usedKeys.has(key)) key = `${key}-${i + 1}`;
       usedKeys.add(key);
-      return { title: part.title.trim(), sessionKey: key, brief: part.brief.trim(), dependsOn: [...new Set(part.dependsOn)] };
+      return {
+        title: part.title.trim(),
+        sessionKey: key,
+        brief: part.brief.trim(),
+        outcome: part.outcome.trim(),
+        dependsOn: [...new Set(part.dependsOn)],
+      };
     });
 
     await updateSession(sessionInfo.sessionId, {

@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { ErrorText, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import { StageStepper } from '@/components/DevSessions/StageStepper';
 import { SessionReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
+import { SplitPartStrip } from '@/components/DevSessions/SplitPanel';
 import { RequirementsStage } from '@/components/DevSessions/stages/RequirementsStage';
 import { PlanStage } from '@/components/DevSessions/stages/PlanStage';
 import { CodingStage } from '@/components/DevSessions/stages/CodingStage';
@@ -106,6 +107,11 @@ function SessionView() {
       <div className="flex-shrink-0 mb-3">
         <StageStepper session={session} current={stage} />
       </div>
+      {session.splitFrom && (
+        <div className="flex-shrink-0 mb-3">
+          <SplitPartStrip session={session} />
+        </div>
+      )}
       <Stage key={`${session.id}-${stage}`} session={session} />
     </PageShell>
   );

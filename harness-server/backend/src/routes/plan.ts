@@ -6,6 +6,7 @@ import { startEventStream } from './sse.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
+import { loadSplitRoadmap } from '../sessions/split-roadmap-load.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
@@ -129,11 +130,29 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Human-only approval gate. No agent tool can reach this.
-  app.post<{ Params: { id: string } }>('/api/sessions/:id/plan/approve', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { ignoreDependencies?: boolean } }>('/api/sessions/:id/plan/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     if (!session.planPath) {
       return reply.code(400).send({ error: 'no plan document has been written yet' });
+    }
+
+    // A part of a split feature branches off the base branch, so code from
+    // a part it builds on is only there once that part has shipped. The
+    // human can still go ahead (e.g. they merged it by hand).
+    if (!request.body?.ignoreDependencies && !session.branch) {
+      const roadmap = await loadSplitRoadmap(session);
+      const self = roadmap?.parts.find((p) => p.sessionId === session.id);
+      if (roadmap && self && self.blockedBy.length > 0) {
+        const waiting = self.blockedBy.map((i) => roadmap.parts[i]);
+        return reply.code(409).send({
+          error:
+            `This part builds on ${waiting.map((p) => `"${p.title}"`).join(', ')}, which ${waiting.length > 1 ? "haven't" : "hasn't"} ` +
+            'shipped yet, so coding would start without that code.',
+          code: 'dependencies_not_shipped',
+          blockedBy: waiting.map((p) => ({ sessionId: p.sessionId, title: p.title, sessionKey: p.sessionKey })),
+        });
+      }
     }
 
     const filePath = path.join(config.harnessRoot, session.planPath);

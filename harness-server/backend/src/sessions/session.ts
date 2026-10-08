@@ -15,7 +15,8 @@ export type SessionStage =
   | 'abandoned'
   // Terminal: the requirements agent judged this feature too big for one
   // pass, the human accepted its proposal, and the work now lives in the
-  // child sessions listed in splitInto.
+  // child sessions listed in splitInto. The parent stays the place to track
+  // them (sessions/split-roadmap.ts).
   | 'split';
 
 export type TranscriptRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
@@ -89,6 +90,9 @@ export interface SplitPart {
   // Self-contained markdown handed to the child session's requirements
   // agent as its starting point — it never sees the parent's conversation.
   brief: string;
+  // What works once this part ships — shown on the roadmap. Absent on
+  // proposals made before it existed.
+  outcome?: string;
   // Indexes into the same parts array — each only ever points at an
   // earlier part, so the order is also a valid build order.
   dependsOn: number[];

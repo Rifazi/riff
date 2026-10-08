@@ -14,6 +14,7 @@ import { wantsWebAccess } from '../agents/tool-defs/fetch-url-tool.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import { copyMeetingSource, readMeetingSourceAttachment } from '../sessions/meeting-source.js';
 import { copyReferenceDocs } from '../sessions/reference-docs.js';
+import { loadProgressBrief } from '../sessions/split-roadmap-load.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 
 export async function registerRequirementsRoutes(app: FastifyInstance): Promise<void> {
@@ -69,6 +70,10 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
       // had one (the child's own meeting kickoff is folded into this one).
       if (session.splitKickoffPending && session.splitBrief) {
         const kickoff = [{ name: `split-brief-${session.sessionKey}.md`, text: session.splitBrief }];
+        // The brief is from split time; parts are often started much later,
+        // after earlier ones shipped — say what exists now.
+        const progress = await loadProgressBrief(session).catch(() => null);
+        if (progress) kickoff.push({ name: `split-progress-${session.sessionKey}.md`, text: progress });
         if (session.sourceMeeting) {
           try {
             kickoff.push(await readMeetingSourceAttachment(session.sourceMeeting));
@@ -333,15 +338,15 @@ function buildSplitBrief(
   const dependsOn = part.dependsOn.length
     ? `\n\nThis part builds on ${part.dependsOn.map((d) => `"${proposal.parts[d].title}" (${keys[d]})`).join(', ')}, ` +
       (many
-        ? 'each its own session — assume they exist, but keep their scope out of this doc.'
-        : 'which is its own session — assume it exists, but keep its scope out of this doc.')
+        ? 'each its own session that ships before this one is coded — assume they exist, but keep their scope out of this doc.'
+        : 'which is its own session that ships before this one is coded — assume it exists, but keep its scope out of this doc.')
     : '';
   return [
     `# Split from "${parent.title}" (${parent.sessionKey})`,
     `The original request was judged too big for one requirements doc and split into ${proposal.parts.length} sessions. ` +
       `Why: ${proposal.rationale}`,
     `## All parts\n\n${others}`,
-    `## This part: ${part.title}\n\n${part.brief}${dependsOn}`,
+    `## This part: ${part.title}\n\n${part.outcome ? `When it ships: ${part.outcome}\n\n` : ''}${part.brief}${dependsOn}`,
     parentDoc
       ? `## The parent's draft requirements (for context — only this part's slice belongs in your doc)\n\n${parentDoc}`
       : null,

@@ -18,6 +18,7 @@ import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
+import { useUnshippedDependencies } from '../SplitPanel';
 
 const AGENT = AGENT_PERSONAS.plan;
 
@@ -108,8 +109,9 @@ export function PlanStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['plan-doc', sessionId] });
   };
 
+  const waitingOn = useUnshippedDependencies(session);
   const approveMutation = useMutation({
-    mutationFn: () => api.approvePlan(sessionId),
+    mutationFn: (ignoreDependencies: boolean) => api.approvePlan(sessionId, { ignoreDependencies }),
     onSuccess: () => {
       refresh();
       router.push(sessionHref(sessionId, 'coding'));
@@ -186,6 +188,7 @@ export function PlanStage({ session }: { session: SessionRecord }) {
 
   const entries = streaming ? [...session.transcripts.plan, ...overlay] : session.transcripts.plan;
   const isApproved = session.planStatus === 'approved';
+  const blockedByParts = waitingOn.length > 0 && !isApproved && !session.branch;
   const codingStarted = Boolean(session.branch);
   const reopenedHere = codingStarted && stageGroupFor(session) === 'plan';
   const canEdit = Boolean(session.planPath) && (!codingStarted || reopenedHere) && !streaming;
@@ -237,6 +240,25 @@ export function PlanStage({ session }: { session: SessionRecord }) {
           }
           notices={
             <>
+              {blockedByParts && (
+                <Notice tone="amber">
+                  <div>
+                    This part builds on {waitingOn.map((p) => `"${p.title}"`).join(', ')}, which{' '}
+                    {waitingOn.length > 1 ? "haven't" : "hasn't"} shipped yet. Coding branches off the base branch, so
+                    it wouldn&apos;t have that code. Finish the earlier part first, or approve anyway if you merged it
+                    yourself.
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 bg-card"
+                    disabled={isApproved || !session.planPath || streaming || isEditing || approveMutation.isPending}
+                    onClick={() => approveMutation.mutate(true)}
+                  >
+                    Approve anyway
+                  </Button>
+                </Notice>
+              )}
               {reopenedHere && (
                 <Notice tone="amber">
                   Reopened mid-coding — branch <code>{session.branch}</code> has existing work. Re-approving resumes the
@@ -267,14 +289,17 @@ export function PlanStage({ session }: { session: SessionRecord }) {
             <>
               <ApprovalBar
                 approveLabel={isApproved ? 'Approved' : 'Approve plan'}
-                onApprove={() => approveMutation.mutate()}
-                approveDisabled={isApproved || !session.planPath || streaming || isEditing}
-                approveDisabledReason={!session.planPath ? 'No plan written yet' : undefined}
+                onApprove={() => approveMutation.mutate(false)}
+                approveDisabled={isApproved || !session.planPath || streaming || isEditing || blockedByParts}
+                approveDisabledReason={
+                  !session.planPath ? 'No plan written yet' : blockedByParts ? 'Waiting on an earlier part' : undefined
+                }
                 busy={approveMutation.isPending}
                 onReject={() => rejectMutation.mutate()}
                 rejectDisabled={isApproved || streaming}
                 rejectBusy={rejectMutation.isPending}
               />
+              <ErrorText>{approveMutation.isError ? (approveMutation.error as Error).message : null}</ErrorText>
               {isApproved && doc && <JiraTickets sessionId={sessionId} doc={doc} />}
             </>
           }
