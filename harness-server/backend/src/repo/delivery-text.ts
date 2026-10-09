@@ -114,7 +114,7 @@ export async function buildDeliveryText(session: SessionRecord, repoRoot: string
   }
 
   return {
-    title: `${session.sessionKey}: ${session.title}`,
+    title: session.ticket ? `${session.ticket}: ${session.title}` : session.title,
     description: sections.join('\n\n').slice(0, 60_000),
     summary: (firstParagraph(summary) || session.title).replace(/\s+/g, ' ').trim(),
   };

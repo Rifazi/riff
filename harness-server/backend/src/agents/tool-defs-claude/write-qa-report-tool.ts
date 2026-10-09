@@ -4,6 +4,7 @@ import { wrapForClaudeSdk } from './wrap.js';
 
 export function createWriteQaReportToolClaude(sessionInfo: {
   sessionKey: string;
+  ticket?: string | null;
   sessionId: string;
   branch: string;
   requirementsPath: string;

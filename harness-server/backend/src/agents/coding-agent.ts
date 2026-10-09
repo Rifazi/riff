@@ -39,9 +39,16 @@ import { createGitTools } from './tool-defs/git-tools.js';
 import { createGenerateTools } from './tool-defs/generate-tools.js';
 import { createWriteCodingPlanTool } from './tool-defs/coding-plan-tool.js';
 import { createAssignTeamTool } from './tool-defs/assign-team-tool.js';
+import {
+  createBuildSoloTool,
+  createTeamLeadTools,
+  TEAM_LEAD_TOOL_NAMES,
+  teamDecisionGuard,
+} from './tool-defs/team-lead-tools.js';
 import { createQaTools } from './tool-defs/qa-tools.js';
 import { createRunPrettierTool } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
+import { createNoteForQaTool } from './tool-defs/qa-notes-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
 import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js';
@@ -50,9 +57,11 @@ import { createGitToolsClaude } from './tool-defs-claude/git-tools.js';
 import { createGenerateToolsClaude } from './tool-defs-claude/generate-tools.js';
 import { createWriteCodingPlanToolClaude } from './tool-defs-claude/coding-plan-tool.js';
 import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.js';
+import { createBuildSoloToolClaude, createTeamLeadToolsClaude } from './tool-defs-claude/team-lead-tools.js';
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
+import { createNoteForQaToolClaude } from './tool-defs-claude/qa-notes-tool.js';
 import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
@@ -81,6 +90,7 @@ const TOOL_NAMES = [
   'run_checked_command',
   'run_prettier',
   'run_npm_install',
+  'note_for_qa',
 ];
 
 // Jack decides whether work runs as a team (tool-defs/assign-team-tool.ts
@@ -90,7 +100,8 @@ const QA_FIX_TEAM_NOTE =
   'You are the lead. Before fixing anything, decide whether these fixes can be split across a coding team: if ' +
   'they fall into two or more groups that write disjoint files and are each a meaningful chunk, call assign_team ' +
   'with a step per fix (or group of related fixes), each with a brief the engineer can act on alone, then end your ' +
-  'turn. Otherwise fix them yourself as usual.';
+  'turn; you review and merge each engineer\'s branch as it finishes. Otherwise call build_solo with a one-line ' +
+  'reason and fix them yourself as usual. Your write tools stay locked until you decide.';
 
 const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
   `A lighter model (${lightModel}) worked on the step "${stepTitle}" just now but didn't finish it cleanly. ` +
@@ -123,6 +134,9 @@ export interface CodingTurnOptions {
   stepTurn?: boolean;
   // Relays a QA send-back — always a fresh conversation.
   qaFix?: boolean;
+  // Sent by the team runner (team/coding-team.ts): workstreams finished or
+  // failed and the lead reviews, merges or sends them back mid-run.
+  teamLeadTurn?: boolean;
 }
 
 export async function runCodingAgentTurn(
@@ -135,11 +149,20 @@ export async function runCodingAgentTurn(
   const app = await getApp(session.appId);
   const roleConfig = await getRoleModelConfig('coding');
   const localTeamModel = roleConfig.localTeamModel?.trim() || null;
+  // The kickoff and a QA fix are where the lead decides whether the work
+  // splits across a team; its write tools stay locked until it says which
+  // (assign_team or build_solo), so the question can't be skipped.
+  const kickoff =
+    session.transcripts.coding.length === 0 && !session.branch && !session.codingTeam && session.codingTeamHistory.length === 0;
+  if (!options.teamLeadTurn && (kickoff || options.qaFix)) {
+    await updateSession(session.id, { teamDecisionPending: true });
+    session.teamDecisionPending = true;
+  }
   // When localTeamModel is configured, automatic solo step turns run on the
   // local Ollama model instead of the cloud coding model (saving cloud tokens).
   // QA fixes and human follow-ups always use the cloud model regardless.
   const usingLocalSolo = Boolean(
-    options.stepTurn && !options.qaFix && !session.codingReconciliationPending && localTeamModel
+    options.stepTurn && !options.qaFix && !session.codingReconciliationPending && !session.teamDecisionPending && localTeamModel
   );
   const provider = usingLocalSolo ? 'ollama' : roleConfig.provider;
   const model = usingLocalSolo ? localTeamModel! : roleConfig.model;
@@ -268,6 +291,14 @@ export async function runCodingAgentTurn(
     await updateSession(session.id, { branch: branchName, stage: 'coding-in-progress' });
   };
 
+  // The lead's team tools (tool-defs/team-lead-tools.ts): tracking, review
+  // and merging of the engineers' branches whenever a team round exists,
+  // and build_solo while the split decision is pending.
+  const guard = teamDecisionGuard(session.id);
+  const leadDeps = { sessionId: session.id, repoRoot: app.repoRoot };
+  const withLeadTools = Boolean(session.codingTeam);
+  const withBuildSolo = Boolean(session.teamDecisionPending);
+
   // This conversation's activity, for a handoff if it's compacted mid-turn.
   const contextLog = new ContextLog([
     ...entriesSince((await getSession(session.id))?.transcripts.coding ?? [], contextStartEntryId),
@@ -370,7 +401,8 @@ export async function runCodingAgentTurn(
 
   const latest = await getSession(session.id);
   if (!latest) throw new Error(`Session ${session.id} not found`);
-  if (latest.branch && latest.stage === 'coding-in-progress') {
+  // Mid-run, the team runner owns the stage.
+  if (latest.branch && latest.stage === 'coding-in-progress' && !options.teamLeadTurn) {
     return updateSession(session.id, { stage: 'coding-review' });
   }
   return latest;
@@ -386,11 +418,13 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
         readMemo,
+        guard,
       });
       const { gitCreateBranchTool, gitCommitTool } = createGitToolsClaude({
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         onBranchCreated,
+        guard,
       });
       const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({
         repoRoot: app.repoRoot,
@@ -422,9 +456,12 @@ export async function runCodingAgentTurn(
             runGenerateOpenApiToolClaude,
             createWriteCodingPlanToolClaude(session.id),
             createAssignTeamToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, kind: teamKind }),
+            ...(withLeadTools ? createTeamLeadToolsClaude(leadDeps) : []),
+            ...(withBuildSolo ? [createBuildSoloToolClaude(leadDeps)] : []),
             runCheckedCommandToolClaude,
             createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
+            createNoteForQaToolClaude({ sessionId: session.id, from: null }),
             ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
           ],
         });
@@ -436,7 +473,12 @@ export async function runCodingAgentTurn(
       } = await runClaudeAgentTurn({
         systemPrompt,
         createMcpServer,
-        toolNames: delegateDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
+        toolNames: [
+          ...TOOL_NAMES,
+          ...(withLeadTools ? TEAM_LEAD_TOOL_NAMES : []),
+          ...(withBuildSolo ? ['build_solo'] : []),
+          ...(delegateDeps ? ['delegate'] : []),
+        ],
         model: turnModel,
         resumeSessionId: session.claudeSessionIds.coding,
         prompt: turnPrompt,
@@ -463,11 +505,13 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
         readMemo,
+        guard,
       });
       const { gitCreateBranchTool, gitCommitTool } = createGitTools({
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         onBranchCreated,
+        guard,
       });
       const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
       const { runCheckedCommandTool } = createQaTools({
@@ -494,9 +538,15 @@ export async function runCodingAgentTurn(
         run_generate_openapi: runGenerateOpenApiTool,
         write_coding_plan: createWriteCodingPlanTool(session.id),
         assign_team: createAssignTeamTool({ sessionId: session.id, repoRoot: app.repoRoot, kind: teamKind }),
+        // Always registered here, unlike the Claude engine: a replayed
+        // history that called one must still find it (they refuse when
+        // there's no team or no pending decision).
+        ...createTeamLeadTools(leadDeps),
+        build_solo: createBuildSoloTool(leadDeps),
         run_checked_command: runCheckedCommandTool,
         run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
+        note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
         ...delegateToolEntry(delegateDeps, session.histories.coding),
       };
 
@@ -556,10 +606,13 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
     text +=
       `\n\n# First: build it yourself, or split it across a team?\n\nYou are the lead engineer. Before writing ` +
       `any code, decide whether this plan can be built by a team of engineers in parallel (assign_team says when ` +
-      `that's worth it and how to split); read the whole plan with read_doc({ path: "${SESSION_PLAN_DOC}" }) to see ` +
-      `which files each step writes. If it can, call assign_team with no new steps and workstreams covering ` +
-      `every step below, then end your turn: the team builds it and you take follow-ups once their work is merged. ` +
-      `If it can't, build it yourself as below.` +
+      `that's worth it and how to split). Read the whole plan with read_doc({ path: "${SESSION_PLAN_DOC}" }) and ` +
+      `note which files each step writes: steps that write disjoint files and don't need each other's code can run ` +
+      `at the same time. If the plan splits, call assign_team with no new steps and workstreams covering every step ` +
+      `below, then end your turn. You then own the engineers' branches: you review each one as it finishes and ` +
+      `merge it into the session branch, send it back with feedback, or take its steps back. If it doesn't split, ` +
+      `call build_solo with a one-line reason and build it yourself as below. Your write tools stay locked until ` +
+      `you've called one of the two.` +
       `\n\n# Seed for write_coding_plan\n\nWhen you build it yourself, your first tool calls are git_create_branch, ` +
       `then write_coding_plan with replace: true and exactly these steps (same id and title, do not invent your own) — all ` +
       `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
@@ -579,23 +632,28 @@ function teamSection(session: SessionRecord): string {
   const members = team.members
     .map(
       (m) =>
-        `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; steps ${m.stepIds.join(', ')}; owned ${m.ownedPaths.join(', ')}`,
+        `- ${m.title} (${m.id}): ${m.status}${m.note ? ` — ${m.note}` : ''}; ${m.branch && m.status !== 'merged' && m.status !== 'dropped' ? `branch ${m.branch}; ` : ''}steps ${m.stepIds.join(', ')}; owned ${m.ownedPaths.join(', ')}`,
     )
     .join('\n');
   const what = team.kind === 'qa-fix' ? "QA's findings" : team.kind === 'plan' ? 'the plan' : 'the work you split';
   const where = session.branch ? `on branch "${session.branch}", which is checked out` : 'on the session branch';
+  const neverStarted = team.status === 'assigned' && !team.members.some((m) => m.branch);
   const state =
     team.status === 'done'
-      ? `A team of engineers you assigned built ${what} in parallel, and all of their work is merged ${where}.`
-      : team.status === 'assigned'
+      ? `A team of engineers you assigned built ${what} in parallel, and you merged or took back every workstream ${where}.`
+      : neverStarted
         ? `You split ${what} across a team; it hasn't started yet. Calling assign_team again replaces that split.`
-        : `A team of engineers you assigned worked on ${what}, but not everything merged (see below) — their merged ` +
-          `work is ${where}. The human can resume the team, or you can finish what's left yourself.`;
+        : team.status === 'running' || team.status === 'assigned'
+          ? `A team of engineers you assigned is building ${what}; you merge their branches ${where} as they finish.`
+          : `A team of engineers you assigned worked on ${what}, but not every workstream is merged (see below). ` +
+            `Their merged work is ${where}. Use team_status and review_workstream to see where each branch is, then ` +
+            `merge, send back or drop what's open — or finish what's left yourself.`;
   return (
-    `\n\n# The coding team (round ${team.round})\n\nYou are the lead engineer. ${state} Do NOT call git_create_branch. ` +
-    `Review what's there before changing it, handle the human's requests on this branch, and keep the checklist ` +
-    `accurate with write_coding_plan. If new work splits cleanly across engineers again, assign_team runs another ` +
-    `round.\n\nTeam members:\n${members}\n\nChecklist:\n${checklist}`
+    `\n\n# The coding team (round ${team.round})\n\nYou are the lead engineer, and you are responsible for the ` +
+    `engineers' branches until each one is merged or dropped. ${state} Do NOT call git_create_branch. Review ` +
+    `what's there before changing it, handle the human's requests on this branch, and keep the checklist accurate ` +
+    `with write_coding_plan. If new work splits cleanly across engineers again, assign_team runs another round.` +
+    `\n\nTeam members:\n${members}\n\nChecklist:\n${checklist}`
   );
 }
 
@@ -651,19 +709,16 @@ function currentStepId(session: SessionRecord): string | null {
 }
 
 export function suggestedBranchName(session: SessionRecord): string {
-  const key = session.sessionKey.trim();
-  // A ticket-style key (e.g. "API-1234", "JIRA-42") has uppercase letters or
-  // uppercase+digits separated by a hyphen. When the key is just a kebab-slug
-  // of the title (no-ticket path), appending the title slug again would
-  // double it, so we use the key alone in that case.
-  const isTicketKey = /[A-Z]/.test(key);
-  if (!isTicketKey) return key;
+  // With no ticket the key is already a kebab-slug of the title, so it's
+  // the branch name on its own.
+  const ticket = session.ticket?.trim();
+  if (!ticket) return session.sessionKey;
   const titleSlug = session.title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 40);
-  return `${key.replace(/\s+/g, '_')}_${titleSlug}`;
+  return `${ticket.replace(/\s+/g, '_')}_${titleSlug}`;
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {

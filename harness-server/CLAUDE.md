@@ -920,6 +920,120 @@ below) — never inside the target repo.
    accept, the roadmap, the 409, the progress note after a part shipped,
    and approval once unblocked. Not run with real agents yet.
 
+34. User said the coding work didn't split up correctly, and asked for Jack
+   to decide what can be parallelized and to own the branches and merge
+   them. In session `9bdaa858` Jack never considered splitting and built 8
+   steps alone. In `6d214de9` an engineer hit the Claude usage limit, was
+   reported as "finished without committing anything", and its dependent was
+   blocked with nobody deciding anything. **Supersedes step 10/26's
+   auto-merge.**
+   - **The decision is enforced**: a coding kickoff (first coding turn, no
+     branch, no team ever) or a QA-fix turn sets `session.teamDecisionPending`.
+     While it's set, `write_file`/`edit_file`/`delete_file`/`git_create_branch`/
+     `git_commit` refuse (`guard` on `FileToolDeps`/`GitToolDeps`,
+     `teamDecisionGuard`) until Jack calls `assign_team` or the new
+     `build_solo({ reason })`. A pending decision is never run on the local solo
+     model.
+   - **The runner only builds** (`team/coding-team.ts`): a finished workstream
+     is cleaned and committed as before and becomes `ready` (new status) on its
+     branch. Nothing is merged automatically. A run that ends in an error (`done`
+     with `isError`, e.g. a usage limit) still has its work committed and fails
+     with the real reason. Each ready or failed member queues a **lead turn**:
+     `runCodingAgentTurn(..., { teamLeadTurn: true })` with
+     `leadReviewMessage` (`team/lead-core.ts`, pure, tested by
+     `frontend/tests/harness-server/coding-team-lead.test.ts`). Lead turns run
+     one at a time and batch whatever finished meanwhile, while the other
+     engineers keep building. A workstream starts only once Jack has **merged**
+     its dependencies (`startable`), so `ready` isn't enough. His merge or
+     send-back wakes the scheduler mid-turn (`wakeTeam` in `team/team-state.ts`).
+     A branch left undecided gets one reminder turn. A lead turn that errors
+     stops further lead turns for the run. At the end, waiting members become
+     `blocked`, and the round is `done` only if every member is `merged` or
+     `dropped` (new status). A done round gets a wrap-up lead turn
+     (`leadWrapUpMessage`): lint/tests on the merged branch, cross-workstream
+     fixes, and the steps he took back.
+   - **Jack's tools** (`tool-defs/team-lead-tools.ts`, registered whenever a
+     team round exists; always on the AI-SDK engine so replays stay valid):
+     `team_status`, `review_workstream` (commits, stat and 1-context diff
+     against the session branch, `path` for one file in full, a failed one's
+     uncommitted files), `merge_workstream` (ready or failed; `--no-ff` under
+     the repo lock, then the worktree and branch are removed and its steps are
+     done; a failed merge restores the status and says why),
+     `send_back_workstream` (`feedback` is one-shot in the member's next run
+     prompt; a failed one restarts from a handoff; `MAX_SEND_BACKS` = 3) and
+     `drop_workstreams` (its dependents must be dropped too; the branch is
+     deleted and its steps go back to pending for Jack). Outside a run, a merge
+     or send-back that leaves startable work re-queues the round (`assigned`
+     with a new `startedAt`; `useTeamBoard` keys auto-start by round +
+     `startedAt`), and unblocks dependents whose dependencies are now merged.
+   - `assign_team` refuses to start a new round while the current one has
+     waiting/running/ready/merging members, so no branch is orphaned.
+   - UI: "Awaiting review" and "Taken back" statuses. Lead turns stream as
+     `team_member_event` with memberId `lead` plus `team_lead { active }`. The
+     board switches to Jack's chat while he reviews, and refetches on his text
+     and on state-changing tool results.
+   Verified on a scratch repo with stub engineers and a stub Jack driving the
+   real runner and tools: a send-back and rebuild with feedback, a dependent
+   that started only after the merge (branched off it), a usage-limit failure
+   dropped, the wrap-up, the reminder → `needs_attention` → out-of-run merge
+   that re-queues the round, the `assign_team` refusal, and the write lock.
+   Not run with real agents yet.
+
+35. User asked to create several requirements under one ticket number, not
+   treating it as an id. `SessionRecord.ticket` is now its own field (not
+   unique; null when none given), and `sessionKey` stays the unique key that
+   names a session's docs. `POST /api/sessions` takes `ticket` and never 409s:
+   `uniqueSessionKey` (`sessions/session-keys.ts`) tries the bare ticket, then
+   `<ticket>-<title slug>`, then a counter. The ticket drives the branch name,
+   PR title, docs' `ticket:` frontmatter and the Jira epic lookup (which now
+   refuses without one). Split parts inherit the parent's ticket. Older
+   sessions get `ticket` from an uppercase key in `normalizeSession`.
+
+36. User asked to be able to restart a team member (engineer or QA reviewer)
+   that stops for whatever reason. Before, a failed member only ran again by
+   resuming the whole team once the round had ended, and a hung one couldn't
+   be stopped at all.
+   - `POST /api/sessions/:id/{coding,qa}/team/members/:memberId/restart`
+     calls the live run's handler (`onMemberRestart` / `restartLiveMember` in
+     `agents/team/team-state.ts`). A **running** member's run is aborted. Its
+     checkout is left as it is, with no hand-off to the lead, and it goes back
+     to `waiting` with a cleared conversation. A **failed** one is reset the
+     same way at once. The scheduler then starts it again. A restarted
+     engineer continues from a handoff, and `RunWorkstreamParams.restarted`
+     words it as "stopped and restarted", not "ran out of steps". A
+     restarted reviewer starts its review over. `{ live: false }` means no
+     run is going in this process, so the UI resumes the team instead, which
+     reruns every unfinished member. Once a round's loop has ended, the
+     handler refuses with `ROUND_FINISHING`.
+   - Abort: `abortSignal` on `runAgentTurn` and `runClaudeAgentTurn`. The
+     Claude engine passes an `abortController` to `query()`, and neither
+     engine starts another continuation hop after an abort. The member agents
+     drop events and skip their history/session writes once aborted, so a
+     late finish can't overwrite the reset. The runners race the run against
+     `untilAborted`, so a hung tool call can't block the restart.
+   - The QA runner no longer waits on a fixed `Promise.all`. It waits until
+     nothing is in flight (and the checks are done), because a restart adds
+     a new run mid-round.
+   - UI: "Stop & restart" next to a working member's status, and "Restart
+     <name>" under a failed member's note, which replaces the old "Retry this
+     engineer/reviewer" (that resumed the whole team). These come from
+     `useTeamBoard().restartMember`.
+   Typechecked only. Not yet run against real agents.
+37. User asked for the coding agent's notes to reach QA when "Approve diff
+   and start QA" is clicked. The coding agent and every team engineer have
+   `note_for_qa` (`agents/tool-defs/qa-notes-tool.ts`): notes QA can't
+   work out from the requirements and diff (deliberate deviations, known
+   gaps, setup, areas to scrutinise), appended to `session.qaNotes` with
+   `from` (null = the coding agent, else the workstream's title);
+   `replace: true` rewrites that author's pending notes. `coding/approve`
+   moves them to `qaHandoffNotes` and empties `qaNotes`, so each coding
+   round hands over only its own. `qaHandoffSection` adds them to the QA
+   lead's first-turn system prompt (a rerun's fresh conversation included)
+   and to every QA reviewer's. UI: `components/DevSessions/QaNotes.tsx`,
+   above the approve bar on the Coding tab (pending) and above the chat on
+   the QA tab (handed over). Typechecked only; the test
+   (`frontend/tests/harness-server/qa-notes.test.ts`) hasn't been run.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

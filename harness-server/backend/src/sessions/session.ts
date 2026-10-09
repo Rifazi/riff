@@ -138,7 +138,10 @@ export interface Workstream {
   dependsOn: string[];
 }
 
-export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
+// "ready" = built and committed on its branch, waiting for the lead to
+// review and merge it (or send it back). "dropped" = the lead took its
+// steps back to build them itself (drop_workstreams).
+export type TeamMemberStatus = 'waiting' | 'running' | 'ready' | 'merging' | 'merged' | 'failed' | 'blocked' | 'dropped';
 
 export interface CodingTeamMember extends Workstream {
   branch: string;
@@ -156,6 +159,19 @@ export interface CodingTeamMember extends Workstream {
   // When set, this member runs on Ollama with this model ID rather than the
   // coding role's configured provider/model (see settings.ts localTeamModel).
   localModel?: string | null;
+  // The lead's notes from send_back_workstream, for its next run; cleared
+  // once that run starts. sendBacks counts them (capped, team-lead-tools.ts).
+  feedback?: string | null;
+  sendBacks?: number;
+}
+
+// Something the coding agent (from = null) or a team engineer (from = its
+// workstream's title) left for QA with note_for_qa.
+export interface QaNote {
+  id: string;
+  from: string | null;
+  text: string;
+  at: string;
 }
 
 export interface CodingContext {
@@ -173,7 +189,9 @@ export type CodingTeamKind = 'plan' | 'qa-fix' | 'follow-up';
 
 export interface CodingTeamState {
   // "assigned" = the lead has split the work and the team hasn't started
-  // (the Coding tab starts it once the lead's turn ends). "interrupted" =
+  // (the Coding tab starts it once the lead's turn ends) — or, after the
+  // lead merged or sent back a branch outside a run, has more to do; the
+  // tab starts it again when startedAt changes. "interrupted" =
   // the server stopped mid-run (set at boot); the run endpoint resumes
   // every member that hasn't merged yet.
   status: 'assigned' | 'running' | 'done' | 'needs_attention' | 'interrupted';
@@ -255,7 +273,14 @@ export type ReferenceDocsStage = 'requirements' | 'plan' | 'coding' | 'qa';
 
 export interface SessionRecord {
   id: string;
-  sessionKey: string; // e.g. "API-1234" or a kebab-slug — shared across requirements doc, branch, QA report
+  // Unique per session: names its requirements/plan/QA docs. Derived from
+  // the ticket when there is one (see session-keys.ts's uniqueSessionKey),
+  // so it isn't the ticket itself — several sessions can share a ticket.
+  sessionKey: string;
+  // The ticket this work belongs to (e.g. "API-1234"), as the human typed
+  // it. Not unique. Drives the branch name, PR title, docs' `ticket:` and
+  // the Jira epic lookup. Null when none was given.
+  ticket: string | null;
   title: string;
   stage: SessionStage;
 
@@ -296,6 +321,12 @@ export interface SessionRecord {
   // one got large — instead of re-sending every earlier step on each call.
   codingContext: CodingContext | null;
 
+  // Notes for QA collected while coding (note_for_qa). Approving the diff
+  // moves them to qaHandoffNotes, which the QA agent's next fresh
+  // conversation opens with; the next coding round starts with none.
+  qaNotes: QaNote[];
+  qaHandoffNotes: QaNote[];
+
   qaReportPath: string | null;
   // Set when the QA lead split the review across reviewers (assign_qa_team);
   // their transcripts live here, transcripts.qa is the lead's own chat.
@@ -310,6 +341,11 @@ export interface SessionRecord {
   // marked reviewed — true until the next coding message is sent, at which
   // point CodingStage has relayed the findings and this clears itself.
   qaFindingsPending: boolean;
+
+  // Set at the start of a coding kickoff or a QA-fix turn: until the lead
+  // calls assign_team or build_solo, its write tools refuse, so splitting
+  // the work is always a decision, never something it forgets to consider.
+  teamDecisionPending?: boolean;
 
   // Set when coding is re-approved after a send-back and QA already has a
   // conversation — QaStage (or the coordinator) sends a re-review message

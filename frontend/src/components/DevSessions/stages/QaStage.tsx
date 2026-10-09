@@ -18,6 +18,7 @@ import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
+import { QaNotes } from '../QaNotes';
 import { StageLayout } from './StageLayout';
 import { EarlierQaRounds, QaTeamPanel } from '../QaTeam';
 
@@ -116,6 +117,9 @@ export function QaStage({ session }: { session: SessionRecord }) {
     finished: teamFinished,
     start: startTeam,
     entriesFor,
+    restartMember,
+    restarting,
+    restartError,
   } = useTeamBoard({ sessionId, kind: 'qa', team: qaTeam, leadBusy: streaming, refresh });
 
   const approveMutation = useMutation({ mutationFn: () => api.approveQa(sessionId), onSuccess: refresh });
@@ -202,6 +206,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
       chat={
         <div className="flex flex-col flex-1 min-h-0 gap-3">
           {earlierRounds}
+          <QaNotes notes={session.qaHandoffNotes ?? []} title={`Notes from ${AGENT_PERSONAS.coding.name}`} />
           {qaTeam ? (
             <QaTeamPanel
               team={qaTeam}
@@ -212,13 +217,16 @@ export function QaStage({ session }: { session: SessionRecord }) {
               canStart={canStartTeam}
               starting={team.running}
               onStart={startTeam}
+              onRestart={restartMember}
+              canRestart={!reviewed}
+              restartingId={restarting}
               leadChat={leadChat}
               leadActive={streaming}
             />
           ) : (
             leadChat
           )}
-          <ErrorText>{team.error ?? error}</ErrorText>
+          <ErrorText>{team.error ?? restartError ?? error}</ErrorText>
         </div>
       }
       document={

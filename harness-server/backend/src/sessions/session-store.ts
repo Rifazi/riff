@@ -38,6 +38,9 @@ function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 // crashing a session-shaped field added later.
 function normalizeSession(session: SessionRecord): SessionRecord {
   session.appId ??= LEGACY_APP_ID;
+  // Before tickets were their own field the key was the ticket when one was
+  // typed; a title slug is always lowercase.
+  session.ticket ??= /[A-Z]/.test(session.sessionKey) ? session.sessionKey : null;
   session.histories ??= { requirements: [], plan: [], coding: [], qa: [] };
   session.histories.plan ??= [];
   session.claudeSessionIds ??= { requirements: null, plan: null, coding: null, qa: null };
@@ -65,6 +68,8 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.qaTeam ??= null;
   session.qaTeamHistory ??= [];
   session.codingContext ??= null;
+  session.qaNotes ??= [];
+  session.qaHandoffNotes ??= [];
   session.delivery ??= null;
   session.splitProposal ??= null;
   session.splitInto ??= [];
@@ -138,6 +143,7 @@ export async function createSession(input: {
   id?: string;
   title: string;
   sessionKey?: string;
+  ticket?: string | null;
   appId: string;
   branch?: string | null;
   sourceMeeting?: SessionMeetingSource | null;
@@ -149,6 +155,7 @@ export async function createSession(input: {
   const session: SessionRecord = {
     id: input.id ?? uuidv4(),
     sessionKey,
+    ticket: input.ticket?.trim() || null,
     title: input.title,
     appId: input.appId,
     stage: 'requirements-in-progress',
@@ -164,6 +171,8 @@ export async function createSession(input: {
     qaTeam: null,
     qaTeamHistory: [],
     codingContext: null,
+    qaNotes: [],
+    qaHandoffNotes: [],
     qaReportPath: null,
     delivery: null,
     qaStatus: null,

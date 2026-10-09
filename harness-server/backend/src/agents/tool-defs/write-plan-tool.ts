@@ -42,7 +42,7 @@ export const writePlanDescription =
   'the human have converged; it can be called again to revise. The document always starts in draft status; ' +
   'only the human can approve it.';
 
-export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessionId: string; requirementsPath: string }) {
+export function createWritePlanExecute(sessionInfo: { sessionKey: string; ticket?: string | null; sessionId: string; requirementsPath: string }) {
   return async ({ markdownBody, steps }: z.infer<typeof writePlanSchema>): Promise<string> => {
     await fs.mkdir(config.plansDir, { recursive: true });
     const filePath = path.join(config.plansDir, `${sessionInfo.sessionKey}.md`);
@@ -71,7 +71,7 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessio
     );
 
     const frontmatter = {
-      ticket: sessionInfo.sessionKey,
+      ticket: sessionInfo.ticket ?? sessionInfo.sessionKey,
       status: 'draft',
       created: createdDate,
       'author-agent': 'plan',
@@ -93,7 +93,7 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; sessio
   };
 }
 
-export function createWritePlanTool(sessionInfo: { sessionKey: string; sessionId: string; requirementsPath: string }) {
+export function createWritePlanTool(sessionInfo: { sessionKey: string; ticket?: string | null; sessionId: string; requirementsPath: string }) {
   return tool({
     description: writePlanDescription,
     inputSchema: writePlanSchema,

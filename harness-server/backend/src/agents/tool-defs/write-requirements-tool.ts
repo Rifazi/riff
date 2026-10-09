@@ -25,7 +25,7 @@ export const writeRequirementsDescription =
  * human-only backend endpoint; this tool can never set status to "approved"
  * itself.
  */
-export function createWriteRequirementsExecute(sessionInfo: { sessionKey: string; sessionId: string }) {
+export function createWriteRequirementsExecute(sessionInfo: { sessionKey: string; ticket?: string | null; sessionId: string }) {
   return async ({ markdownBody, relatedDocs }: z.infer<typeof writeRequirementsSchema>): Promise<string> => {
     await fs.mkdir(config.requirementsDir, { recursive: true });
     const filePath = path.join(config.requirementsDir, `${sessionInfo.sessionKey}.md`);
@@ -40,7 +40,7 @@ export function createWriteRequirementsExecute(sessionInfo: { sessionKey: string
     }
 
     const frontmatter = {
-      ticket: sessionInfo.sessionKey,
+      ticket: sessionInfo.ticket ?? sessionInfo.sessionKey,
       status: 'draft',
       created: createdDate,
       'author-agent': 'requirements',
@@ -55,7 +55,7 @@ export function createWriteRequirementsExecute(sessionInfo: { sessionKey: string
   };
 }
 
-export function createWriteRequirementsTool(sessionInfo: { sessionKey: string; sessionId: string }) {
+export function createWriteRequirementsTool(sessionInfo: { sessionKey: string; ticket?: string | null; sessionId: string }) {
   return tool({
     description: writeRequirementsDescription,
     inputSchema: writeRequirementsSchema,

@@ -1,6 +1,5 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { config } from '../../config.js';
 import { getApp } from '../../apps/apps-store.js';
 import { baseBranchFor } from '../../apps/apps.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
@@ -8,7 +7,6 @@ import { getRoleModelConfig } from '../../settings/settings-store.js';
 import { lightModelFor, planStepEfforts } from '../model-routing.js';
 import type {
   CodingTeamMember,
-  CodingTeamState,
   QaCheckCommand,
   QaReviewerStatus,
   QaTeamCheck,
@@ -22,17 +20,32 @@ import {
   commitCount,
   committedPathsOutside,
   createBranch,
-  deleteBranch,
   discardPaths,
   hasUncommittedChanges,
-  mergeBranch,
   removeWorktree,
   uncommittedPathsOutside,
   withRepoLock,
 } from '../../repo/git.js';
-import { suggestedBranchName } from '../coding-agent.js';
+import { runCodingAgentTurn, suggestedBranchName } from '../coding-agent.js';
 import type { AgentEvent } from '../sdk-client.js';
 import { runWorkstreamAgent } from './workstream-agent.js';
+import { leadReviewMessage, leadWrapUpMessage, roundOutcome, startable, stuckDependencies } from './lead-core.js';
+import {
+  isTeamRunning,
+  memberKey,
+  memberWorktree,
+  onMemberRestart,
+  onTeamWake,
+  ROUND_FINISHING,
+  runningTeams,
+  untilAborted,
+  worktreeDirFor,
+} from './team-state.js';
+
+export { isTeamRunning, worktreeDirFor };
+
+// The lead's turns during a run stream on the team board under this id.
+export const LEAD_MEMBER_ID = 'lead';
 
 // Shared by the coding team and the QA team (qa-team.ts): one SSE stream
 // carrying every member's events, tagged by memberId.
@@ -41,43 +54,29 @@ export type TeamEvent =
   | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus | QaReviewerStatus; note: string | null }
   | { type: 'team_check'; command: QaCheckCommand; status: QaTeamCheck['status'] }
   | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
+  | { type: 'team_lead'; active: boolean }
   | { type: 'error'; message: string };
-
-// Which sessions have a team run in flight in this process — the persisted
-// status alone can't tell a live run from one the server was killed during.
-const running = new Set<string>();
-
-export function isTeamRunning(sessionId: string): boolean {
-  return running.has(sessionId);
-}
-
-export function worktreeDirFor(sessionId: string, memberId?: string): string {
-  const dir = path.join(config.stateDir, 'worktrees', sessionId);
-  return memberId ? path.join(dir, memberId) : dir;
-}
-
-// A member's branch suffix and worktree name. Round 1 keeps the bare id (as
-// before rounds existed); later rounds are prefixed so an earlier round's
-// unmerged branch or worktree never collides with the new one.
-function memberKey(team: CodingTeamState, member: CodingTeamMember): string {
-  return team.round > 1 ? `r${team.round}-${member.id}` : member.id;
-}
 
 /**
  * Runs the workstreams the coding lead assigned (assign_team) as a coding
- * team: one agent per workstream, each in its own git worktree on its own branch off the
- * session branch, started as soon as everything it depends on has merged.
- * Each finished member's branch is merged back into the session branch
- * (serialized per repo). Members that haven't merged — failed, or cut off
- * by a restart — are picked up again by calling this again.
+ * team: one agent per workstream, each in its own git worktree on its own
+ * branch off the session branch. The runner only builds. When a workstream
+ * finishes (or fails) the lead gets a turn in the main checkout to review
+ * it and merge it, send it back or drop it (tool-defs/team-lead-tools.ts);
+ * a workstream starts once the lead has merged everything it depends on.
+ * Lead turns are one at a time, batching whatever finished meanwhile, while
+ * the other engineers keep building. Calling this again resumes whatever
+ * hasn't merged.
  */
 export async function runCodingTeam(sessionId: string, emit: (event: TeamEvent) => void): Promise<void> {
-  if (running.has(sessionId)) throw new Error('The coding team is already running for this session.');
-  running.add(sessionId);
+  if (runningTeams.has(sessionId)) throw new Error('The coding team is already running for this session.');
+  runningTeams.add(sessionId);
   try {
     await run(sessionId, emit);
   } finally {
-    running.delete(sessionId);
+    runningTeams.delete(sessionId);
+    onTeamWake(sessionId, null);
+    onMemberRestart('coding', sessionId, null);
   }
 }
 
@@ -90,8 +89,8 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   if (!session.codingTeam) throw new Error("The lead hasn't split this work across a team.");
   const app = await getApp(session.appId);
 
-  // The main checkout stays on the session branch the whole time: every
-  // member's branch is merged into it there.
+  // The main checkout stays on the session branch the whole time: the lead
+  // merges every member's branch into it there.
   if (!session.branch) {
     const branch = suggestedBranchName(session);
     await withRepoLock(app.repoRoot, () => createBranch(app.repoRoot, branch, baseBranchFor(app)));
@@ -109,21 +108,20 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     const team = s.codingTeam!;
     team.status = 'running';
     team.finishedAt = null;
-    // Everyone who hasn't merged runs (again), keeping their history.
     for (const m of team.members) {
-      if (m.status === 'merged') continue;
+      // Merged and dropped are done with; a ready branch waits for the lead.
+      if (m.status === 'merged' || m.status === 'dropped' || m.status === 'ready') continue;
       m.branch = `${sessionBranch}--${memberKey(team, m)}`;
-      // A previously failed member likely ran out of steps or context — resuming
-      // with the same large history will hit the same wall. Clear it so the next
-      // run opens with a handoff summary instead (workstream-agent.ts detects the
-      // cleared state and builds one from the transcript).
+      // Resuming retries a failed member. It likely ran out of steps or
+      // context, so it starts from a handoff instead of the same history
+      // (workstream-agent.ts detects the cleared state).
       if (m.status === 'failed') {
         m.history = [];
         m.claudeSessionId = null;
         m.contextStartEntryId = null;
       }
       m.status = 'waiting';
-      m.note = null;
+      m.note = m.feedback ? 'Sent back by the lead.' : null;
       m.startedAt = null;
       m.finishedAt = null;
     }
@@ -138,66 +136,64 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       m.status = status;
       m.note = note;
       if (status === 'running') m.startedAt = new Date().toISOString();
-      if (status === 'merged' || status === 'failed') m.finishedAt = new Date().toISOString();
-      if (status === 'merged') {
-        for (const step of s.codingPlan ?? []) if (m.stepIds.includes(step.id)) step.status = 'done';
-      }
+      if (status === 'ready' || status === 'failed') m.finishedAt = new Date().toISOString();
     });
     emit({ type: 'team_member_status', memberId, status, note });
   };
 
-  const members = session.codingTeam!.members;
-  const byId = new Map(members.map((m) => [m.id, m]));
-  const outcomes = new Map<string, Promise<boolean>>();
+  // --- building ---------------------------------------------------------
 
-  const runMember = (member: CodingTeamMember): Promise<boolean> => {
-    const existing = outcomes.get(member.id);
-    if (existing) return existing;
-    const outcome = (async () => {
-      if (member.status === 'merged') return true;
-      const deps = await Promise.all(member.dependsOn.map((id) => runMember(byId.get(id)!)));
-      if (!deps.every(Boolean)) {
-        const failed = member.dependsOn.filter((_, i) => !deps[i]);
-        await setStatus(member.id, 'blocked', `Waiting on ${failed.join(', ')}, which didn't merge.`);
-        return false;
+  // A restart (restartMember below) aborts the member's run and skips the
+  // hand-off to the lead: the scheduler resets it and starts it again.
+  const buildMember = async (id: string, signal: AbortSignal): Promise<void> => {
+    try {
+      const latest = (await getSession(sessionId))!;
+      const member = latest.codingTeam!.members.find((m) => m.id === id)!;
+      const worktreePath = memberWorktree(sessionId, team, member);
+      await fs.mkdir(path.dirname(worktreePath), { recursive: true });
+      // Branches off the session branch as it is now — i.e. including every
+      // dependency the lead has merged.
+      await withRepoLock(app.repoRoot, () => addWorktree(app.repoRoot, worktreePath, member.branch, sessionBranch));
+      // Lint/tests/prettier need the repo's installed dependencies.
+      const modules = path.join(app.repoRoot, 'node_modules');
+      const linked = path.join(worktreePath, 'node_modules');
+      if (existsSync(modules) && !existsSync(linked)) await fs.symlink(modules, linked, 'dir');
+
+      // Already built (e.g. cut off by a restart after its last commit):
+      // goes straight back to the lead.
+      const built =
+        !member.feedback &&
+        member.transcript.length > 0 &&
+        member.stepIds.every((sid) => latest.codingPlan?.find((s) => s.id === sid)?.status === 'done') &&
+        !(await hasUncommittedChanges(worktreePath)) &&
+        (await commitCount(worktreePath, sessionBranch, member.branch)) > 0;
+      let runError: string | null = null;
+      if (!built) {
+        try {
+          await Promise.race([build(member, latest, worktreePath, signal), untilAborted(signal)]);
+        } catch (err) {
+          runError = err instanceof Error ? err.message : String(err);
+        }
       }
-      try {
-        return await runOne(member);
-      } catch (err) {
-        await setStatus(member.id, 'failed', err instanceof Error ? err.message : String(err));
-        return false;
-      }
-    })();
-    outcomes.set(member.id, outcome);
-    return outcome;
+      // Restarting: what it left in its checkout stays there for the next run.
+      if (signal.aborted) return;
+      await prepareForLead(member, worktreePath, runError);
+    } catch (err) {
+      if (signal.aborted) return;
+      await setStatus(id, 'failed', err instanceof Error ? err.message : String(err));
+    }
   };
 
-  const runOne = async (member: CodingTeamMember): Promise<boolean> => {
-    const worktreePath = worktreeDirFor(sessionId, memberKey(team, member));
-    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-    // Branches off the session branch as it is now — i.e. including every
-    // dependency that has already merged.
-    await withRepoLock(app.repoRoot, () => addWorktree(app.repoRoot, worktreePath, member.branch, sessionBranch));
-    // Lint/tests/prettier need the repo's installed dependencies.
-    const modules = path.join(app.repoRoot, 'node_modules');
-    const linked = path.join(worktreePath, 'node_modules');
-    if (existsSync(modules) && !existsSync(linked)) await fs.symlink(modules, linked, 'dir');
-
-    const latest = (await getSession(sessionId))!;
-    const fresh = latest.codingTeam!.members.find((m) => m.id === member.id)!;
-    // Already built, only the merge failed (e.g. the main checkout was on
-    // another branch): resuming goes straight back to the merge.
-    const finished =
-      fresh.transcript.length > 0 &&
-      fresh.stepIds.every((id) => latest.codingPlan?.find((s) => s.id === id)?.status === 'done') &&
-      !(await hasUncommittedChanges(worktreePath)) &&
-      (await commitCount(worktreePath, sessionBranch, member.branch)) > 0;
-    if (!finished) await build(member, latest, fresh, worktreePath);
-    return finish(member, worktreePath);
-  };
-
-  const build = async (member: CodingTeamMember, latest: SessionRecord, fresh: CodingTeamMember, worktreePath: string) => {
-    await setStatus(member.id, 'running');
+  const build = async (member: CodingTeamMember, latest: SessionRecord, worktreePath: string, signal: AbortSignal) => {
+    const restartedNow = restarted.delete(member.id);
+    await setStatus(member.id, 'running', member.feedback ? 'Working on the lead’s feedback.' : null);
+    // The run below reads the feedback from `member`; it's one-shot.
+    if (member.feedback) {
+      await mutateSession(sessionId, (s) => {
+        const m = s.codingTeam?.members.find((x) => x.id === member.id);
+        if (m) m.feedback = null;
+      });
+    }
     const onEvent = (event: AgentEvent) => emit({ type: 'team_member_event', memberId: member.id, event });
 
     // Light-model routing: a workstream whose steps are all tagged light
@@ -207,44 +203,47 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     const lightModel = lightModelFor(await getRoleModelConfig('coding'));
     const efforts = await planStepEfforts(latest);
     const light =
-      lightModel && fresh.transcript.length === 0 && fresh.stepIds.every((id) => efforts.get(id) === 'light') ? lightModel : null;
+      lightModel && member.transcript.length === 0 && member.stepIds.every((id) => efforts.get(id) === 'light') ? lightModel : null;
 
-    if (light) {
-      await appendTeamTranscriptEntry(sessionId, member.id, { role: 'system', text: `Light workstream — running on ${light}.` });
-      let failed = false;
-      try {
-        await runWorkstreamAgent({ session: latest, app, member: fresh, teammates: latest.codingTeam!.members, worktreePath, onEvent, model: light });
-      } catch {
-        failed = true;
-      }
-      const after = (await getSession(sessionId))!;
-      const done = fresh.stepIds.every((id) => after.codingPlan?.find((s) => s.id === id)?.status === 'done');
-      if (failed || !done) {
-        const { model } = await getRoleModelConfig('coding');
-        await appendTeamTranscriptEntry(sessionId, member.id, {
-          role: 'system',
-          text: `↑ ${light} didn't finish this workstream — handing it to ${model}.`,
-        });
-        const again = after.codingTeam!.members.find((m) => m.id === member.id)!;
-        await runWorkstreamAgent({
-          session: after,
-          app,
-          member: again,
-          teammates: after.codingTeam!.members,
-          worktreePath,
-          onEvent,
-          prompt:
-            `A lighter model (${light}) worked on this workstream just now but didn't finish it cleanly. Review what ` +
-            'it did in your checkout — commits and uncommitted changes — fix anything wrong or missing, then finish ' +
-            'the remaining steps and leave nothing uncommitted.',
-        });
-      }
-    } else {
-      await runWorkstreamAgent({ session: latest, app, member: fresh, teammates: latest.codingTeam!.members, worktreePath, onEvent });
+    const common = { app, worktreePath, onEvent, restarted: restartedNow, abortSignal: signal };
+    if (!light) {
+      await runWorkstreamAgent({ ...common, session: latest, member, teammates: latest.codingTeam!.members });
+      return;
     }
+    await appendTeamTranscriptEntry(sessionId, member.id, { role: 'system', text: `Light workstream — running on ${light}.` });
+    let failed = false;
+    try {
+      await runWorkstreamAgent({ ...common, session: latest, member, teammates: latest.codingTeam!.members, model: light });
+    } catch {
+      failed = true;
+    }
+    if (signal.aborted) return;
+    const after = (await getSession(sessionId))!;
+    const done = member.stepIds.every((id) => after.codingPlan?.find((s) => s.id === id)?.status === 'done');
+    if (!failed && done) return;
+    const { model } = await getRoleModelConfig('coding');
+    await appendTeamTranscriptEntry(sessionId, member.id, {
+      role: 'system',
+      text: `↑ ${light} didn't finish this workstream — handing it to ${model}.`,
+    });
+    const again = after.codingTeam!.members.find((m) => m.id === member.id)!;
+    await runWorkstreamAgent({
+      ...common,
+      restarted: false,
+      session: after,
+      member: again,
+      teammates: after.codingTeam!.members,
+      prompt:
+        `A lighter model (${light}) worked on this workstream just now but didn't finish it cleanly. Review what ` +
+        'it did in your checkout — commits and uncommitted changes — fix anything wrong or missing, then finish ' +
+        'the remaining steps and leave nothing uncommitted.',
+    });
   };
 
-  const finish = async (member: CodingTeamMember, worktreePath: string): Promise<boolean> => {
+  // Leaves the branch clean and inside its owned paths for the lead to
+  // review, or fails it with why. A run that errored (out of steps or
+  // usage) still has its work committed, so the lead can judge what's there.
+  const prepareForLead = async (member: CodingTeamMember, worktreePath: string, runError: string | null) => {
     // Checks and formatters can touch files the member doesn't own (lint
     // --fix, snapshots, a lockfile). Those belong to a teammate or nobody,
     // and would collide at merge, so they're thrown away, not committed.
@@ -259,9 +258,14 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     if (await hasUncommittedChanges(worktreePath)) {
       await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`, member.ownedPaths);
     }
-    if ((await commitCount(worktreePath, sessionBranch, member.branch)) === 0) {
+    const commits = await commitCount(worktreePath, sessionBranch, member.branch);
+    if (runError) {
+      await setStatus(member.id, 'failed', `${runError}${commits ? ` (${commits} commit${commits === 1 ? '' : 's'} on ${member.branch})` : ''}`);
+      return;
+    }
+    if (commits === 0) {
       await setStatus(member.id, 'failed', 'Finished without committing anything — see its log.');
-      return false;
+      return;
     }
     // git_commit can't commit outside the owned paths, so this only catches
     // a commit made some other way (a hook, a check command running git).
@@ -270,29 +274,214 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       await setStatus(
         member.id,
         'failed',
-        `Its commits change files outside its owned paths (${foreign.slice(0, 5).join(', ')}${foreign.length > 5 ? ', …' : ''}), so it wasn't merged.`
+        `Its commits change files outside its owned paths (${foreign.slice(0, 5).join(', ')}${foreign.length > 5 ? ', …' : ''}).`,
       );
-      return false;
+      return;
     }
-
-    await setStatus(member.id, 'merging');
-    const merged = await withRepoLock(app.repoRoot, () =>
-      mergeBranch(app.repoRoot, member.branch, `chore: merge ${member.id} workstream — ${member.title}`, sessionBranch)
-    );
-    if (!merged.ok) {
-      await setStatus(member.id, 'failed', `Couldn't merge ${member.branch} into ${sessionBranch}: ${merged.error.split('\n')[0]}`);
-      return false;
-    }
-    await withRepoLock(app.repoRoot, async () => {
-      await removeWorktree(app.repoRoot, worktreePath);
-      await deleteBranch(app.repoRoot, member.branch);
-    });
-    await setStatus(member.id, 'merged');
-    return true;
+    await setStatus(member.id, 'ready', `${commits} commit${commits === 1 ? '' : 's'} on ${member.branch}, waiting for the lead.`);
   };
 
-  const results = await Promise.all(members.map(runMember));
-  const status = results.every(Boolean) ? 'done' : 'needs_attention';
+  // --- the lead ---------------------------------------------------------
+
+  // A lead turn that errored (out of usage, no key) won't do better on the
+  // next update, so the run stops handing him work and leaves it for the human.
+  let leadBroken = false;
+  const leadTurn = async (message: string) => {
+    emit({ type: 'team_lead', active: true });
+    try {
+      const latest = (await getSession(sessionId))!;
+      await runCodingAgentTurn(
+        latest,
+        message,
+        (event) => {
+          if (event.type === 'error' || (event.type === 'done' && event.isError)) leadBroken = true;
+          emit({ type: 'team_member_event', memberId: LEAD_MEMBER_ID, event });
+        },
+        [],
+        { teamLeadTurn: true },
+      );
+    } catch (err) {
+      leadBroken = true;
+      const message = err instanceof Error ? err.message : String(err);
+      emit({ type: 'team_member_event', memberId: LEAD_MEMBER_ID, event: { type: 'error', message } });
+    } finally {
+      emit({ type: 'team_lead', active: false });
+    }
+  };
+
+  const commitsAhead = async (members: CodingTeamMember[]) => {
+    const ahead = new Map<string, number>();
+    for (const m of members) {
+      if (m.status !== 'ready' && m.status !== 'failed') continue;
+      try {
+        ahead.set(m.id, await commitCount(app.repoRoot, sessionBranch, m.branch));
+      } catch {
+        // its branch was never created
+      }
+    }
+    return ahead;
+  };
+
+  // --- scheduling -------------------------------------------------------
+
+  let poked = false;
+  let waiter: (() => void) | null = null;
+  const poke = () => {
+    poked = true;
+    waiter?.();
+  };
+  const nextPoke = () =>
+    poked
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          waiter = resolve;
+        });
+  onTeamWake(sessionId, poke);
+
+  const building = new Map<string, Promise<void>>();
+  // Each building member's abort, for a restart; members being restarted;
+  // and members whose next run is a restart (a fresh conversation with a handoff).
+  const aborts = new Map<string, AbortController>();
+  const restarting = new Set<string>();
+  const restarted = new Set<string>();
+  // Set the moment the loop below exits: no restart can be taken after it.
+  let closed = false;
+
+  // Back to waiting with a fresh conversation, for the scheduler to start
+  // again. False if the lead decided on it meanwhile (merged, dropped).
+  const resetForRestart = async (id: string, from: TeamMemberStatus[]): Promise<boolean> => {
+    let reset = false;
+    await mutateSession(sessionId, (s) => {
+      const m = s.codingTeam?.members.find((x) => x.id === id);
+      if (!m || !from.includes(m.status)) return;
+      m.status = 'waiting';
+      m.note = 'Restarted by you.';
+      m.history = [];
+      m.claudeSessionId = null;
+      m.startedAt = null;
+      m.finishedAt = null;
+      reset = true;
+    });
+    if (reset) {
+      restarted.add(id);
+      emit({ type: 'team_member_status', memberId: id, status: 'waiting', note: 'Restarted by you.' });
+    }
+    return reset;
+  };
+
+  // The human's restart of one engineer: a running one is stopped (its work
+  // so far stays in its checkout) and starts over; a failed one starts over
+  // without waiting for the round to end. Either way it continues from a
+  // handoff of what it did, not its old conversation.
+  const restartMember = async (id: string): Promise<string | null> => {
+    if (closed) return ROUND_FINISHING;
+    const current = (await getSession(sessionId))!.codingTeam?.members.find((m) => m.id === id);
+    if (!current) return `There is no workstream "${id}" in this round.`;
+    if (closed) return ROUND_FINISHING;
+    const abort = aborts.get(id);
+    if (abort) {
+      if (!restarting.has(id)) {
+        restarting.add(id);
+        abort.abort();
+        await appendTeamTranscriptEntry(sessionId, id, { role: 'system', text: '⏹ Stopped by you — restarting.' });
+      }
+      return null;
+    }
+    if (building.has(id)) return null; // already restarting
+    if (current.status !== 'failed') {
+      return `${current.title} is ${current.status} — only a working or failed workstream can be restarted.`;
+    }
+    // Held in `building` so the loop can't finish the round mid-reset.
+    building.set(
+      id,
+      (async () => {
+        if (await resetForRestart(id, ['failed'])) {
+          forLead.delete(id);
+          await appendTeamTranscriptEntry(sessionId, id, { role: 'system', text: '⟲ Restarted by you.' });
+        }
+      })().finally(() => {
+        building.delete(id);
+        poke();
+      }),
+    );
+    return null;
+  };
+  onMemberRestart('coding', sessionId, restartMember);
+  // Members whose outcome the lead hasn't seen yet. A branch already ready
+  // when the run (re)starts goes straight to him.
+  const forLead = new Set(team.members.filter((m) => m.status === 'ready').map((m) => m.id));
+  // A ready branch the lead didn't decide on gets one reminder.
+  const reminded = new Set<string>();
+  let lead: Promise<void> | null = null;
+
+  for (;;) {
+    poked = false;
+    waiter = null;
+    const members = (await getSession(sessionId))!.codingTeam!.members;
+
+    for (const m of startable(members)) {
+      if (building.has(m.id)) continue;
+      const abort = new AbortController();
+      aborts.set(m.id, abort);
+      building.set(
+        m.id,
+        buildMember(m.id, abort.signal)
+          .then(async () => {
+            aborts.delete(m.id);
+            if (!restarting.delete(m.id)) {
+              forLead.add(m.id);
+              return;
+            }
+            const reset = await resetForRestart(m.id, ['running', 'waiting', 'failed']).catch(() => false);
+            if (!reset) forLead.add(m.id);
+          })
+          .finally(() => {
+            building.delete(m.id);
+            poke();
+          }),
+      );
+    }
+
+    if (!lead && !leadBroken && forLead.size > 0) {
+      const ids = [...forLead];
+      forLead.clear();
+      const reminder = ids.every((id) => reminded.has(id))
+        ? `You haven't merged, sent back or dropped ${ids.join(', ')} yet — decide now.\n\n`
+        : '';
+      const message = reminder + leadReviewMessage(members, ids, sessionBranch, await commitsAhead(members));
+      lead = (async () => {
+        await leadTurn(message);
+        const after = (await getSession(sessionId))!.codingTeam!.members;
+        for (const id of ids) {
+          if (after.find((m) => m.id === id)?.status === 'ready' && !reminded.has(id)) {
+            reminded.add(id);
+            forLead.add(id);
+          }
+        }
+      })().finally(() => {
+        lead = null;
+        poke();
+      });
+    }
+
+    if (building.size === 0 && !lead && (forLead.size === 0 || leadBroken)) break;
+    await nextPoke();
+  }
+  closed = true;
+
+  // Whatever is still waiting can't start: what it depends on wasn't merged.
+  const final = (await getSession(sessionId))!.codingTeam!.members;
+  for (const m of final.filter((x) => x.status === 'waiting')) {
+    const stuck = stuckDependencies(final, m);
+    const unmerged = m.dependsOn.filter((d) => final.find((x) => x.id === d)?.status !== 'merged');
+    await setStatus(
+      m.id,
+      'blocked',
+      stuck.length ? `Waiting on ${stuck.join(', ')}, which didn't merge.` : `Waiting for the lead to merge ${unmerged.join(', ')}.`,
+    );
+  }
+  const settled = (await getSession(sessionId))!.codingTeam!.members;
+  const status = roundOutcome(settled);
   await mutateSession(sessionId, (s) => {
     if (s.codingTeam) {
       s.codingTeam.status = status;
@@ -301,6 +490,11 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     s.stage = 'coding-review';
   });
   emit({ type: 'team_status', status });
+
+  // Everything merged: the lead checks the integrated branch as a whole.
+  if (status === 'done' && !leadBroken && settled.some((m) => m.status === 'merged')) {
+    await leadTurn(leadWrapUpMessage(settled, sessionBranch));
+  }
 }
 
 /** At server start: any team marked running was cut off by the restart. */
@@ -311,9 +505,13 @@ export async function recoverInterruptedTeams(): Promise<void> {
       if (!s.codingTeam) return;
       s.codingTeam.status = 'interrupted';
       for (const m of s.codingTeam.members) {
-        if (m.status === 'running' || m.status === 'merging' || m.status === 'waiting') {
+        if (m.status === 'running' || m.status === 'waiting') {
           m.status = 'waiting';
           m.note = 'Interrupted when the agent server stopped — resume the team to continue.';
+        } else if (m.status === 'merging') {
+          // The merge aborts or completes atomically; the lead checks again.
+          m.status = 'ready';
+          m.note = 'Interrupted while merging — the lead will review it again.';
         }
       }
     });
@@ -332,8 +530,8 @@ export async function cleanupTeamWorktrees(session: SessionRecord): Promise<void
   }
   for (const team of teams) {
     for (const member of team.members) {
-      if (member.status === 'merged' || !repoRoot) continue;
-      await withRepoLock(repoRoot, () => removeWorktree(repoRoot!, worktreeDirFor(session.id, memberKey(team, member))));
+      if (member.status === 'merged' || member.status === 'dropped' || !repoRoot) continue;
+      await withRepoLock(repoRoot, () => removeWorktree(repoRoot!, memberWorktree(session.id, team, member)));
     }
   }
   await fs.rm(worktreeDirFor(session.id), { recursive: true, force: true });

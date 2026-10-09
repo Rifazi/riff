@@ -38,8 +38,6 @@ export function ThemeAdoptionCard({ appId, appName, themeName }: { appId: string
     mutationFn: () =>
       api.createSession({
         title: `Migrate ${appName} to the ${themeName} theme`,
-        // Unique even when a migration is started more than once.
-        sessionKey: `theme-migration-${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 6)}`,
         appId,
       }),
     onSuccess: (session) => router.push(`${sessionHref(session.id, 'requirements')}&kickoff=${THEME_MIGRATION_KICKOFF}`),

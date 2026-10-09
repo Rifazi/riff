@@ -43,6 +43,7 @@ import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createWriteQaReportToolClaude } from './tool-defs-claude/write-qa-report-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { qaHandoffSection } from './tool-defs/qa-notes-tool.js';
 import { createAssignQaTeamTool } from './tool-defs/qa-team-tools.js';
 import { createAssignQaTeamToolClaude } from './tool-defs-claude/qa-team-tools.js';
 import { formatQaTeamFindings } from './team/qa-review-areas.js';
@@ -209,6 +210,7 @@ export async function runQaAgentTurn(
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
     systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
     systemPrompt += `\n\n# Session\n\nBranch to review: ${session.branch}`;
+    systemPrompt += qaHandoffSection(session.qaHandoffNotes);
     if (previousFindings) {
       systemPrompt +=
         `\n\n# Your previous QA pass on this branch\n\nThe coding agent has since pushed fixes for these. Confirm ` +
@@ -240,7 +242,7 @@ export async function runQaAgentTurn(
     checkCommands: app.checkCommands,
     helperContext,
   });
-  const reportInfo = { sessionKey: session.sessionKey, sessionId: session.id, branch, requirementsPath };
+  const reportInfo = { sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id, branch, requirementsPath };
   const checkDeps = { repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands, helperContext };
 
   if (provider === 'claude') {

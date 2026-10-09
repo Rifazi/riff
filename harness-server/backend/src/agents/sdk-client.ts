@@ -145,7 +145,8 @@ export interface RunAgentTurnParams {
   prompt: string;
   onEvent: (event: AgentEvent) => void;
   compaction?: CompactionOptions;
-  // Cancels the model calls, e.g. a delegate helper's time limit.
+  // Cancels the model calls, e.g. a delegate helper's time limit or a
+  // team member restarted by the human. No continuation hop starts after it.
   abortSignal?: AbortSignal;
   // Optional: compress accumulated tool results in the history before each
   // hop to reduce the payload sent to the model. The canonical history
@@ -308,7 +309,7 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   let conversationStart = result.startTokens;
   const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
 
-  while (result.finishReason === 'tool-calls' && hop < maxHops) {
+  while (result.finishReason === 'tool-calls' && hop < maxHops && !params.abortSignal?.aborted) {
     hop += 1;
     onEvent({ type: 'continuation', hop, maxHops });
     const compacting = shouldCompact(params.compaction, result.contextTokens, conversationStart);
@@ -400,6 +401,8 @@ export interface RunClaudeAgentTurnParams {
   cwd: string;
   onEvent: (event: AgentEvent) => void;
   compaction?: CompactionOptions;
+  // Same as RunAgentTurnParams.abortSignal: stops the CLI subprocess.
+  abortSignal?: AbortSignal;
 }
 
 export interface RunClaudeAgentTurnResult {
@@ -441,6 +444,15 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   let contextTokens = 0;
   let startTokens = 0;
 
+  // The SDK takes a controller, not a signal: one per query(), following the caller's signal.
+  let abortController: AbortController | undefined;
+  if (params.abortSignal) {
+    const controller = new AbortController();
+    if (params.abortSignal.aborted) controller.abort();
+    else params.abortSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    abortController = controller;
+  }
+
   const stream = query({
     prompt,
     options: {
@@ -456,6 +468,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
       ...CLAUDE_ISOLATION,
       ...(model ? { model } : {}),
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
+      ...(abortController ? { abortController } : {}),
     },
   });
 
@@ -567,7 +580,7 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   let conversationStart = result.startTokens;
   const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
 
-  while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < maxHops) {
+  while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < maxHops && !params.abortSignal?.aborted) {
     hop += 1;
     onEvent({ type: 'continuation', hop, maxHops });
     if (shouldCompact(params.compaction, result.contextTokens, conversationStart)) {

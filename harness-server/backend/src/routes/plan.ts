@@ -108,7 +108,7 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
       // back to proposing its own breakdown if this plan was never given a
       // structured step list (see coding-agent.ts).
       frontmatter = {
-        ticket: session.sessionKey,
+        ticket: session.ticket ?? session.sessionKey,
         created: new Date().toISOString().slice(0, 10),
         'author-agent': 'plan',
         session: session.id,
@@ -196,7 +196,7 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
 
   // Human-only. Creates one Jira issue per plan step (skipping any step
   // that already has one recorded from an earlier call), all linked to the
-  // epic that this session's own ticket (sessionKey) already belongs to in
+  // epic that this session's own ticket already belongs to in
   // Jira. Never called by an agent — same "no agent pushes/approves/opens
   // things on its own" boundary as git_create_branch.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/plan/jira/create', async (request, reply) => {
@@ -207,11 +207,14 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'approve the plan before creating tickets in Jira' });
     }
 
+    if (!session.ticket) {
+      return reply.code(400).send({ error: 'this session has no ticket ID — Jira tickets are linked to its epic' });
+    }
     const jiraSettings = await getJiraSettings();
     try {
       const result = await createTicketsFromPlan(
         path.join(config.harnessRoot, session.planPath),
-        session.sessionKey,
+        session.ticket,
         session.title,
         jiraSettings
       );

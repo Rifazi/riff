@@ -8,6 +8,13 @@ export type TeamKind = 'coding' | 'qa';
 let seq = 0;
 const nextId = () => `overlay-team-${++seq}`;
 
+// The coding lead's turns during a run (harness-server LEAD_MEMBER_ID): he
+// reviews and merges branches mid-run. His chat is the stage's own
+// transcript, so it's refetched as he goes instead of overlaid.
+const LEAD_ID = 'lead';
+// His tools whose result changes what the board shows.
+const LEAD_STATE_TOOLS = /(merge_workstream|send_back_workstream|drop_workstreams|write_coding_plan|git_commit)$/;
+
 /**
  * Drives /coding/team/run or /qa/team/run: one SSE stream carrying every team member's
  * events, tagged by memberId. Keeps a live overlay and "running tool" per
@@ -19,6 +26,7 @@ export function useTeamRun(kind: TeamKind = 'coding') {
   const [overlays, setOverlays] = useState<Record<string, TranscriptEntry[]>>({});
   const [runningTools, setRunningTools] = useState<Record<string, string | null>>({});
   const [error, setError] = useState<string | null>(null);
+  const [leadActive, setLeadActive] = useState(false);
   // Persisted transcript entries from this run are also in the overlay —
   // lanes show persisted entries from before this instant plus the overlay.
   const [startedAt, setStartedAt] = useState<string | null>(null);
@@ -41,6 +49,23 @@ export function useTeamRun(kind: TeamKind = 'coding') {
       await postSSE<TeamEvent>(`/api/sessions/${sessionId}/${kind}/team/run`, {}, (e) => {
         if (e.type === 'error') {
           setError(e.message);
+        } else if (e.type === 'team_lead') {
+          setLeadActive(e.active);
+          if (!e.active) setRunningTools((prev) => ({ ...prev, [LEAD_ID]: null }));
+          onChange();
+        } else if (e.type === 'team_member_event' && e.memberId === LEAD_ID) {
+          const { event } = e;
+          if (event.type === 'tool_call') {
+            setRunningTools((prev) => ({ ...prev, [LEAD_ID]: event.name }));
+            toolNames.set(event.toolCallId, event.name);
+          } else if (event.type === 'tool_result') {
+            setRunningTools((prev) => ({ ...prev, [LEAD_ID]: null }));
+            if (LEAD_STATE_TOOLS.test(toolNames.get(event.toolCallId) ?? '')) onChange();
+          } else if (event.type === 'assistant_text') {
+            onChange();
+          } else if (event.type === 'error') {
+            setError(event.message);
+          }
         } else if (e.type === 'team_member_status' || e.type === 'team_status' || e.type === 'team_check') {
           // Persisted server-side — refetch for the new status.
           if (e.type === 'team_member_status' && e.status !== 'running') {
@@ -73,6 +98,7 @@ export function useTeamRun(kind: TeamKind = 'coding') {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRunning(false);
+      setLeadActive(false);
       setStartedAt(null);
       setRunningTools({});
       setOverlays({});
@@ -80,5 +106,5 @@ export function useTeamRun(kind: TeamKind = 'coding') {
     }
   };
 
-  return { running, overlays, runningTools, error, startedAt, start };
+  return { running, overlays, runningTools, error, startedAt, leadActive, start };
 }

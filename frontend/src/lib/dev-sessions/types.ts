@@ -197,6 +197,15 @@ export interface ThemeAudit {
 
 export type ThemeApplyResult = SetupSteps & { theme: AppThemeSummary };
 
+// Left for QA by the coding agent (from = null) or a team engineer (from =
+// its workstream's title) with note_for_qa.
+export interface QaNote {
+  id: string;
+  from: string | null;
+  text: string;
+  at: string;
+}
+
 export interface SessionMeetingSource {
   /** "journal" when started from a Riff journal; absent = one meeting. */
   kind?: 'meeting' | 'journal';
@@ -276,7 +285,8 @@ export interface Workstream {
   dependsOn: string[];
 }
 
-export type TeamMemberStatus = 'waiting' | 'running' | 'merging' | 'merged' | 'failed' | 'blocked';
+/** "ready": built on its branch, waiting for the lead to review and merge it. "dropped": the lead took its steps back. */
+export type TeamMemberStatus = 'waiting' | 'running' | 'ready' | 'merging' | 'merged' | 'failed' | 'blocked' | 'dropped';
 
 export interface CodingTeamMember extends Workstream {
   branch: string;
@@ -285,6 +295,8 @@ export interface CodingTeamMember extends Workstream {
   startedAt: string | null;
   finishedAt: string | null;
   transcript: TranscriptEntry[];
+  /** How many times the lead sent this workstream back for changes. */
+  sendBacks?: number;
 }
 
 export interface CodingTeamState {
@@ -351,6 +363,8 @@ export type TeamEvent =
   | { type: 'team_member_status'; memberId: string; status: TeamMemberStatus | QaReviewerStatus; note: string | null }
   | { type: 'team_check'; command: QaCheckCommand; status: QaTeamCheck['status'] }
   | { type: 'team_status'; status: 'running' | 'done' | 'needs_attention' }
+  /** The lead started or finished a turn mid-run (reviewing and merging branches). */
+  | { type: 'team_lead'; active: boolean }
   | { type: 'error'; message: string };
 
 export interface SessionDelivery {
@@ -378,7 +392,10 @@ export type DeliveryPlan =
 
 export interface SessionRecord {
   id: string;
+  /** Unique; names the session's docs. Not the ticket. */
   sessionKey: string;
+  /** Ticket ID the human gave, if any. Several sessions can share one. */
+  ticket: string | null;
   title: string;
   stage: SessionStage;
   appId: string;
@@ -395,6 +412,9 @@ export interface SessionRecord {
   codingPlan: CodingPlanStep[] | null;
   codingTeam: CodingTeamState | null;
   codingTeamHistory: CodingTeamState[];
+  // Collected while coding; approving the diff hands them to QA as qaHandoffNotes.
+  qaNotes: QaNote[];
+  qaHandoffNotes: QaNote[];
 
   qaReportPath: string | null;
   qaTeam: QaTeamState | null;

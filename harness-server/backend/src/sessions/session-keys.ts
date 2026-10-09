@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { listSessions } from './session-store.js';
+import { slugify } from './session.js';
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -28,4 +29,21 @@ export async function isSessionKeyInUse(key: string): Promise<boolean> {
     [config.requirementsDir, config.plansDir, config.qaReportsDir].map((dir) => fileExists(path.join(dir, `${key}.md`)))
   );
   return hits.some(Boolean);
+}
+
+// A free key for a new session. A ticket isn't unique — several sessions can
+// belong to one — so it's only the starting point: the bare ticket if free,
+// else the ticket plus the title's slug, then a counter.
+export async function uniqueSessionKey(input: { ticket?: string | null; title: string }): Promise<string> {
+  // Keys name files, so keep only filename-safe characters.
+  const ticket = input.ticket?.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|-+$/g, '');
+  const titleSlug = slugify(input.title).slice(0, 40).replace(/-+$/, '');
+  const candidates = ticket ? [ticket, titleSlug ? `${ticket}-${titleSlug}` : ticket] : [titleSlug || 'session'];
+  for (const key of candidates) {
+    if (!(await isSessionKeyInUse(key))) return key;
+  }
+  const base = candidates[candidates.length - 1];
+  for (let n = 2; ; n++) {
+    if (!(await isSessionKeyInUse(`${base}-${n}`))) return `${base}-${n}`;
+  }
 }

@@ -1,12 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 import { useTeamRun, type TeamKind } from './useTeamRun';
 import type { CodingTeamState, TranscriptEntry } from './types';
 
 // Which round of which team was last started per session — module-level so
-// a tab-switch remount doesn't start the same round twice.
-const startedRounds = new Map<string, number>();
+// a tab-switch remount doesn't start the same round twice. Keyed by round and
+// startedAt: the coding lead re-queues a round (new startedAt) when he merges
+// or sends back a branch outside a run.
+const startedRounds = new Map<string, string>();
 
 /** The query key for a team's "is a run going server-side" check; stage refreshes invalidate it. */
 export const teamStatusKey = (kind: TeamKind, sessionId: string) => ['team-status', kind, sessionId];
@@ -27,7 +29,7 @@ export function useTeamBoard<M extends { id: string; transcript: TranscriptEntry
 }: {
   sessionId: string;
   kind: TeamKind;
-  team: { status: CodingTeamState['status']; round: number; members: M[] } | null;
+  team: { status: CodingTeamState['status']; round: number; startedAt?: string; members: M[] } | null;
   /** The lead is mid-turn: an assigned round waits for it to end. */
   leadBusy: boolean;
   refresh: () => void;
@@ -62,20 +64,45 @@ export function useTeamBoard<M extends { id: string; transcript: TranscriptEntry
 
   const start = () => void run.start(sessionId, refresh);
 
+  // Restarting one member: inside a live run the server stops it (if it's
+  // working) and starts it over; with no run going, resuming the team
+  // reruns it along with anything else that didn't finish.
+  const [restarting, setRestarting] = useState<string | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const restartMember = async (memberId: string) => {
+    setRestarting(memberId);
+    setRestartError(null);
+    try {
+      if (active) {
+        const { live } = await api.restartTeamMember(sessionId, kind, memberId);
+        if (live) {
+          refresh();
+          return;
+        }
+      }
+      if (!run.running) start();
+    } catch (err) {
+      setRestartError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRestarting(null);
+    }
+  };
+
   // The lead assigned a team: start it once the lead's turn has ended, once per round.
   useEffect(() => {
     if (team?.status !== 'assigned' || run.running || leadBusy) return;
     const key = `${kind}:${sessionId}`;
-    if (startedRounds.get(key) === team.round) return;
-    startedRounds.set(key, team.round);
+    const marker = `${team.round}:${team.startedAt ?? ''}`;
+    if (startedRounds.get(key) === marker) return;
+    startedRounds.set(key, marker);
     start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [team?.status, team?.round, run.running, leadBusy]);
+  }, [team?.status, team?.round, team?.startedAt, run.running, leadBusy]);
 
   const entriesFor = (member: M) =>
     run.running && run.startedAt
       ? [...member.transcript.filter((e) => e.timestamp < run.startedAt!), ...(run.overlays[member.id] ?? [])]
       : member.transcript;
 
-  return { run, active, status, finished, start, entriesFor };
+  return { run, active, status, finished, start, entriesFor, restartMember, restarting, restartError };
 }

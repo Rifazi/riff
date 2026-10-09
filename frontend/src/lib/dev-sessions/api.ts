@@ -147,7 +147,7 @@ export const api = {
 
   getSession: (id: string) => fetch(apiUrl(`/api/sessions/${id}`)).then((r) => json<SessionRecord>(r)),
 
-  createSession: (input: { title: string; sessionKey?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput }) =>
+  createSession: (input: { title: string; ticket?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput }) =>
     fetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -234,6 +234,12 @@ export const api = {
 
   getTeamStatus: (id: string, team: TeamKind = 'coding') =>
     fetch(apiUrl(`/api/sessions/${id}/${team}/team`)).then((r) => json<{ running: boolean }>(r)),
+
+  /** Restarts one member inside the team's live run; `live: false` means no run is going — resume the team instead. */
+  restartTeamMember: (id: string, team: TeamKind, memberId: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/${team}/team/members/${encodeURIComponent(memberId)}/restart`), {
+      method: 'POST',
+    }).then((r) => json<{ live: boolean }>(r)),
 
   getCodingDiff: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/diff`)).then((r) =>

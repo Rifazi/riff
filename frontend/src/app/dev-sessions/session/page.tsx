@@ -57,7 +57,7 @@ function SessionView() {
       title={session.title}
       subtitle={
         <span className="flex flex-wrap items-center gap-2">
-          <span className="font-mono">{session.sessionKey}</span>
+          <span className="font-mono">{session.ticket ?? session.sessionKey}</span>
           <Badge variant="secondary">{session.appName}</Badge>
           <Badge
             variant={

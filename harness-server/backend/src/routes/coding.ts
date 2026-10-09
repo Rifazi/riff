@@ -11,6 +11,7 @@ import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam, type TeamEvent } from '../agents/team/coding-team.js';
+import { restartLiveMember } from '../agents/team/team-state.js';
 
 // Mirrors the frontmatter rewrite the approve/reject routes already do for
 // their own doc — revert to draft on disk too, not just on the session
@@ -97,6 +98,17 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     }
   });
 
+  // Restarts one engineer inside the team's live run: a running one is
+  // stopped and starts over, a failed one runs again straight away. With no
+  // run going ({ live: false }) the caller resumes the team instead.
+  app.post<{ Params: { id: string; memberId: string } }>('/api/sessions/:id/coding/team/members/:memberId/restart', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    const { live, error } = await restartLiveMember('coding', session.id, request.params.memberId);
+    if (error) return reply.code(409).send({ error });
+    return { live };
+  });
+
   app.get<{ Params: { id: string } }>('/api/sessions/:id/coding/team', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
@@ -125,9 +137,12 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     if (!session.branch) {
       return reply.code(400).send({ error: 'no commits exist on a branch yet' });
     }
+    // The coding agent's notes go over with the branch (qa-agent.ts).
     return updateSession(session.id, {
       stage: 'qa-in-progress',
       codingApprovedAt: new Date().toISOString(),
+      qaNotes: [],
+      qaHandoffNotes: session.qaNotes,
       qaRerunPending: session.transcripts.qa.length > 0,
     });
   });

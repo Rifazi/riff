@@ -11,6 +11,7 @@ import {
   Maximize2,
   Play,
   RotateCcw,
+  Undo2,
   Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,16 +31,19 @@ export type MemberStatus = TeamMemberStatus | QaReviewerStatus;
 const STATUS_META: Record<MemberStatus, { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
   waiting: { label: 'Waiting', variant: 'secondary' },
   running: { label: 'Working', variant: 'info' },
+  ready: { label: 'Awaiting review', variant: 'warning' },
   merging: { label: 'Merging', variant: 'info' },
   merged: { label: 'Merged', variant: 'success' },
   done: { label: 'Done', variant: 'success' },
   failed: { label: 'Needs attention', variant: 'destructive' },
   blocked: { label: 'Blocked', variant: 'warning' },
+  dropped: { label: 'Taken back', variant: 'secondary' },
 };
 
 export function StatusIcon({ status, className = 'w-3 h-3' }: { status: MemberStatus; className?: string }) {
   if (status === 'running') return <Loader2 className={`${className} animate-spin`} />;
-  if (status === 'merging') return <GitMerge className={className} />;
+  if (status === 'merging' || status === 'ready') return <GitMerge className={className} />;
+  if (status === 'dropped') return <Undo2 className={className} />;
   if (status === 'merged' || status === 'done') return <CheckCircle2 className={className} />;
   if (status === 'failed' || status === 'blocked') return <AlertTriangle className={className} />;
   return <Clock className={className} />;
@@ -104,6 +108,7 @@ function MemberLog({
   runningTool,
   emptyHint,
   readOnlyNote,
+  actions,
 }: {
   persona: TeamPersona;
   status: MemberStatus;
@@ -111,6 +116,8 @@ function MemberLog({
   runningTool: string | null;
   emptyHint: string;
   readOnlyNote: string;
+  /** Beside the status, e.g. "Stop & restart". */
+  actions?: React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const active = status === 'running' || status === 'merging';
@@ -127,6 +134,7 @@ function MemberLog({
       emptyHint={emptyHint}
       headerActions={
         <>
+          {actions}
           <StatusPill status={status} />
           {!expandedView && (
             <Button
@@ -180,8 +188,15 @@ export interface TeamPanelProps<M extends TeamMemberView> {
   renderDetails: (member: M, persona: TeamPersona) => React.ReactNode;
   emptyHint: (member: M, persona: TeamPersona) => string;
   readOnlyNote: (member: M, persona: TeamPersona) => string;
-  /** "Retry this engineer". */
-  retryLabel: string;
+  /**
+   * Restart one member: a working one is stopped and starts over, a failed
+   * one runs again (inside the live run, or by resuming the team).
+   */
+  onRestart?: (memberId: string) => void;
+  /** Whether members can be restarted now (not once the stage is approved). */
+  canRestart?: boolean;
+  /** The member a restart is being sent for. */
+  restartingId?: string | null;
   entriesFor: (member: M) => TranscriptEntry[];
   runningTools: Record<string, string | null>;
   canStart: boolean;
@@ -219,7 +234,9 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
     renderDetails,
     emptyHint,
     readOnlyNote,
-    retryLabel,
+    onRestart,
+    canRestart,
+    restartingId,
     entriesFor,
     runningTools,
     canStart,
@@ -248,6 +265,27 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
   const selected = picked ?? defaultTab;
   const selectedIndex = lineup.findIndex((m) => m.id === selected);
   const member = selectedIndex >= 0 ? lineup[selectedIndex] : null;
+  const restartable = Boolean(onRestart && canRestart && !past);
+  const restartButton = (m: M, persona: TeamPersona) => {
+    const sending = restartingId === m.id;
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        className={m.status === 'running' ? 'h-8' : undefined}
+        onClick={() => onRestart?.(m.id)}
+        disabled={sending || Boolean(restartingId)}
+        title={
+          m.status === 'running'
+            ? `Stop ${persona.name}'s run and start it again, continuing from what it has done so far`
+            : `Run ${persona.name} again, continuing from what it has done so far`
+        }
+      >
+        {sending ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+        {m.status === 'running' ? 'Stop & restart' : `Restart ${persona.name}`}
+      </Button>
+    );
+  };
 
   const count = (...s: MemberStatus[]) => lineup.filter((m) => s.includes(m.status)).length;
   const summary =
@@ -255,7 +293,9 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
       ? 'Ready to start'
       : [
           count('running', 'merging') && `${count('running', 'merging')} working`,
+          count('ready') && `${count('ready')} awaiting review`,
           count('merged') && `${count('merged')} merged`,
+          count('dropped') && `${count('dropped')} taken back`,
           count('done') && `${count('done')} done`,
           count('waiting') && `${count('waiting')} waiting`,
           count('failed', 'blocked') && `${count('failed', 'blocked')} need attention`,
@@ -357,19 +397,20 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
           <div className="flex-shrink-0 space-y-2">
             {renderDetails(member, personas[selectedIndex])}
             {member.note &&
-              (member.status === 'failed' || member.status === 'blocked' || member.status === 'waiting') && (
+              (member.status === 'failed' ||
+                member.status === 'blocked' ||
+                member.status === 'waiting' ||
+                member.status === 'ready' ||
+                member.status === 'dropped') && (
                 <div className="space-y-1.5">
                   <div
-                    className={`text-xs ${member.status === 'waiting' ? 'text-muted-foreground' : 'text-destructive'}`}
+                    className={`text-xs ${
+                      member.status === 'failed' || member.status === 'blocked' ? 'text-destructive' : 'text-muted-foreground'
+                    }`}
                   >
                     {member.note}
                   </div>
-                  {member.status === 'failed' && canStart && (
-                    <Button size="sm" variant="outline" onClick={onStart} disabled={starting}>
-                      {starting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-                      {retryLabel}
-                    </Button>
-                  )}
+                  {member.status === 'failed' && restartable && restartButton(member, personas[selectedIndex])}
                 </div>
               )}
           </div>
@@ -381,6 +422,9 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
             runningTool={runningTools[member.id] ?? null}
             emptyHint={emptyHint(member, personas[selectedIndex])}
             readOnlyNote={readOnlyNote(member, personas[selectedIndex])}
+            actions={
+              member.status === 'running' && restartable ? restartButton(member, personas[selectedIndex]) : undefined
+            }
           />
         </div>
       ) : (

@@ -37,13 +37,13 @@ export default function DevSessionsPage() {
   const noProviderConfigured = settings && !Object.values(settings.credentials).some((c) => c.hasKey);
 
   const [title, setTitle] = useState('');
-  const [sessionKey, setSessionKey] = useState('');
+  const [ticket, setTicket] = useState('');
   const [appId, setAppId] = useState('');
   const [existingBranch, setExistingBranch] = useState('');
   const [pendingDelete, setPendingDelete] = useState<SessionRecord | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: () => api.createSession({ title, sessionKey: sessionKey || undefined, appId, existingBranch: existingBranch || undefined }),
+    mutationFn: () => api.createSession({ title, ticket: ticket.trim() || undefined, appId, existingBranch: existingBranch || undefined }),
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       router.push(sessionHref(session.id, stageGroupFor(session)));
@@ -108,8 +108,8 @@ export default function DevSessionsPage() {
                 <Input
                   className="w-52"
                   placeholder="Ticket ID (optional)"
-                  value={sessionKey}
-                  onChange={(e) => setSessionKey(e.target.value)}
+                  value={ticket}
+                  onChange={(e) => setTicket(e.target.value)}
                 />
                 <Input
                   className="w-52"
@@ -151,7 +151,7 @@ export default function DevSessionsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-foreground truncate">{session.title}</div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-mono">{session.sessionKey}</span>
+                      <span className="font-mono">{session.ticket ?? session.sessionKey}</span>
                       <Badge variant="secondary">{session.appName}</Badge>
                       {session.splitFrom && (
                         <Badge variant="secondary" className="gap-1" title={`Split from "${session.splitFrom.title}"`}>

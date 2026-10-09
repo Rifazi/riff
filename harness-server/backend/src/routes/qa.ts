@@ -15,6 +15,7 @@ import { resolveBaseBranch } from '../repo/git.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
+import { restartLiveMember } from '../agents/team/team-state.js';
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -70,6 +71,17 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       reply.raw.end();
     }
+  });
+
+  // Restarts one reviewer inside the team's live run: a running one is
+  // stopped and starts over, a failed one runs again straight away. With no
+  // run going ({ live: false }) the caller resumes the team instead.
+  app.post<{ Params: { id: string; memberId: string } }>('/api/sessions/:id/qa/team/members/:memberId/restart', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    const { live, error } = await restartLiveMember('qa', session.id, request.params.memberId);
+    if (error) return reply.code(409).send({ error });
+    return { live };
   });
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/team', async (request, reply) => {

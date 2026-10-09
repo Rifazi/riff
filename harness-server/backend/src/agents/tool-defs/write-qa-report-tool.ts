@@ -36,6 +36,7 @@ export const writeQaReportDescription =
 
 export function createWriteQaReportExecute(sessionInfo: {
   sessionKey: string;
+  ticket?: string | null;
   sessionId: string;
   branch: string;
   requirementsPath: string;
@@ -66,7 +67,7 @@ export function createWriteQaReportExecute(sessionInfo: {
     }
 
     const frontmatter = {
-      ticket: sessionInfo.sessionKey,
+      ticket: sessionInfo.ticket ?? sessionInfo.sessionKey,
       status: 'pending-review',
       result,
       created: createdDate,
@@ -90,6 +91,7 @@ export function createWriteQaReportExecute(sessionInfo: {
 
 export function createWriteQaReportTool(sessionInfo: {
   sessionKey: string;
+  ticket?: string | null;
   sessionId: string;
   branch: string;
   requirementsPath: string;

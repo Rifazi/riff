@@ -161,7 +161,7 @@ export async function runRequirementsAgentTurn(
         tools: [
           searchDocsToolClaude,
           readDocToolClaude,
-          createWriteRequirementsToolClaude({ sessionKey: session.sessionKey, sessionId: session.id }),
+          createWriteRequirementsToolClaude({ sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id }),
           askMultipleChoiceToolClaude,
           askQuestionToolClaude,
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
@@ -198,7 +198,7 @@ export async function runRequirementsAgentTurn(
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
-      write_requirements_doc: createWriteRequirementsTool({ sessionKey: session.sessionKey, sessionId: session.id }),
+      write_requirements_doc: createWriteRequirementsTool({ sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id }),
       ask_multiple_choice: askMultipleChoiceTool,
       ask_question: askQuestionTool,
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),

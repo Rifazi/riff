@@ -6,7 +6,7 @@ import {
 } from '../tool-defs/write-requirements-tool.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createWriteRequirementsToolClaude(sessionInfo: { sessionKey: string; sessionId: string }) {
+export function createWriteRequirementsToolClaude(sessionInfo: { sessionKey: string; ticket?: string | null; sessionId: string }) {
   return tool(
     'write_requirements_doc',
     writeRequirementsDescription,

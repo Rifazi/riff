@@ -14,7 +14,9 @@ import { CodingPlanChecklist } from './CodingPlanChecklist';
 import { EarlierRounds, PathChips, TeamPanel, pastTeamStatus, type TeamStatus } from './AgentTeam';
 
 // Jack's coding team on the shared team board (AgentTeam.tsx): engineers
-// own paths, build checklist steps and merge into the session branch.
+// own paths and build checklist steps on their own branches; Jack reviews
+// each finished branch and merges it into the session branch, sends it
+// back, or takes its steps back.
 
 function nameOf(id: string, all: Workstream[]): string {
   const i = all.findIndex((w) => w.id === id);
@@ -41,6 +43,9 @@ export interface CodingTeamPanelProps {
   canStart: boolean;
   starting: boolean;
   onStart: () => void;
+  onRestart?: (memberId: string) => void;
+  canRestart?: boolean;
+  restartingId?: string | null;
   leadChat: React.ReactNode;
   leadActive: boolean;
   past?: boolean;
@@ -53,11 +58,14 @@ export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatu
   const doneSteps = steps.filter((s) => teamStepIds.includes(s.id) && s.status === 'done').length;
   const finishedNote = past
     ? teamStatus === 'done'
-      ? { ok: true, text: "An earlier round — everyone's work was merged." }
+      ? { ok: true, text: `An earlier round — ${lead} merged or took back every workstream.` }
       : { ok: false, text: 'An earlier round — not everything merged before the next one started.' }
     : teamStatus === 'done'
-      ? { ok: true, text: `Everyone's work is merged — review the diff, or ask ${lead} for changes.` }
-      : { ok: false, text: `Not everything merged — resume the team to retry, or ask ${lead} to finish it.` };
+      ? { ok: true, text: `${lead} merged or took back every workstream — review the diff, or ask ${lead} for changes.` }
+      : {
+          ok: false,
+          text: `Not everything merged — resume the team, or ask ${lead} to review, merge or take back what's open.`,
+        };
 
   return (
     <TeamPanel
@@ -77,12 +85,11 @@ export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatu
         label: 'steps done',
         aside: branch && (
           <span className="break-all">
-            merging into <code className="text-foreground">{branch}</code>
+            {lead} merges into <code className="text-foreground">{branch}</code>
           </span>
         ),
       }}
       finishedNote={finishedNote}
-      retryLabel="Retry this engineer"
       renderDetails={(member, persona) => (
         <>
           <CodingPlanChecklist
@@ -97,13 +104,15 @@ export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatu
       emptyHint={(member, persona) => {
         const after = waitsFor(member, members);
         return member.status === 'waiting' && after
-          ? `${persona.name} starts once ${after} ${after.includes('&') ? 'have' : 'has'} merged.`
+          ? `${persona.name} starts once ${lead} has merged ${after}.`
           : `${persona.name} hasn't started yet.`;
       }}
       readOnlyNote={(member, persona) =>
         member.status === 'merging'
-          ? `Merging ${member.branch} into the session branch…`
-          : `${persona.name}'s full log — read only. ${lead} takes follow-ups once the team is done.`
+          ? `${lead} is merging ${member.branch} into the session branch…`
+          : member.status === 'ready'
+            ? `${persona.name} is done on ${member.branch} — waiting for ${lead} to review and merge it.`
+            : `${persona.name}'s full log — read only. ${lead} reviews and merges each branch.`
       }
     />
   );

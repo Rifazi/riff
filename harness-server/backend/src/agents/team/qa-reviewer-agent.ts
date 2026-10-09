@@ -17,6 +17,7 @@ import { compressMessages } from '../helpers/compress.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { createReviewTools, REVIEW_TOOL_NAMES } from '../qa-agent.js';
 import { createSubmitReviewTool } from '../tool-defs/qa-team-tools.js';
+import { qaHandoffSection } from '../tool-defs/qa-notes-tool.js';
 import { createSubmitReviewToolClaude } from '../tool-defs-claude/qa-team-tools.js';
 
 const QA_PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/qa-agent.md');
@@ -28,6 +29,9 @@ export interface RunReviewerParams {
   member: QaTeamMember;
   teammates: QaTeamMember[];
   onEvent: (event: AgentEvent) => void;
+  // Aborted when the human restarts a running reviewer; nothing from the
+  // aborted run is persisted after that.
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -36,7 +40,7 @@ export interface RunReviewerParams {
  * same read-only tools as the QA lead plus submit_review. Reviewers share
  * the main checkout, which nothing writes to during QA.
  */
-export async function runQaReviewerAgent({ session, app, member, teammates, onEvent }: RunReviewerParams): Promise<void> {
+export async function runQaReviewerAgent({ session, app, member, teammates, onEvent, abortSignal }: RunReviewerParams): Promise<void> {
   if (!session.branch || !session.requirementsPath) throw new Error('QA needs a branch and an approved requirements document.');
   const { provider, model } = await getRoleModelConfig('qa');
   // Local helpers report into this reviewer's own chat.
@@ -66,6 +70,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     repoInstructionsNote(app.repoRoot) +
     `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirements}` +
     brief +
+    qaHandoffSection(session.qaHandoffNotes) +
     (referenceDocs ? `\n\n${referenceDocs}` : '');
 
   const prompt = `Review your criteria on ${session.branch} now, then call submit_review.`;
@@ -73,6 +78,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
 
   const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
+    if (abortSignal?.aborted) return;
     onEvent(event);
     if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
     void persistEvent(session.id, member.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
@@ -99,7 +105,9 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
       prompt,
       cwd: app.repoRoot,
       onEvent: wrappedOnEvent,
+      abortSignal,
     });
+    if (abortSignal?.aborted) return;
     await mutateSession(session.id, (s) => {
       const m = s.qaTeam?.members.find((x) => x.id === member.id);
       if (m) m.claudeSessionId = sdkSessionId;
@@ -120,7 +128,9 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     prompt,
     onEvent: wrappedOnEvent,
     compressHistory: compressMessages,
+    abortSignal,
   });
+  if (abortSignal?.aborted) return;
   await mutateSession(session.id, (s) => {
     const m = s.qaTeam?.members.find((x) => x.id === member.id);
     if (m) m.history = updatedHistory;

@@ -115,7 +115,7 @@ function RequirementsDialog({
 
   const [appId, setAppId] = useState('');
   const [title, setTitle] = useState(source.title);
-  const [sessionKey, setSessionKey] = useState('');
+  const [ticket, setTicket] = useState('');
   const [includeSummary, setIncludeSummary] = useState(true);
   const [summaryAvailable, setSummaryAvailable] = useState(false);
   const isJournal = source.kind === 'journal';
@@ -123,7 +123,7 @@ function RequirementsDialog({
   useEffect(() => {
     if (!open) return;
     setTitle(source.title);
-    setSessionKey('');
+    setTicket('');
     source
       .getSummaryMarkdown()
       .then((md) => setSummaryAvailable(Boolean(md?.trim())))
@@ -137,7 +137,7 @@ function RequirementsDialog({
       if (!input.transcript.trim()) throw new Error(`This ${source.kind} has nothing to work from yet.`);
       return api.createSession({
         title: title.trim(),
-        sessionKey: sessionKey.trim() || undefined,
+        ticket: ticket.trim() || undefined,
         appId,
         source: input,
       });
@@ -213,7 +213,7 @@ function RequirementsDialog({
               <Label>
                 Ticket ID <span className="text-muted-foreground font-normal">(optional)</span>
               </Label>
-              <Input value={sessionKey} onChange={(e) => setSessionKey(e.target.value)} placeholder="e.g. API-1234" />
+              <Input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="e.g. API-1234" />
             </div>
             {summaryAvailable && (
               <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 cursor-pointer">

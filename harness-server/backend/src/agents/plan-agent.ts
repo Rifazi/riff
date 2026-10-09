@@ -165,6 +165,7 @@ export async function runPlanAgentTurn(
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
           createWritePlanToolClaude({
             sessionKey: session.sessionKey,
+            ticket: session.ticket,
             sessionId: session.id,
             requirementsPath: session.requirementsPath ?? '',
           }),
@@ -207,6 +208,7 @@ export async function runPlanAgentTurn(
       ...delegateToolEntry(researchDeps, session.histories.plan),
       write_plan_doc: createWritePlanTool({
         sessionKey: session.sessionKey,
+        ticket: session.ticket,
         sessionId: session.id,
         requirementsPath: session.requirementsPath ?? '',
       }),

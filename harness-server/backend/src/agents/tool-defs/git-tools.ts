@@ -56,16 +56,21 @@ export interface GitToolDeps {
   onBranchCreated: (branchName: string) => Promise<void>;
   // A coding-team member's owned paths: commits can't include anything else.
   writablePaths?: string[];
+  // Runs before branch creation and every commit, and throws to refuse it
+  // (the lead's pending split decision).
+  guard?: () => Promise<void>;
 }
 
 export function createGitExecutors(deps: GitToolDeps) {
   const gitCreateBranchExecute = async ({ branchName }: z.infer<typeof gitCreateBranchSchema>): Promise<string> => {
+    await deps.guard?.();
     await createBranch(deps.repoRoot, branchName, deps.baseBranch);
     await deps.onBranchCreated(branchName);
     return `Created and checked out branch ${branchName}.`;
   };
 
   const gitCommitExecute = async ({ branchName, message, files }: z.infer<typeof gitCommitSchema>): Promise<string> => {
+    await deps.guard?.();
     const problem = commitMessageProblem(message);
     if (problem) {
       throw new Error(`Not committed: ${problem}. Message was: "${message.split('\n')[0]}"`);

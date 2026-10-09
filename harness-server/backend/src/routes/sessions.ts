@@ -4,9 +4,9 @@ import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { createSession, deleteSession, getSession, listSessions, updateSession } from '../sessions/session-store.js';
 import { checkoutExistingBranch, GitPreconditionError } from '../repo/git.js';
-import { slugify, type SessionRecord } from '../sessions/session.js';
+import type { SessionRecord } from '../sessions/session.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
-import { isSessionKeyInUse } from '../sessions/session-keys.js';
+import { uniqueSessionKey } from '../sessions/session-keys.js';
 import { cleanupTeamWorktrees } from '../agents/team/coding-team.js';
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { listApps } from '../apps/apps-store.js';
@@ -35,8 +35,10 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     return Promise.all(sessions.map(withAppName));
   });
 
-  app.post<{ Body: { title: string; sessionKey?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput } }>('/api/sessions', async (request, reply) => {
-    const { title, sessionKey, appId, existingBranch, source } = request.body ?? {};
+  // `ticket` is the ticket ID the human typed — several sessions can share one.
+  app.post<{ Body: { title: string; ticket?: string; appId: string; existingBranch?: string; source?: MeetingSourceInput } }>('/api/sessions', async (request, reply) => {
+    const { title, appId, existingBranch, source } = request.body ?? {};
+    const ticket = request.body?.ticket?.trim() || null;
     if (!title || !title.trim()) {
       return reply.code(400).send({ error: 'title is required' });
     }
@@ -65,18 +67,13 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
       }
     }
 
-    // Reject a key collision here, once, before two sessions can merge onto
-    // the same docs (see session-keys.ts).
-    const effectiveKey = sessionKey?.trim() || slugify(title);
-    if (await isSessionKeyInUse(effectiveKey)) {
-      return reply.code(409).send({
-        error: `"${effectiveKey}" is already in use by another session or an existing artifact doc — pick a different ticket ID, or open the existing session instead.`,
-      });
-    }
+    // Each session gets its own key so two never merge onto the same docs
+    // (see session-keys.ts), even when they share a ticket.
+    const sessionKey = await uniqueSessionKey({ ticket, title });
 
     const id = uuidv4();
     const sourceMeeting = source ? await writeMeetingSource(id, source) : null;
-    const session = await createSession({ id, title, sessionKey, appId, branch, sourceMeeting });
+    const session = await createSession({ id, title, sessionKey, ticket, appId, branch, sourceMeeting });
     return reply.code(201).send(await withAppName(session));
   });
 

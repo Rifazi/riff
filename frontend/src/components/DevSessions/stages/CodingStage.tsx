@@ -19,6 +19,7 @@ import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
 import { CodingTeamPanel, EarlierTeamRounds } from '../CodingTeam';
 import { DiffViewer } from '../DiffViewer';
+import { QaNotes } from '../QaNotes';
 import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
@@ -122,6 +123,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     finished: teamFinished,
     start: startTeam,
     entriesFor,
+    restartMember,
+    restarting,
+    restartError,
   } = useTeamBoard({ sessionId, kind: 'coding', team: codingTeam, leadBusy: streaming, refresh });
 
   const approveMutation = useMutation({
@@ -397,10 +401,13 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               canStart={canStartTeam}
               starting={team.running}
               onStart={startTeam}
+              onRestart={restartMember}
+              canRestart={!approved}
+              restartingId={restarting}
               leadChat={leadChat}
-              leadActive={streaming}
+              leadActive={streaming || team.leadActive}
             />
-            <ErrorText>{team.error ?? error}</ErrorText>
+            <ErrorText>{team.error ?? restartError ?? error}</ErrorText>
           </div>
         ) : (
           <div className="flex flex-col flex-1 min-h-0 gap-3">
@@ -493,7 +500,8 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               </div>
             )}
           </div>
-          <div className="flex-shrink-0 px-4 pb-4">
+          <div className="flex-shrink-0 px-4 pb-4 space-y-2">
+            {!approved && <QaNotes notes={session.qaNotes ?? []} title="Notes for QA — sent when QA starts" />}
             {plan && !allStepsDone && !approved && (
               <Notice tone="amber">
                 {plan.filter((s) => s.status === 'done').length} of {plan.length} planned steps done — approving now

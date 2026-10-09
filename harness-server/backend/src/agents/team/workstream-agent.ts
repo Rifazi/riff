@@ -30,6 +30,7 @@ import { createGitTools } from '../tool-defs/git-tools.js';
 import { createQaTools } from '../tool-defs/qa-tools.js';
 import { createRunPrettierTool } from '../tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from '../tool-defs/npm-install-tool.js';
+import { createNoteForQaTool } from '../tool-defs/qa-notes-tool.js';
 import { createUpdateMyStepsTool } from '../tool-defs/team-steps-tool.js';
 import { createDocsSearchToolsClaude } from '../tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from '../tool-defs-claude/code-search-tool.js';
@@ -39,6 +40,7 @@ import { createGitToolsClaude } from '../tool-defs-claude/git-tools.js';
 import { createQaToolsClaude } from '../tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from '../tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from '../tool-defs-claude/npm-install-tool.js';
+import { createNoteForQaToolClaude } from '../tool-defs-claude/qa-notes-tool.js';
 import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-tool.js';
 // No read_file compression here: a team member edits what it reads, and a
 // compressed read only sent it back for a ranged re-read (helpers/compress.ts).
@@ -66,6 +68,12 @@ export interface RunWorkstreamParams {
   // the coding role's, and/or with this message instead of the default.
   model?: string;
   prompt?: string;
+  // The human restarted this member (coding-team.ts restartMember): its
+  // conversation was cleared, and the restart says so instead of "ran out of steps".
+  restarted?: boolean;
+  // Aborted when the human restarts a running member. Nothing from the
+  // aborted run is persisted after that, so it can't clobber the restart.
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -84,6 +92,8 @@ export async function runWorkstreamAgent({
   onEvent,
   model: modelOverride,
   prompt: promptOverride,
+  restarted,
+  abortSignal,
 }: RunWorkstreamParams): Promise<void> {
   const { provider: roleProvider, model: roleModel, delegateModel } = await getRoleModelConfig('coding');
   // When the member carries a localModel, spin it up on Ollama instead of the
@@ -152,7 +162,7 @@ export async function runWorkstreamAgent({
   let contextStartEntryId = member.contextStartEntryId ?? null;
   if (freshAfterFailure) {
     handoffNote = await buildHandoff({
-      reason: 'The previous run ran out of steps and was restarted fresh.',
+      reason: restarted ? 'The human stopped the previous run and restarted it fresh.' : 'The previous run ran out of steps and was restarted fresh.',
       entries: entriesSince(member.transcript, contextStartEntryId),
       repoRoot: worktreePath,
       branch: member.branch,
@@ -161,7 +171,9 @@ export async function runWorkstreamAgent({
     });
     const marker = await appendTeamTranscriptEntry(session.id, member.id, {
       role: 'system',
-      text: '⟲ New conversation — previous run ran out of steps, restarting with a handoff summary.',
+      text: restarted
+        ? '⟲ New conversation — restarted by you, continuing from a handoff summary.'
+        : '⟲ New conversation — previous run ran out of steps, restarting with a handoff summary.',
     });
     contextStartEntryId = marker.id;
     await mutateSession(session.id, (s) => {
@@ -170,11 +182,18 @@ export async function runWorkstreamAgent({
     });
   }
 
+  const feedback = member.feedback
+    ? `Your lead reviewed your branch and sent it back:\n\n${member.feedback}\n\nYour checkout has everything you ` +
+      'committed. Make exactly these changes, keep lint and tests passing, commit, and leave nothing uncommitted. ' +
+      'Your branch goes back to the lead for review when you finish.'
+    : null;
   const prompt =
     promptOverride ??
+    feedback ??
     (freshAfterFailure
-      ? 'Your previous run on this workstream ran out of steps. The summary above shows what was done. ' +
-        'Check what is already committed on your branch, then finish any remaining steps and leave nothing uncommitted.'
+      ? `Your previous run on this workstream ${restarted ? 'was stopped and restarted' : 'ran out of steps'}. The summary above shows what was done. ` +
+        'Check what is already committed on your branch (and anything left uncommitted in your checkout), then finish ' +
+        'any remaining steps and leave nothing uncommitted.'
       : resuming
         ? 'Your previous run on this workstream stopped before it finished. Your checkout still has everything you ' +
           'committed (and anything you left uncommitted). Read your files to see where you got to, then finish the ' +
@@ -223,7 +242,15 @@ export async function runWorkstreamAgent({
 
   // Each result's tool, so the chat can show a delegate result as its own card.
   const toolNames = new Map<string, string>();
+  // A run that ends in an error (out of usage, a provider outage) is a
+  // failure with that reason, not "finished without committing anything".
+  let runError: string | null = null;
+  let lastText = '';
   const wrappedOnEvent = (event: AgentEvent) => {
+    if (abortSignal?.aborted) return;
+    if (event.type === 'error') runError = event.message;
+    if (event.type === 'assistant_text') lastText = event.text;
+    if (event.type === 'done' && event.isError) runError ??= event.text || lastText || 'The run ended with an error.';
     contextLog.record(event);
     onEvent(event);
     if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
@@ -232,6 +259,7 @@ export async function runWorkstreamAgent({
 
   const scoped = { repoRoot: worktreePath, writablePaths: member.ownedPaths };
   const steps = { sessionId: session.id, stepIds: member.stepIds };
+  const qaNoteDeps = { sessionId: session.id, from: member.title };
 
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
@@ -266,6 +294,7 @@ export async function runWorkstreamAgent({
       runCheckedCommandToolClaude,
       createRunPrettierToolClaude(scoped),
       createUpdateMyStepsToolClaude(steps),
+      createNoteForQaToolClaude(qaNoteDeps),
       ...(ownsPackageJson(member) ? [createRunNpmInstallToolClaude({ repoRoot: worktreePath })] : []),
       ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
     ];
@@ -284,6 +313,7 @@ export async function runWorkstreamAgent({
       'run_checked_command',
       'run_prettier',
       'update_my_steps',
+      'note_for_qa',
       ...(ownsPackageJson(member) ? ['run_npm_install'] : []),
       ...(delegateDeps ? ['delegate'] : []),
     ];
@@ -298,11 +328,14 @@ export async function runWorkstreamAgent({
       cwd: worktreePath,
       onEvent: wrappedOnEvent,
       compaction,
+      abortSignal,
     });
+    if (abortSignal?.aborted) return;
     await mutateSession(session.id, (s) => {
       const m = s.codingTeam?.members.find((x) => x.id === member.id);
       if (m) m.claudeSessionId = sdkSessionId;
     });
+    if (runError) throw new Error(firstLine(runError));
     return;
   }
 
@@ -337,6 +370,7 @@ export async function runWorkstreamAgent({
     run_checked_command: runCheckedCommandTool,
     run_prettier: createRunPrettierTool(scoped),
     update_my_steps: createUpdateMyStepsTool(steps),
+    note_for_qa: createNoteForQaTool(qaNoteDeps),
     ...(ownsPackageJson(member) ? { run_npm_install: createRunNpmInstallTool({ repoRoot: worktreePath }) } : {}),
     ...delegateToolEntry(delegateDeps, member.history),
   };
@@ -352,12 +386,17 @@ export async function runWorkstreamAgent({
     onEvent: wrappedOnEvent,
     compaction,
     compressHistory: compressMessages,
+    abortSignal,
   });
+  if (abortSignal?.aborted) return;
   await mutateSession(session.id, (s) => {
     const m = s.codingTeam?.members.find((x) => x.id === member.id);
     if (m) m.history = updatedHistory;
   });
+  if (runError) throw new Error(firstLine(runError));
 }
+
+const firstLine = (text: string) => text.trim().split('\n')[0].slice(0, 300);
 
 async function persistEvent(sessionId: string, memberId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
   if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);

@@ -82,8 +82,11 @@ export const assignTeamDescription =
   'Look before you split: read the plan and search_code / outline_file the areas involved so ownedPaths are right. ' +
   'Commit or discard any uncommitted work first. The call is rejected if paths overlap, an unfinished step is ' +
   'unassigned, or nothing could run in parallel. Once it succeeds, end your turn: tell the human in a few lines who ' +
-  'builds what and why. The team starts when your turn ends, and each finished workstream is merged into the ' +
-  'session branch; you take follow-ups once they are done. Don\'t write code yourself in the same turn.';
+  'builds what and why. The team starts when your turn ends. Don\'t write code yourself in the same turn.\n\n' +
+  'You stay responsible for the branches: each engineer works on its own branch, and when one finishes (or fails) ' +
+  'you get a turn to review it (review_workstream) and merge it into the session branch (merge_workstream), send ' +
+  'it back with feedback (send_back_workstream), or take its steps back (drop_workstreams). A workstream that ' +
+  'depends on others starts once you have merged them. team_status shows every branch.';
 
 /**
  * Records the lead's split as the session's next team round ("assigned").
@@ -95,6 +98,16 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
     const session = await getSession(deps.sessionId);
     if (!session) throw new Error('Session not found.');
     if (session.codingTeam?.status === 'running') throw new Error('A coding team is already running for this session.');
+    // Starting a new round would orphan branches the lead still owns.
+    const openMembers = session.codingTeam?.status === 'assigned' && !session.codingTeam.members.some((m) => m.branch)
+      ? []
+      : (session.codingTeam?.members ?? []).filter((m) => ['waiting', 'running', 'ready', 'merging'].includes(m.status));
+    if (openMembers.length) {
+      throw new Error(
+        `Round ${session.codingTeam!.round} still has open workstreams (${openMembers.map((m) => `${m.id}: ${m.status}`).join(', ')}). ` +
+          'Merge, send back or drop them first — team_status shows where each one is.'
+      );
+    }
     if (session.branch && (await hasUncommittedChanges(deps.repoRoot))) {
       throw new Error('The branch has uncommitted changes — commit or discard them before handing work to a team.');
     }
@@ -108,13 +121,14 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
       taken.add(step.id);
     }
     const added: CodingPlanStep[] = newSteps.map((s) => ({ id: s.id, title: s.title, brief: s.brief, status: 'pending' }));
-    const open = [...checklist, ...added].filter((s) => s.status !== 'done').map((s) => s.id);
+    const unfinished = [...checklist, ...added].filter((s) => s.status !== 'done').map((s) => s.id);
     // Thrown before anything is saved, so the model sees why and retries.
-    const valid = validateWorkstreams(open, withLockfiles(deps.repoRoot, workstreams), await planStepEfforts(session));
+    const valid = validateWorkstreams(unfinished, withLockfiles(deps.repoRoot, workstreams), await planStepEfforts(session));
 
     let round = 1;
     await mutateSession(deps.sessionId, (s) => {
-      s.codingPlan = [...checklist, ...added].map((step) => (open.includes(step.id) ? { ...step, status: 'pending' } : step));
+      s.codingPlan = [...checklist, ...added].map((step) => (unfinished.includes(step.id) ? { ...step, status: 'pending' } : step));
+      s.teamDecisionPending = false;
       const previous = s.codingTeam;
       // Re-assigning before the team started replaces that split; anything
       // else becomes history and this is the next round.
@@ -143,6 +157,8 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
             history: [],
             claudeSessionId: null,
             localModel: localTeamModel,
+            feedback: null,
+            sendBacks: 0,
           })
         ),
       };
@@ -150,7 +166,8 @@ export function createAssignTeamExecute(deps: { sessionId: string; repoRoot: str
 
     return (
       `Team assigned (round ${round}): ${valid.map((w) => `${w.id} → ${w.stepIds.join(', ')}`).join('; ')}. ` +
-      'End your turn now with a short note to the human on who builds what and why — the team starts when your turn ends.'
+      'End your turn now with a short note to the human on who builds what and why — the team starts when your turn ends, ' +
+      'and you will get a turn to review and merge each workstream as it finishes.'
     );
   };
 }

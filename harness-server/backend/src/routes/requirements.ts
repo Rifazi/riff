@@ -159,7 +159,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
         // the agent yet) — this is a legitimate way to start one from
         // scratch, not an error. Fall back to sensible defaults.
         frontmatter = {
-          ticket: session.sessionKey,
+          ticket: session.ticket ?? session.sessionKey,
           created: new Date().toISOString().slice(0, 10),
           'author-agent': 'requirements',
           session: session.id,
@@ -276,6 +276,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
           id: ids[i],
           title: part.title,
           sessionKey: keys[i],
+          ticket: session.ticket,
           appId: session.appId,
           sourceMeeting,
           splitFrom: {

@@ -108,6 +108,8 @@ export interface FileToolDeps {
   onRead?: (filePath: string) => void;
   /** Shared with the agent's other read tools and cleared on compaction; a fresh one when unset. */
   readMemo?: ReadMemo;
+  /** Runs before every write and throws to refuse it (the lead's pending split decision). */
+  guard?: () => Promise<void>;
 }
 
 export function createFileExecutors(deps: FileToolDeps) {
@@ -161,6 +163,7 @@ export function createFileExecutors(deps: FileToolDeps) {
   };
 
   const writeFileExecute = async ({ path: requestedPath, content }: z.infer<typeof writeFileSchema>): Promise<string> => {
+    await deps.guard?.();
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     const existed = await fs
       .stat(absolute)
@@ -175,12 +178,14 @@ export function createFileExecutors(deps: FileToolDeps) {
   };
 
   const deleteFileExecute = async ({ path: requestedPath }: z.infer<typeof deleteFileSchema>): Promise<string> => {
+    await deps.guard?.();
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     await fs.unlink(absolute);
     return `Deleted ${requestedPath}`;
   };
 
   const editFileExecute = async ({ path: requestedPath, oldText, newText, edits }: z.infer<typeof editFileSchema>): Promise<string> => {
+    await deps.guard?.();
     const absolute = assertWritable(requestedPath, deps.repoRoot, deps.writablePaths);
     const replacements = [...(oldText !== undefined ? [{ oldText, newText: newText ?? '' }] : []), ...(edits ?? [])];
     if (replacements.length === 0) throw new Error('Pass oldText and newText, or edits.');

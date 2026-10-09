@@ -74,6 +74,9 @@ export interface QaTeamPanelProps {
   canStart: boolean;
   starting: boolean;
   onStart: () => void;
+  onRestart?: (memberId: string) => void;
+  canRestart?: boolean;
+  restartingId?: string | null;
   leadChat: React.ReactNode;
   leadActive: boolean;
   past?: boolean;
@@ -105,7 +108,6 @@ export function QaTeamPanel({ team, teamStatus, past, ...rest }: QaTeamPanelProp
       progress={{ done: reported, total: team.members.length, label: 'reviews in' }}
       extra={<ChecksRow checks={team.checks} />}
       finishedNote={finishedNote}
-      retryLabel="Retry this reviewer"
       renderDetails={(member, persona) => (
         <>
           <CodingPlanChecklist
