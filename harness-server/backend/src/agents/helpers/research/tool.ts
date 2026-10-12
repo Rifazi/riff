@@ -20,7 +20,9 @@ import {
 } from './core.js';
 import { reportHelperRedo, reportHelperRun, type HelperContext } from '../helper.js';
 import { createDocsSearchTools } from '../../tool-defs/docs-search-tool.js';
-import { createSearchCodeTool } from '../../tool-defs/code-search-tool.js';
+import { createSearchCodeTool, type SearchListing } from '../../tool-defs/code-search-tool.js';
+import type { AppConfig } from '../../../apps/apps.js';
+import { domainListing } from '../../../architecture/focus.js';
 import { createOutlineFileTool } from '../../tool-defs/outline-tool.js';
 import { createFileExecutors, readFileDescription, readFileSchema } from '../../tool-defs/file-tools.js';
 import { createQaExecutors, runCheckedCommandSchema, runCheckedCommandDescription, type CheckCommand } from '../../tool-defs/qa-tools.js';
@@ -56,6 +58,8 @@ export interface DelegateDeps {
   runHelper?: (prompt: string) => Promise<HelperRun>;
   // Answered delegations and the files behind them, per agent turn (see noteDelegateRead).
   ledger?: RedoLedger;
+  // search_code's answer to "list these files": the domains' Files sections in a Wayfinding app.
+  listing?: SearchListing;
 }
 
 /**
@@ -69,6 +73,7 @@ export function delegateDeps(params: {
   appId: string;
   context: HelperContext;
   checkCommands?: Partial<Record<CheckCommand, string>>;
+  app?: Pick<AppConfig, 'architecture'>;
 }): DelegateDeps {
   const model = params.model?.trim() || BUILTIN_MODEL_ID;
   return {
@@ -79,6 +84,7 @@ export function delegateDeps(params: {
     checkCommands: params.checkCommands,
     context: params.context,
     ledger: new RedoLedger(),
+    listing: params.app ? domainListing(params.app, params.repoRoot) : undefined,
   };
 }
 
@@ -120,7 +126,7 @@ async function runOllamaHelper(deps: DelegateDeps, prompt: string): Promise<Help
   });
   const { runCheckedCommandExecute } = createQaExecutors({ repoRoot: deps.repoRoot, checkCommands: deps.checkCommands });
   const tools: ToolSet = {
-    search_code: createSearchCodeTool({ repoRoot: deps.repoRoot }),
+    search_code: createSearchCodeTool({ repoRoot: deps.repoRoot, listing: deps.listing }),
     search_docs: searchDocsTool,
     read_doc: readDocTool,
     outline_file: createOutlineFileTool({ repoRoot: deps.repoRoot }),

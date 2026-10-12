@@ -22,7 +22,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureBriefingFor, architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
-import { namedDomainsFocus } from '../architecture/focus.js';
+import { domainListing, namedDomainsFocus } from '../architecture/focus.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
@@ -179,6 +179,7 @@ export async function runCodingAgentTurn(
     appId: app.id,
     context: helperContext,
     checkCommands: app.checkCommands,
+    app,
   });
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
@@ -457,7 +458,7 @@ export async function runCodingAgentTurn(
           tools: [
             searchDocsToolClaude,
             readDocToolClaude,
-            createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus }),
+            createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
             createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             createClassifyTextToolClaude(helperContext),
@@ -541,7 +542,7 @@ export async function runCodingAgentTurn(
       const tools: ToolSet = {
         search_docs: searchDocsTool,
         read_doc: readDocTool,
-        search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus }),
+        search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         classify_text: createClassifyTextTool(helperContext),

@@ -20,7 +20,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
-import { changedDomainsFocus } from '../architecture/focus.js';
+import { changedDomainsFocus, domainListing } from '../architecture/focus.js';
 import type { AppConfig } from '../apps/apps.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
@@ -108,7 +108,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
       return [
         searchDocsToolClaude,
         readDocToolClaude,
-        createSearchCodeToolClaude({ repoRoot: deps.repoRoot, focus: searchFocus }),
+        createSearchCodeToolClaude({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         createOutlineFileToolClaude({ repoRoot: deps.repoRoot }),
         createAuditThemeToolClaude({ repoRoot: deps.repoRoot }),
         createClassifyTextToolClaude(deps.helperContext),
@@ -124,7 +124,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
       return {
         search_docs: searchDocsTool,
         read_doc: readDocTool,
-        search_code: createSearchCodeTool({ repoRoot: deps.repoRoot, focus: searchFocus }),
+        search_code: createSearchCodeTool({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: deps.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: deps.repoRoot }),
         classify_text: createClassifyTextTool(deps.helperContext),

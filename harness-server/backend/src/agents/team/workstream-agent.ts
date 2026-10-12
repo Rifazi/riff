@@ -26,6 +26,7 @@ import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool, type SearchFocus } from '../tool-defs/code-search-tool.js';
+import { domainListing } from '../../architecture/focus.js';
 import { createOutlineFileTool } from '../tool-defs/outline-tool.js';
 import { createFileTools } from '../tool-defs/file-tools.js';
 import { ReadMemo } from '../tool-defs/read-memo.js';
@@ -116,6 +117,7 @@ export async function runWorkstreamAgent({
     appId: app.id,
     context: helperContext,
     checkCommands: app.checkCommands,
+    app,
   });
   // In an app that follows an architecture, search_code without a glob starts in the member's own paths.
   const searchFocus: SearchFocus | undefined = app.architecture
@@ -291,7 +293,7 @@ export async function runWorkstreamAgent({
     const tools = [
       searchDocsToolClaude,
       readDocToolClaude,
-      createSearchCodeToolClaude({ repoRoot: worktreePath, focus: searchFocus }),
+      createSearchCodeToolClaude({ repoRoot: worktreePath, focus: searchFocus, listing: domainListing(app, worktreePath) }),
       createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
       createClassifyTextToolClaude(helperContext),
@@ -369,7 +371,7 @@ export async function runWorkstreamAgent({
   const tools: ToolSet = {
     search_docs: searchDocsTool,
     read_doc: readDocTool,
-    search_code: createSearchCodeTool({ repoRoot: worktreePath, focus: searchFocus }),
+    search_code: createSearchCodeTool({ repoRoot: worktreePath, focus: searchFocus, listing: domainListing(app, worktreePath) }),
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
     classify_text: createClassifyTextTool(helperContext),

@@ -77,7 +77,7 @@ export async function runRequirementsAgentTurn(
   const { provider, model } = await getRoleModelConfig('requirements');
   const { delegateModel } = await getRoleModelConfig('coding');
   const helperContext = stageHelperContext(session.id, 'requirements');
-  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext });
+  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext, app });
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'requirements');

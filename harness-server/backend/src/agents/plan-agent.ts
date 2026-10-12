@@ -21,7 +21,7 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
-import { namedDomainsFocus } from '../architecture/focus.js';
+import { domainListing, namedDomainsFocus } from '../architecture/focus.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
@@ -74,7 +74,7 @@ export async function runPlanAgentTurn(
   const { provider, model } = await getRoleModelConfig('plan');
   const { delegateModel } = await getRoleModelConfig('coding');
   const helperContext = stageHelperContext(session.id, 'plan');
-  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext });
+  const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext, app });
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'plan');
@@ -170,7 +170,7 @@ export async function runPlanAgentTurn(
         tools: [
           searchDocsToolClaude,
           readDocToolClaude,
-          createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus }),
+          createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'plan')),
@@ -214,7 +214,7 @@ export async function runPlanAgentTurn(
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
-      search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus }),
+      search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'plan')),

@@ -204,18 +204,26 @@ const SHARED = (c: WayfindingConfig) =>
 // edited, so it says so in words as well).
 const FINDING_CODE = (c: WayfindingConfig) =>
   `## Finding code\n\n` +
-  `${MAP_PATH} and the ${DOMAIN_DOC} files are this repo's code map. They replace any other guidance in this prompt on how to ` +
-  `find code (searching docs/ for a code-map page first, searching the code broadly) or on keeping a code map page.\n\n` +
-  `1. read_doc ${MAP_PATH}: find the domain that owns the decision.\n` +
+  `${MAP_PATH} and the ${DOMAIN_DOC} files are this repo's code map, and they are complete: each ${DOMAIN_DOC}'s Files ` +
+  `section is generated from the code and audit_architecture keeps it current. They replace any other guidance in this ` +
+  `prompt on how to find code (searching docs/ for a code-map page first, searching the code broadly) or on keeping a ` +
+  `code map page.\n\n` +
+  `1. read_doc ${MAP_PATH}: find the domain that owns the decision. ${MAP_PATH} lists only top-level domains; a domain's ` +
+  `child domains are under "Child domains" in its ${DOMAIN_DOC}.\n` +
   `2. read_doc that domain's ${DOMAIN_DOC}, one heading at a time when you need only part of it ("Files", "Rules", ` +
-  `"Hidden behavior", "Recipes"). Its generated Files section lists every file the domain holds and what each exports, ` +
-  `the public file first, marked "(interface)".\n` +
+  `"Hidden behavior", "Recipes"). Its Files section lists every file the domain holds and what each exports, the public ` +
+  `file first, marked "(interface)". Read ${MAP_PATH} and ${DOMAIN_DOC} with read_doc, not read_file.\n` +
   `3. Go straight to the file Files names: outline_file it, then read_file only the range you need. To find a call site ` +
-  `or a symbol, search_code inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob already ` +
-  `starts in the domains you're working on and says so.\n` +
+  `or a symbol, search_code for it inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob ` +
+  `already starts in the domains you're working on and says so.\n` +
   `4. Another domain: read its public file, never its private files.\n` +
-  `5. Search the whole repo (search_code with glob ".") only for code that's on no domain yet: config, entry points, and ` +
-  `the folders audit_architecture lists as not on the map yet. Never read a whole folder's files to find something.`;
+  `5. Trust the map. Never list folders or files to check it: no search_code with a pattern that matches everything ` +
+  `(".") or a glob over ${DOMAIN_DOC} files, and no delegate task to list files. Files already answers that. Don't open a ` +
+  `file to confirm what its ${DOMAIN_DOC} says; open one only for the code you'll change, call or reuse. A ${DOMAIN_DOC} ` +
+  `that turns out wrong is something to fix (or report), not a reason to stop trusting the rest.\n` +
+  `6. Search the whole repo (search_code with glob ".") only for code that's on no domain yet: config, entry points, and ` +
+  `the folders audit_architecture lists as not on the map yet, and then with a real pattern. Never read a whole folder's ` +
+  `files to find something.`;
 
 /**
  * The per-role architecture section of an agent's system prompt. Appended

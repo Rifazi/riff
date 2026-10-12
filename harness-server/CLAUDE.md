@@ -1239,6 +1239,34 @@ below) — never inside the target repo.
    Tests: `wayfinding-audit.test.ts` (undocumented folders, a branch touching
    one, the outermost-first order).
 
+45. User asked whether Wayfinding saved tokens. Plan + coding + QA per plan
+   step cost the same on comic-drafter as on apps without it (~320-350k
+   weighted units/step; read_file per step unchanged, read_doc up 3-30×):
+   agents read MAP.md and DOMAIN.md, then the code anyway. The plan agent
+   swept folders with `search_code({ query: "." , glob })` (before
+   `client/` was mapped, which the prompt allowed), and after it was mapped
+   still globbed `client/**/DOMAIN.md`, delegated "list all files under
+   client/src" and opened DOMAIN.md with read_file. User: it should trust
+   DOMAIN.md.
+   - **Listing answered from the map**: `search_code` treats a pattern that
+     matches every line (`isListAllQuery`: "", ".", ".*", "^", "^.*$") as a
+     listing. In a Wayfinding app `SearchCodeDeps.listing`
+     (`architecture/focus.ts` `domainListing` → `listByDomain`) returns the
+     Files sections of the domains the tracked files under the glob fall in
+     (a domain without one lists its own files), plus files on no domain;
+     otherwise it lists tracked paths (80 max). Wired into plan, coding, QA,
+     team members and the research helper (`delegateDeps({ app })`). On the
+     plan agent's real calls: 46.9k → 5.7k chars.
+   - **Briefing** ("Finding code"): the map is complete (Files is generated
+     and audited); child domains are under "Child domains", not on MAP.md;
+     read MAP.md/DOMAIN.md with read_doc; never list folders or files to check
+     the map (match-all search, a glob over DOMAIN.md, a delegate listing
+     task); open a file only for code you'll change, call or reuse; a wrong
+     DOMAIN.md is fixed or reported, not a reason to distrust the rest.
+   Tests: `wayfinding-navigation.test.ts` (listing), run through a node:test
+   shim. Not yet run with real agents; compare read_file/read_doc per step in
+   `state/usage-log.jsonl` on the next comic-drafter session.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

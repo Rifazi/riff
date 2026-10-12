@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { promptForArchitecture } from '../../../harness-server/backend/src/architecture/architecture-context';
-import { domainsNamedIn, domainsOfFiles } from '../../../harness-server/backend/src/architecture/focus';
-import { createSearchCodeExecute } from '../../../harness-server/backend/src/agents/tool-defs/code-search-tool';
+import { domainsNamedIn, domainsOfFiles, listByDomain } from '../../../harness-server/backend/src/architecture/focus';
+import { createSearchCodeExecute, isListAllQuery } from '../../../harness-server/backend/src/agents/tool-defs/code-search-tool';
 import { planStepSection } from '../../../harness-server/backend/src/agents/plan-excerpt';
 
 // How agents in a Wayfinding app find code: from MAP.md and DOMAIN.md down,
@@ -91,6 +91,81 @@ describe('search_code with a focus', () => {
     const result = await search({ query: 'priceFor', glob: '.' });
     expect(result).not.toContain('Searched src/pricing');
     expect(result).toContain('src/invoice/service.ts');
+  });
+});
+
+describe('listing files with search_code', () => {
+  let repo: string;
+  const write = (rel: string, text: string) => {
+    mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    writeFileSync(path.join(repo, rel), text);
+  };
+  const domains = [
+    { id: 'pages', dir: 'client/src/pages' },
+    { id: 'pages/ListPage', dir: 'client/src/pages/ListPage' },
+  ];
+
+  beforeEach(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'search-listing-'));
+    write(
+      'client/src/pages/DOMAIN.md',
+      '# pages\n\n## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface): ListPage\n<!-- end generated -->\n'
+    );
+    write('client/src/pages/service.ts', "export { ListPage } from './ListPage/ListPage'\n");
+    write('client/src/pages/ListPage/DOMAIN.md', '# ListPage\n');
+    write('client/src/pages/ListPage/ListPage.tsx', 'export const ListPage = () => null\n');
+    write('client/src/main.tsx', 'render()\n');
+    write('client/package-lock.json', '{}\n');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+  });
+  afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+  test('a pattern that matches every line is a listing', () => {
+    for (const q of ['.', '.*', '^', '^.*$', '', ' . ']) expect(isListAllQuery(q)).toBe(true);
+    for (const q of ['a.b', '\\.', 'ListPage', '.ts']) expect(isListAllQuery(q)).toBe(false);
+  });
+
+  test("answers from the domains' Files sections, plus files on no domain", async () => {
+    const result = (await listByDomain(repo, domains, 'client/**'))!;
+    expect(result).toContain('client/src/pages/DOMAIN.md\n- `service.ts` (interface): ListPage');
+    // No Files section yet: its tracked files instead.
+    expect(result).toContain('client/src/pages/ListPage/DOMAIN.md (no Files section yet');
+    expect(result).toContain('- `ListPage.tsx`');
+    expect(result).toContain('On no domain yet:\nclient/src/main.tsx');
+    expect(result).not.toContain('package-lock.json');
+    expect(result).not.toContain('render()');
+  });
+
+  test('a glob over DOMAIN.md files lists the domains', async () => {
+    const result = (await listByDomain(repo, domains, 'client/**/DOMAIN.md'))!;
+    expect(result).toContain('client/src/pages/DOMAIN.md');
+    expect(result).toContain('client/src/pages/ListPage/DOMAIN.md');
+    expect(result).not.toContain('On no domain yet');
+  });
+
+  test('null when nothing under the glob is on a domain', async () => {
+    expect(await listByDomain(repo, domains, 'client/src/main.tsx')).toBeNull();
+  });
+
+  test('search_code lists files instead of every line', async () => {
+    const plain = createSearchCodeExecute({
+      get repoRoot() {
+        return repo;
+      },
+    });
+    const result = await plain({ query: '.', glob: 'client/src/**' });
+    expect(result).toContain('only lists files');
+    expect(result).toContain('client/src/main.tsx');
+    expect(result).not.toContain('render()');
+
+    const mapped = createSearchCodeExecute({
+      get repoRoot() {
+        return repo;
+      },
+      listing: (glob) => listByDomain(repo, domains, glob),
+    });
+    expect(await mapped({ query: '.*', glob: 'client/src/pages/**' })).toContain('generated from the code');
   });
 });
 

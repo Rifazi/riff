@@ -31,7 +31,8 @@ export const searchCodeDescription =
   'instead, so it also finds files by name (e.g. "vitest.config"). Use this to check whether something similar ' +
   'already exists before proposing new code, and to find the line range to read_file. In an app that follows an ' +
   'architecture, a search without `glob` looks in the folders you are working in first (the result says which) and ' +
-  'only searches the whole repo when nothing matches there.';
+  'only searches the whole repo when nothing matches there. A pattern that matches every line (".") lists files instead ' +
+  'of returning their lines; in an app that follows an architecture it returns the domains\' generated Files sections.';
 
 /**
  * Where a search without a glob looks first: e.g. the domains a coding step
@@ -39,9 +40,23 @@ export const searchCodeDescription =
  */
 export type SearchFocus = () => Promise<{ label: string; paths: string[] } | null>;
 
+/**
+ * How a pattern that matches every line is answered: e.g. the Files sections
+ * of the domains under `glob`. null = list the tracked files plainly.
+ */
+export type SearchListing = (glob: string | undefined) => Promise<string | null>;
+
 export interface SearchCodeDeps {
   repoRoot: string;
   focus?: SearchFocus;
+  listing?: SearchListing;
+}
+
+const PLAIN_LIST_LIMIT = 80;
+
+/** A pattern that matches every line ("", ".", ".*", "^", "^.*$"): the agent is listing files, not searching. */
+export function isListAllQuery(query: string): boolean {
+  return /^\^?(\.[*+]?)?\$?$/.test(query.trim());
 }
 
 const PATH_MATCH_LIMIT = 15;
@@ -89,7 +104,18 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
     }
   };
 
+  const listFiles = async (glob: string | undefined): Promise<string> => {
+    const listed = await deps.listing?.(glob).catch(() => null);
+    if (listed) return listed;
+    const { stdout } = await execFileAsync('git', ['ls-files', '-z', '--', glob ?? '.'], { cwd: deps.repoRoot, maxBuffer: 20_000_000 });
+    const files = stdout.split('\0').filter(Boolean);
+    if (!files.length) return `No tracked files under "${glob ?? '.'}".`;
+    const more = files.length > PLAIN_LIST_LIMIT ? `\n…and ${files.length - PLAIN_LIST_LIMIT} more: narrow the glob.` : '';
+    return `A pattern that matches every line only lists files. ${files.length} tracked under "${glob ?? '.'}":\n${files.slice(0, PLAIN_LIST_LIMIT).join('\n')}${more}`;
+  };
+
   return async ({ query, glob, context }: z.infer<typeof searchCodeSchema>): Promise<string> => {
+    if (isListAllQuery(query)) return listFiles(glob);
     let note = '';
     if (!glob && deps.focus) {
       const focus = await deps.focus().catch(() => null);
