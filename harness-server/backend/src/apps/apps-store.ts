@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { listSessions } from '../sessions/session-store.js';
 import { validateRepoRoot, ensureDocsDir, slugifyAppId, LEGACY_APP_ID, type AppConfig, type CheckCommands } from './apps.js';
 import { setupGitRepo, type GitSetupResult } from '../repo/git.js';
-import type { ArchitectureConfig } from '../architecture/architecture.js';
+import { normalizeArchitecture, type ArchitectureConfig } from '../architecture/architecture.js';
 
 // Deliberately separate from backend/.env, same treatment as
 // local-settings.json — this is runtime-editable via the Apps page, no
@@ -31,7 +31,9 @@ async function readApps(): Promise<AppConfig[]> {
   if (cache) return cache;
   try {
     const raw = await fs.readFile(APPS_PATH, 'utf8');
-    cache = JSON.parse(raw) as AppConfig[];
+    cache = (JSON.parse(raw) as AppConfig[]).map((app) =>
+      app.architecture ? { ...app, architecture: normalizeArchitecture(app.architecture) } : app
+    );
   } catch {
     cache = await seedFromLegacyEnv();
     if (cache.length > 0) await writeApps(cache);

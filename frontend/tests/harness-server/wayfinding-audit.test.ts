@@ -8,14 +8,16 @@ import { parseArchitectureConfig } from '../../../harness-server/backend/src/arc
 import {
   auditWayfinding,
   branchScope,
+  exportedNames,
   formatWayfindingAudit,
   importSpecifiers,
+  listDomains,
   parseMapRows,
   parseRules,
 } from '../../../harness-server/backend/src/architecture/wayfinding-audit';
 import { branchChanges } from '../../../harness-server/backend/src/repo/git';
 
-const CONFIG = { kind: 'wayfinding' as const, srcDir: 'src', interfaceFile: 'service.ts' };
+const CONFIG = { kind: 'wayfinding' as const, srcDirs: ['src'], interfaceFile: 'service.ts' };
 
 function domainDoc(name: string, opts: { parent?: string; children?: string; rules?: string; consumers?: string; extra?: string } = {}) {
   return `# ${name}
@@ -64,6 +66,8 @@ function seedCleanRepo() {
   write('src/invoice/DOMAIN.md', domainDoc('invoice'));
   write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nexport const render = () => priceFor()\n");
   write('src/lib/util.ts', 'export const x = 1\n');
+  // Writes each DOMAIN.md's generated Files section.
+  auditWayfinding(repo, CONFIG, { regenerate: true });
 }
 
 const messages = () => auditWayfinding(repo, CONFIG).problems.map((p) => p.message);
@@ -133,13 +137,13 @@ describe('auditWayfinding', () => {
 
   test('a missing source folder is reported, not thrown', () => {
     rmSync(path.join(repo, 'src'), { recursive: true });
-    const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
+    const audit = auditWayfinding(repo, { ...CONFIG, srcDirs: ['app'] });
     expect(audit.srcDirExists).toBe(false);
     expect(formatWayfindingAudit(audit)).toContain("app/ doesn't exist yet");
   });
 
   test('a wrong source folder is audited from the one folder that holds every DOMAIN.md', () => {
-    const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
+    const audit = auditWayfinding(repo, { ...CONFIG, srcDirs: ['app'] });
     expect(audit.inferredSrcDir).toBe('src');
     expect(audit.domains.map((d) => d.id).sort()).toEqual(['invoice', 'pricing', 'pricing/promotions']);
     expect(audit.problems).toEqual([]);
@@ -148,7 +152,7 @@ describe('auditWayfinding', () => {
 
   test('a wrong source folder with domains in several folders is reported, not guessed', () => {
     write('server/src/projects/DOMAIN.md', domainDoc('projects'));
-    const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
+    const audit = auditWayfinding(repo, { ...CONFIG, srcDirs: ['app'] });
     expect(audit.inferredSrcDir).toBeUndefined();
     expect(audit.srcDirCandidates).toEqual(['server/src', 'src']);
     expect(formatWayfindingAudit(audit)).toContain('probably wrong');
@@ -157,6 +161,7 @@ describe('auditWayfinding', () => {
   test('Owns data matches tables written as code', () => {
     write('src/invoice/DOMAIN.md', domainDoc('invoice').replace('Owns data: none', 'Owns data: `invoice_headers`, `invoice_lines`'));
     write('src/invoice/entities.ts', "@Entity('invoice_headers')\nclass A {}\n@Entity({ name: 'invoice_lines' })\nclass B {}\n");
+    auditWayfinding(repo, CONFIG, { regenerate: true });
     expect(messages()).toEqual([]);
   });
 
@@ -164,6 +169,84 @@ describe('auditWayfinding', () => {
     const doc = readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8');
     write('src/pricing/DOMAIN.md', doc.replace('<!-- generated: do not edit -->\n- invoice\n', '<!-- generated: do not edit -->\n\n- invoice\n\n'));
     expect(messages()).toEqual([]);
+  });
+});
+
+describe('generated Files section', () => {
+  const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
+
+  test("lists the domain's own files with their exports, interface first, tests last, child domains left out", () => {
+    expect(doc('src/pricing/DOMAIN.md')).toContain(
+      '## Files\n<!-- generated: files, do not edit -->\n' +
+        '- `service.ts` (interface): priceFor\n- `model.ts`: table\n- tests: `service.test.ts`\n<!-- end generated -->'
+    );
+    expect(doc('src/pricing/DOMAIN.md')).not.toContain('promotions/service.ts');
+    // Placed before Consumers.
+    expect(doc('src/pricing/DOMAIN.md').indexOf('## Files')).toBeLessThan(doc('src/pricing/DOMAIN.md').indexOf('## Consumers'));
+  });
+
+  test('a new file or export makes it stale, and regenerate rewrites it', () => {
+    write('src/invoice/layout.ts', 'export function pageSize() {}\nexport { pageSize as size }\n');
+    expect(messages()).toContain('Files section is stale (a file was added, removed or changed its exports)');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(doc('src/invoice/DOMAIN.md')).toContain('- `layout.ts`: pageSize, size\n');
+    expect(messages()).toEqual([]);
+  });
+
+  test('a DOMAIN.md without one is reported, and regenerate adds it', () => {
+    write('src/invoice/DOMAIN.md', domainDoc('invoice'));
+    expect(messages()).toContain('missing the generated Files block');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(doc('src/invoice/DOMAIN.md')).toContain('## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface): render\n');
+  });
+
+  test('exportedNames covers declarations, lists, aliases and anonymous defaults', () => {
+    const src =
+      'export async function a() {}\nexport default class B {}\nexport const c = 1\nexport type D = 1\n' +
+      "export { e, f as g }\nexport type { H } from './h'\nconst x = 1\n";
+    expect(exportedNames(src)).toEqual(['a', 'B', 'c', 'D', 'e', 'g', 'H']);
+    expect(exportedNames('export default () => 1\n')).toEqual(['default']);
+  });
+});
+
+describe('several source folders', () => {
+  const TWO = { ...CONFIG, srcDirs: ['src', 'client/src'] };
+
+  test('audits the domains under every folder', () => {
+    write('client/src/editor/DOMAIN.md', domainDoc('editor'));
+    write('client/src/editor/service.ts', 'export const open = () => 1\n');
+    write('MAP.md', readFileSync(path.join(repo, 'MAP.md'), 'utf8') + '| editor | editing | open() |\n');
+    auditWayfinding(repo, TWO, { regenerate: true });
+    const audit = auditWayfinding(repo, TWO);
+    expect(audit.domains.map((d) => d.dir)).toEqual([
+      'src/invoice',
+      'src/pricing',
+      'src/pricing/promotions',
+      'client/src/editor',
+    ]);
+    expect(audit.problems).toEqual([]);
+    expect(listDomains(repo, TWO).map((d) => d.id)).toEqual(['invoice', 'pricing', 'pricing/promotions', 'editor']);
+  });
+
+  test('names folders with domains outside the source folders', () => {
+    write('client/src/editor/DOMAIN.md', domainDoc('editor'));
+    const audit = auditWayfinding(repo, CONFIG);
+    expect(audit.srcDirCandidates).toEqual(['client/src']);
+    expect(formatWayfindingAudit(audit)).toContain('outside the source folders, under client/src/, get no checks');
+  });
+
+  test('a configured folder that is missing is listed while the others are audited', () => {
+    const audit = auditWayfinding(repo, TWO);
+    expect(audit.missingSrcDirs).toEqual(['client/src']);
+    expect(audit.domains.length).toBe(3);
+    expect(formatWayfindingAudit(audit)).toContain('Configured but missing (no domains there yet): client/src/');
+  });
+
+  test('the same domain name under two folders is a problem', () => {
+    write('client/src/invoice/DOMAIN.md', domainDoc('invoice'));
+    expect(auditWayfinding(repo, TWO).problems.map((p) => p.message)).toContain(
+      'invoice is also a domain at src/invoice; domain names must be unique across source folders'
+    );
   });
 });
 
@@ -197,15 +280,26 @@ describe('parseArchitectureConfig', () => {
   test('null turns it off and defaults fill in', () => {
     expect(parseArchitectureConfig(null)).toBeNull();
     expect(parseArchitectureConfig({ kind: 'wayfinding' })).toEqual(CONFIG);
-    expect(parseArchitectureConfig({ kind: 'wayfinding', srcDir: './app/', interfaceFile: 'index.ts' })).toEqual({
+    expect(parseArchitectureConfig({ kind: 'wayfinding', srcDirs: ['./app/', 'client/src', ' '], interfaceFile: 'index.ts' })).toEqual({
       kind: 'wayfinding',
-      srcDir: 'app',
+      srcDirs: ['app', 'client/src'],
       interfaceFile: 'index.ts',
     });
   });
 
+  test("reads an older app's single srcDir", () => {
+    expect(parseArchitectureConfig({ kind: 'wayfinding', srcDir: 'server/src', interfaceFile: 'service.ts' })).toEqual({
+      ...CONFIG,
+      srcDirs: ['server/src'],
+    });
+  });
+
+  test('rejects a folder inside another', () => {
+    expect(() => parseArchitectureConfig({ kind: 'wayfinding', srcDirs: ['src', 'src/client'] })).toThrow();
+  });
+
   test('rejects paths outside the repo and unknown kinds', () => {
-    expect(() => parseArchitectureConfig({ kind: 'wayfinding', srcDir: '../elsewhere' })).toThrow();
+    expect(() => parseArchitectureConfig({ kind: 'wayfinding', srcDirs: ['../elsewhere'] })).toThrow();
     expect(() => parseArchitectureConfig({ kind: 'wayfinding', interfaceFile: 'a/service.ts' })).toThrow();
     expect(() => parseArchitectureConfig({ kind: 'hexagonal' })).toThrow();
   });

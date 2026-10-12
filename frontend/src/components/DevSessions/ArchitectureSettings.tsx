@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { FilePlus2, ListChecks, Loader2 } from 'lucide-react';
+import { FilePlus2, ListChecks, Loader2, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +14,7 @@ import { ExternalAnchor } from './ExternalAnchor';
 import { SetupNotices, toSetupReport, type SetupReport } from './SetupNotices';
 
 export const WAYFINDING_REPO_URL = 'https://github.com/Rifazi/wayfinding-architecture';
-export const DEFAULT_WAYFINDING: ArchitectureConfig = { kind: 'wayfinding', srcDir: 'src', interfaceFile: 'service.ts' };
+export const DEFAULT_WAYFINDING: ArchitectureConfig = { kind: 'wayfinding', srcDirs: ['src'], interfaceFile: 'service.ts' };
 
 export function architectureLabel(architecture: ArchitectureConfig | null): string {
   return architecture ? 'Wayfinding' : 'none';
@@ -62,14 +62,7 @@ export function ArchitectureFields({
             Saving creates <code>MAP.md</code> and <code>docs/wayfinding.md</code> on the base branch if they&apos;re missing. Domains are
             added as changes need them.
           </p>
-          <Row label="Domains folder">
-            <Input
-              value={value.srcDir}
-              onChange={(e) => onChange({ ...value, srcDir: e.target.value })}
-              placeholder={DEFAULT_WAYFINDING.srcDir}
-              className="font-mono text-xs"
-            />
-          </Row>
+          <SrcDirsField value={value.srcDirs} onChange={(srcDirs) => onChange({ ...value, srcDirs })} />
           <Row label="Interface file">
             <Input
               value={value.interfaceFile}
@@ -88,11 +81,57 @@ export function ArchitectureFields({
   );
 }
 
+/** The folders domains live under: one per package in a repo with several (e.g. server/src and client/src). */
+function SrcDirsField({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+  const dirs = value.length ? value : [''];
+  const set = (i: number, dir: string) => onChange(dirs.map((d, j) => (j === i ? dir : d)));
+  return (
+    <>
+      {dirs.map((dir, i) => (
+        <Row key={i} label={i === 0 ? 'Domain folders' : ''}>
+          <div className="flex gap-2">
+            <Input
+              value={dir}
+              onChange={(e) => set(i, e.target.value)}
+              placeholder={DEFAULT_WAYFINDING.srcDirs[0]}
+              aria-label={`Domain folder ${i + 1}`}
+              className="font-mono text-xs"
+            />
+            {dirs.length > 1 && (
+              <Button size="icon" variant="ghost" aria-label={`Remove ${dir || 'folder'}`} onClick={() => onChange(dirs.filter((_, j) => j !== i))}>
+                <X />
+              </Button>
+            )}
+          </div>
+        </Row>
+      ))}
+      <div className="pl-[152px] space-y-1">
+        <Button size="sm" variant="outline" onClick={() => onChange([...dirs, ''])}>
+          <Plus />
+          Add folder
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Every folder that holds domains, e.g. <code>server/src</code> and <code>client/src</code> in a repo with two packages.
+          Code outside them gets no map, so agents have to search for it.
+        </p>
+      </div>
+    </>
+  );
+}
+
 /**
  * Run the checks the agents run, or create the starting files, for a saved app.
- * `onUseSrcDir` switches the (unsaved) source folder to one the checks found.
+ * `onChangeSrcDirs` updates the (unsaved) domain folders with one the checks found.
  */
-export function ArchitectureTools({ appId, onUseSrcDir }: { appId: string; onUseSrcDir: (srcDir: string) => void }) {
+export function ArchitectureTools({
+  appId,
+  srcDirs,
+  onChangeSrcDirs,
+}: {
+  appId: string;
+  srcDirs: string[];
+  onChangeSrcDirs: (next: string[]) => void;
+}) {
   const [audit, setAudit] = useState<ArchitectureAudit | null>(null);
   const [setupReport, setSetupReport] = useState<SetupReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +154,10 @@ export function ArchitectureTools({ appId, onUseSrcDir }: { appId: string; onUse
   });
 
   const problems = audit?.audit.problems.length ?? 0;
-  const candidates = audit && !audit.audit.srcDirExists ? (audit.audit.srcDirCandidates ?? []) : [];
+  const candidates = audit?.audit.srcDirCandidates ?? [];
+  const missing = audit?.audit.missingSrcDirs ?? [];
+  // A found folder replaces the configured ones that don't exist.
+  const useDir = (dir: string) => onChangeSrcDirs([...srcDirs.filter((d) => !missing.includes(d)), dir]);
   return (
     <div className="space-y-2 pl-[152px]">
       <div className="flex flex-wrap gap-2">
@@ -134,10 +176,13 @@ export function ArchitectureTools({ appId, onUseSrcDir }: { appId: string; onUse
         <>
           {candidates.length > 0 && (
             <Notice tone="amber">
-              <span>The source folder doesn&apos;t exist, but there are domains under </span>
+              <span>
+                {missing.length ? `${missing.map((d) => `${d}/`).join(', ')} doesn't exist. ` : ''}
+                There are domains outside the domain folders, under{' '}
+              </span>
               {candidates.map((dir) => (
-                <Button key={dir} size="sm" variant="outline" className="ml-1" onClick={() => onUseSrcDir(dir)}>
-                  Use {dir}/
+                <Button key={dir} size="sm" variant="outline" className="ml-1" onClick={() => useDir(dir)}>
+                  Add {dir}/
                 </Button>
               ))}
             </Notice>

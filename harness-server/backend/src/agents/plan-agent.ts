@@ -20,7 +20,8 @@ import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
-import { architectureContextForTurn } from '../architecture/architecture-context.js';
+import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
+import { namedDomainsFocus } from '../architecture/focus.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
@@ -79,7 +80,7 @@ export async function runPlanAgentTurn(
   const override = await getPromptOverride(app.id, 'plan');
   const isFirstTurn = provider === 'claude' ? !session.claudeSessionIds.plan : session.histories.plan.length === 0;
 
-  let systemPrompt = override ?? promptTemplate;
+  let systemPrompt = promptForArchitecture(override ?? promptTemplate, app);
   const themeContext = await themeContextForTurn(session, 'plan', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
@@ -87,6 +88,11 @@ export async function runPlanAgentTurn(
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
   const architectureDeps = { app, repoRoot: app.repoRoot, scope: false, allowRegenerate: false };
+  // search_code without a glob starts in the domains the approved requirements name.
+  const requirementsPath = session.requirementsPath;
+  const searchFocus = namedDomainsFocus(app, app.repoRoot, 'the domains the requirements name', async () =>
+    requirementsPath ? fs.readFile(path.join(config.harnessRoot, requirementsPath), 'utf8').catch(() => null) : null
+  );
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     if (!session.requirementsPath) {
@@ -164,7 +170,7 @@ export async function runPlanAgentTurn(
         tools: [
           searchDocsToolClaude,
           readDocToolClaude,
-          createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+          createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'plan')),
@@ -208,7 +214,7 @@ export async function runPlanAgentTurn(
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
-      search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+      search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'plan')),

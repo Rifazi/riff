@@ -95,8 +95,8 @@ export interface AppConfig {
 // Mirrors harness-server's architecture/architecture.ts.
 export interface ArchitectureConfig {
   kind: 'wayfinding';
-  // Repo-relative folder the domains live under.
-  srcDir: string;
+  // Repo-relative folders the domains live under, e.g. ["server/src", "client/src"].
+  srcDirs: string[];
   // A domain's one public file, e.g. service.ts.
   interfaceFile: string;
 }
@@ -106,11 +106,14 @@ export interface ArchitectureConfig {
 export interface ArchitectureAudit {
   audit: {
     srcDirExists: boolean;
+    // Configured source folders that don't exist.
+    missingSrcDirs: string[];
     mapExists: boolean;
-    domains: { id: string }[];
+    domains: { id: string; dir: string }[];
     problems: { kind: string; file: string; message: string }[];
-    // Folders holding DOMAIN.md files when srcDir doesn't exist; with exactly
-    // one, it was audited in srcDir's place (inferredSrcDir).
+    // Folders outside the source folders that hold DOMAIN.md files. When no
+    // configured folder exists and there's exactly one, it was audited in
+    // their place (inferredSrcDir).
     srcDirCandidates?: string[];
     inferredSrcDir?: string;
   };

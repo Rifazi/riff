@@ -1,4 +1,4 @@
-import { DOMAIN_DOC, MAP_PATH, WAYFINDING_GUIDE_PATH, WAYFINDING_REPO_URL, type WayfindingConfig } from './architecture.js';
+import { DOMAIN_DOC, MAP_PATH, WAYFINDING_GUIDE_PATH, WAYFINDING_REPO_URL, describeSrcDirs, type WayfindingConfig } from './architecture.js';
 
 // Marks docs/wayfinding.md as Riff's, so it's refreshed on setup without
 // ever overwriting a hand-written file at that path.
@@ -67,6 +67,11 @@ Checkpoint: <command that runs this domain's tests>
 ## Mirrors
 - none
 
+## Files
+<!-- generated: files, do not edit -->
+- none
+<!-- end generated -->
+
 ## Consumers
 <!-- generated: do not edit -->
 - none
@@ -75,7 +80,7 @@ Checkpoint: <command that runs this domain's tests>
 
 /** docs/wayfinding.md: the procedure, for the humans and agents working in the repo (indexed by search_docs). */
 export function renderWayfindingGuide(config: WayfindingConfig): string {
-  const src = config.srcDir === '.' ? 'the repo root' : `\`${config.srcDir}/\``;
+  const src = describeSrcDirs(config);
   return `${GUIDE_MARKER}
 # How to change this codebase: Wayfinding Architecture
 
@@ -103,7 +108,10 @@ Every change answers three questions:
 
 1. Read \`${MAP_PATH}\` and find the domain that owns the decision you are changing.
 2. Read that domain's \`${DOMAIN_DOC}\`: Rules, Hidden behavior, Recipes. If the decision lives in a child domain, read the parent's first.
-3. Write down the route:
+3. Go to the code from there: the generated **Files** section lists every file the domain holds and what each exports, so open
+   the one you need (the interface first) instead of searching for it. Search inside the domain's folder; search the whole
+   repository only for code that is on no domain yet.
+4. Write down the route:
 
    \`\`\`
    Requirement:  <the request, in one or two lines>
@@ -147,7 +155,7 @@ Write down what the code cannot tell you. Do not restate what it can, unless the
 
 | Section | Updated by | Validated by |
 | --- | --- | --- |
-| Generated (Consumers) | A script, never by hand | The mechanical checks |
+| Generated (Files, Consumers) | A script, never by hand | The mechanical checks |
 | Rules, Hidden behavior, Recipes | The change, in the same segment as the code | QA |
 | Ownership (Owns, Does not own, Mirrors, junction inputs) | The change, in a separate segment | QA, as a boundary change |
 
@@ -155,8 +163,8 @@ Write down what the code cannot tell you. Do not restate what it can, unless the
 
 In Riff Dev Sessions the agents run \`audit_architecture\`, which checks: other domains reached only through
 \`${config.interfaceFile}\`; child domains visible only inside their parent; no child depending on its parent; no dependency
-cycles; every rule anchored to a test that exists; no rule in two domains; files named in Recipes exist; the generated Consumers
-sections match the code; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
+cycles; every rule anchored to a test that exists; no rule in two domains; files named in Recipes exist; the generated Files and
+Consumers sections match the code; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
 entities, one writer per table with the domain's prefix, listed under "Owns data". The reference repo's
 \`example/tools/check.ts\` is a standalone version of the same checks to wire into CI.
 
@@ -177,12 +185,30 @@ next change touches, draw a domain around it (an adapter in front of legacy code
 
 const SHARED = (c: WayfindingConfig) =>
   `This app follows Wayfinding Architecture: every important decision is owned by exactly one domain. Domains are folders ` +
-  `under ${c.srcDir === '.' ? 'the repo root' : `${c.srcDir}/`} with a ${DOMAIN_DOC} (Owns, Does not own, Interface, Checkpoint, Rules ` +
-  `anchored to tests, Hidden behavior, Recipes, Mirrors, a generated Consumers list). ${MAP_PATH} at the repo root indexes the ` +
+  `under ${describeSrcDirs(c, (s) => s)} with a ${DOMAIN_DOC} (Owns, Does not own, Interface, Checkpoint, Rules anchored to tests, ` +
+  `Hidden behavior, Recipes, Mirrors, and generated Files and Consumers lists). ${MAP_PATH} at the repo root indexes the ` +
   `top-level domains and junctions. Other domains are reached only through a domain's ${c.interfaceFile}; a child domain is ` +
-  `visible only inside its parent. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading). The full ` +
-  `procedure, with the ${DOMAIN_DOC} template, is ${WAYFINDING_GUIDE_PATH}. audit_architecture runs the mechanical checks and ` +
-  `lists the domains.`;
+  `visible only inside its parent. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading), and ` +
+  `search_docs searches them along with docs/. The full procedure, with the ${DOMAIN_DOC} template, is ${WAYFINDING_GUIDE_PATH}. ` +
+  `audit_architecture runs the mechanical checks and lists the domains with their folders.`;
+
+// How to find code here. It replaces the base prompt's general guidance on
+// finding code and keeping a code map (an app's prompt override can't be
+// edited, so it says so in words as well).
+const FINDING_CODE = (c: WayfindingConfig) =>
+  `## Finding code\n\n` +
+  `${MAP_PATH} and the ${DOMAIN_DOC} files are this repo's code map. They replace any other guidance in this prompt on how to ` +
+  `find code (searching docs/ for a code-map page first, searching the code broadly) or on keeping a code map page.\n\n` +
+  `1. read_doc ${MAP_PATH}: find the domain that owns the decision.\n` +
+  `2. read_doc that domain's ${DOMAIN_DOC}, one heading at a time when you need only part of it ("Files", "Rules", ` +
+  `"Hidden behavior", "Recipes"). Its generated Files section lists every file the domain holds and what each exports, ` +
+  `the ${c.interfaceFile} first.\n` +
+  `3. Go straight to the file Files names: outline_file it, then read_file only the range you need. To find a call site ` +
+  `or a symbol, search_code inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob already ` +
+  `starts in the domains you're working on and says so.\n` +
+  `4. Another domain: read its ${c.interfaceFile}, never its private files.\n` +
+  `5. Search the whole repo (search_code with glob ".") only for code that's on no domain yet: config, entry points, and ` +
+  `the folders audit_architecture lists as not on the map yet. Never read a whole folder's files to find something.`;
 
 /**
  * The per-role architecture section of an agent's system prompt. Appended
@@ -198,6 +224,11 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `those domains' ${DOMAIN_DOC}: anything that constrains the request (an external consumer, data overwritten by an ` +
       `import, a rule that must keep holding) goes in as a constraint or an open question. Leave segments to the plan.`,
     plan:
+      `${FINDING_CODE(config)}\n\n` +
+      `For the reuse audit, search inside the domains involved and read the functions you'd rely on (outline_file, then their ` +
+      `range), not whole files. Name the files each step changes as the Files sections list them, so the coding agent goes ` +
+      `straight to them. When a step adds, moves or removes files in a domain, the step also updates that ${DOMAIN_DOC} ` +
+      `(audit_architecture regenerates Files); a code-map page such as docs/architecture.md covers only code on no domain.\n\n` +
       `Before writing the plan, read ${MAP_PATH} and the ${DOMAIN_DOC} of every domain involved (a parent before its child), ` +
       `and run audit_architecture. Open the plan with a "Route" section:\n\n` +
       '```\nRequirement:  <the request>\nDomains:      <domain>   <what changes there>\n' +
@@ -211,18 +242,22 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `old shape last; schema changes are forward-only. Behavior-neutral work (refactors, upgrades) takes the short route: ` +
       `domain, interface unchanged, consumers, segments. A decision gets a new domain only when a second place needs it.`,
     coding:
+      `${FINDING_CODE(config)}\n\n` +
       `Read first, update last. Before changing code, read ${MAP_PATH} and the ${DOMAIN_DOC} of the domain the step names ` +
       `(its parent's first), and follow the plan's Route. Change a decision only in its owning domain; reach other domains only ` +
       `through their ${config.interfaceFile}; never import a child domain from outside its parent; never re-implement another ` +
       `domain's decision, call it; write a table only from its owning domain. In the same step as the code, update that ` +
       `${DOMAIN_DOC}'s Rules (each anchored: Enforced by: <test file> › "<test name>", with that test written), Hidden behavior ` +
       `and Recipes. Ownership changes (Owns, Does not own, Mirrors) and new domains go in their own step and commit; log a new, ` +
-      `merged or split domain in ${MAP_PATH}. Never hand-edit the generated Consumers block: audit_architecture({ regenerate: ` +
-      `true }) rewrites it. If ${DOMAIN_DOC} and the code disagree, a test this step didn't modify decides; fix the wrong side ` +
+      `merged or split domain in ${MAP_PATH}. Never hand-edit the generated Files or Consumers blocks: audit_architecture({ ` +
+      `regenerate: true }) rewrites them, so run it after adding, removing or renaming a file or an export. Don't add code ` +
+      `inside a domain to a separate code-map page (docs/architecture.md): ${MAP_PATH} and ${DOMAIN_DOC} are the map, and ` +
+      `that page covers only code on no domain. If ${DOMAIN_DOC} and the code disagree, a test this step didn't modify decides; fix the wrong side ` +
       `and say so. Finish each step with the domain's Checkpoint passing and audit_architecture showing no problems in the ` +
       `domains you touched. Use note_for_qa for the route you actually took if it differs from the plan, any ownership change, ` +
       `and hidden behavior you discovered. When splitting work across a team, give each workstream whole domains as its owned paths.`,
     qa:
+      `${FINDING_CODE(config)}\n\n` +
       `You are the independent QA the procedure calls for: validate the code and the docs together. Run audit_architecture: ` +
       `it reports the structural and doc checks, which domains the branch touched and any ownership or structural edits. Flag ` +
       `as findings: an audit problem in MAP.md or a domain the branch touched; a changed business rule without a matching ` +
@@ -231,7 +266,8 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `outside the owning domain that re-implements its decision), undeclared mirrors, and misplaced decisions (a rule ` +
       `implemented in a consumer); hidden behavior the work relied on or discovered but didn't record; and a diff touching ` +
       `domains the plan's Route didn't name. When the docs and the code disagree and no test the branch didn't modify settles ` +
-      `which is right, say it needs the human's decision rather than guessing. Problems only in domains the branch didn't touch ` +
+      `which is right, say it needs the human's decision rather than guessing. A stale Files section is an audit problem like any ` +
+      `other; a code-map page missing an entry for code inside a domain is not a finding. Problems only in domains the branch didn't touch ` +
       `are not its findings.`,
   };
   return `\n\n# Architecture: Wayfinding\n\n${SHARED(config)}\n\n${byRole[role]}`;

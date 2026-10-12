@@ -20,7 +20,8 @@ export const searchDocsSchema = z.object({
 export const searchDocsDescription =
   'Search this repo\'s docs/ markdown files (architecture, ingestion, transmission, ops, API) by keyword and by ' +
   'meaning, so a question finds the section that answers it even in other words. ' +
-  'Also searches the reference documents the human attached (paths under reference/). ' +
+  'Also searches the reference documents the human attached (paths under reference/), and in an app that follows ' +
+  `Wayfinding Architecture its ${MAP_PATH} and every ${DOMAIN_DOC}. ` +
   'Returns the top matching sections (truncated previews) with their file path and heading — use read_doc ' +
   'for a section\'s full text. Use this before proposing anything — this repo documents its own conventions ' +
   'in detail.';

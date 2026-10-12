@@ -3,6 +3,9 @@ import path from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { docsDirFor, type AppConfig } from '../apps/apps.js';
 import { fingerprint, forgetScope, syncScope, type SearchDocument } from '../search/search-engine.js';
+import { getApp } from '../apps/apps-store.js';
+import { DOMAIN_DOC, MAP_PATH } from '../architecture/architecture.js';
+import { listDomains } from '../architecture/wayfinding-audit.js';
 
 export interface DocSection {
   file: string; // repo-relative path, e.g. docs/ingestion/invoices.md
@@ -146,9 +149,28 @@ export function docsSearchScope(appId: string): string {
   return `app:${appId}:docs`;
 }
 
-/** Brings the search engine's copy of this app's docs up to date (cheap when nothing changed). */
-export function syncDocsSearch(appId: string): Promise<void> {
-  return syncScope(docsSearchScope(appId), searchDocsByApp.get(appId) ?? []);
+/**
+ * Brings the search engine's copy of this app's docs up to date (cheap when
+ * nothing changed). For an app that follows Wayfinding that includes MAP.md
+ * and every DOMAIN.md, read fresh from the checkout each time: they live
+ * beside the code, outside docs/ and its watcher, and agents edit them as
+ * they work.
+ */
+export async function syncDocsSearch(appId: string): Promise<void> {
+  const architectureDocs = await architectureSearchDocuments(appId).catch(() => [] as SearchDocument[]);
+  return syncScope(docsSearchScope(appId), [...(searchDocsByApp.get(appId) ?? []), ...architectureDocs]);
+}
+
+async function architectureSearchDocuments(appId: string): Promise<SearchDocument[]> {
+  const app = await getApp(appId);
+  if (!app.architecture) return [];
+  const files = [MAP_PATH, ...listDomains(app.repoRoot, app.architecture).map((d) => `${d.dir}/${DOMAIN_DOC}`)];
+  const sections: DocSection[] = [];
+  for (const file of files) {
+    const markdown = await fs.readFile(path.join(app.repoRoot, file), 'utf8').catch(() => null);
+    if (markdown !== null) sections.push(...splitIntoSections(file, markdown));
+  }
+  return toSearchDocuments(sections, 'architecture');
 }
 
 // One search document per file; each section is a segment, so a hit's

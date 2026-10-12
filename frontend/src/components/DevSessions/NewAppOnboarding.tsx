@@ -214,7 +214,14 @@ export function NewAppOnboarding({ onDone, onCancel }: { onDone: (app: AppWriteR
           <ReviewRow label="Architecture">
             {architecture ? (
               <>
-                {architectureLabel(architecture)} · domains under <code className="text-xs">{architecture.srcDir}/</code>, interface{' '}
+                {architectureLabel(architecture)} · domains under{' '}
+                {architecture.srcDirs.map((dir, i) => (
+                  <span key={dir}>
+                    {i > 0 && ', '}
+                    <code className="text-xs">{dir}/</code>
+                  </span>
+                ))}
+                , interface{' '}
                 <code className="text-xs">{architecture.interfaceFile}</code>
               </>
             ) : (

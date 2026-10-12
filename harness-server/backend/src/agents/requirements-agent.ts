@@ -36,7 +36,7 @@ import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-t
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
-import { architectureContextForTurn } from '../architecture/architecture-context.js';
+import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
@@ -84,7 +84,7 @@ export async function runRequirementsAgentTurn(
   const isFirstTurn =
     provider === 'claude' ? !session.claudeSessionIds.requirements : session.histories.requirements.length === 0;
 
-  let systemPrompt = override ?? promptTemplate;
+  let systemPrompt = promptForArchitecture(override ?? promptTemplate, app);
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     try {

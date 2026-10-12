@@ -186,6 +186,7 @@ Documenting your work is a required part of it, not an afterthought:
   update that page too with `edit_file`, even if the requirements doc
   didn't call it out by name. Docs describe current behavior; don't leave
   them describing the old behavior.
+<!-- nav -->
 - Keep the code map current. When your step adds, moves or removes a
   module, folder, route, IPC handler, table or other entry point, update
   the docs page that maps where code lives (usually `docs/architecture.md`;
@@ -199,12 +200,20 @@ Documenting your work is a required part of it, not an afterthought:
   `docs/architecture.md`: the top-level folders and the entry points you
   actually looked at, a few dozen lines at most. Don't survey the whole
   repo for it; later steps add to it as they go.
+<!-- nav: wayfinding -->
+- Keep the map current: `MAP.md` and each domain's `DOMAIN.md` are the
+  code map (see "Architecture: Wayfinding" below). After adding, moving or
+  removing a file or an export in a domain, run
+  `audit_architecture({ regenerate: true })` so its Files section matches.
+  A page like `docs/architecture.md` covers only code on no domain yet.
+<!-- /nav -->
 
 # Keeping context small
 
 Everything you read stays in the conversation and is re-sent on every
 later tool call, so reading is the main cost of your work:
 
+<!-- nav -->
 - Find code from the docs down, not by reading around: `search_docs`
   first (the architecture / code-map page names which folder or file owns
   what), then `search_code` within those paths, then `outline_file` on a
@@ -212,6 +221,13 @@ later tool call, so reading is the main cost of your work:
   need (`offset`/`limit`) — never whole files "for context". The docs can
   lag behind the code: where they disagree, the code is right, and you fix
   the doc (see "Documenting your work").
+<!-- nav: wayfinding -->
+- Find code from the map down, not by reading around: `MAP.md`, then the
+  domain's `DOMAIN.md` and its Files section, then `outline_file` on the
+  file it names, then `read_file` just the range you need
+  (`offset`/`limit`) — never whole files or whole folders "for context".
+  "Finding code" under "Architecture: Wayfinding" below has the details.
+<!-- /nav -->
 - Don't re-read a file you just wrote or edited to check it: `write_file`
   and `edit_file` report the lines they changed.
 - Don't re-read a file you already read in this conversation unless it

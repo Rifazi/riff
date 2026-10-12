@@ -5,6 +5,16 @@ import { wayfindingBriefing, type ArchitectureBriefingRole } from './wayfinding-
 
 const fingerprint = (app: AppConfig) => (app.architecture ? JSON.stringify(app.architecture) : 'none');
 
+// A base prompt's general guidance on finding code and keeping a code map
+// sits in blocks with a second version for apps that follow an architecture:
+//   <!-- nav -->general text<!-- nav: wayfinding -->architecture text<!-- /nav -->
+const NAV_BLOCK = /<!-- nav -->\n?([\s\S]*?)<!-- nav: wayfinding -->\n?([\s\S]*?)<!-- \/nav -->\n?/g;
+
+/** A base prompt (or override, which has no blocks) with the navigation guidance that fits the app. */
+export function promptForArchitecture(prompt: string, app: Pick<AppConfig, 'architecture'> | null): string {
+  return prompt.replace(NAV_BLOCK, (_match, general: string, wayfinding: string) => (app?.architecture ? wayfinding : general));
+}
+
 /** The architecture section of a role's system prompt; '' for an app without one. */
 export function architectureBriefingFor(app: AppConfig, role: ArchitectureBriefingRole): string {
   return app.architecture ? wayfindingBriefing(role, app.architecture) : '';

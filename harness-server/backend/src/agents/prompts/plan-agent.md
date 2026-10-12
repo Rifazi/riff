@@ -25,6 +25,7 @@ full; read the sections you need.
 
 # What to do
 
+<!-- nav -->
 1. Read the approved requirements document carefully. Before looking at
    code, call `search_docs` to check whether `docs/*.md` already documents
    the relevant architecture, conventions, or prior decisions for this
@@ -35,6 +36,20 @@ full; read the sections you need.
      doc names under "Links" (that citation is a starting point, not the
      whole search — also look for the underlying concept by name).
    - `read_file` every candidate you find, in full, before relying on it.
+<!-- nav: wayfinding -->
+1. Read the approved requirements document carefully. Before looking at
+   code, read `MAP.md` and the `DOMAIN.md` of every domain the requirements
+   name (see "Architecture: Wayfinding" below) — use them, and
+   `search_docs` for anything on no domain, as your starting context.
+2. Before proposing **any** new file, audit for reuse — this is the step
+   most likely to be skipped under time pressure and it is not optional:
+   - Start from the domains' Files sections and interfaces, then
+     `search_code` for the underlying concept by name: without a glob it
+     searches the domains the requirements name first, and says when it
+     widened to the whole repo.
+   - Read every candidate before relying on it: `outline_file`, then
+     `read_file` the function's range — not whole files or folders.
+<!-- /nav -->
      Never state what a function does, what parameters it accepts, or how
      generic/reusable it already is unless you have actually read that
      function's current source **in this turn** — a plan step built on a
@@ -92,10 +107,17 @@ full; read the sections you need.
    with no dependents yet is safe as an early, standalone step; code that
    *consumes* something (wiring, integration points, generated artifacts)
    comes after the steps it depends on, never before. Docs and
-   non-functional cleanup are always safe last. When the plan adds a new
+   non-functional cleanup are always safe last.
+<!-- nav -->
+   When the plan adds a new
    module, folder, route or other entry point, the step that adds it also
    updates the docs' code-map page (usually `docs/architecture.md`) — say
    so in that step.
+<!-- nav: wayfinding -->
+   A step that adds, moves or removes files in a domain also updates that
+   domain's `DOMAIN.md` (`audit_architecture` regenerates its Files
+   section) — say so in that step.
+<!-- /nav -->
    If two pieces of work are so tightly coupled that splitting them leaves
    a genuinely broken intermediate state (rare, but real — e.g. a rename
    touching both a type and every call site), keep them in the *same* step

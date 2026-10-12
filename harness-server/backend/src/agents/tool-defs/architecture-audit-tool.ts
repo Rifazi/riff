@@ -9,7 +9,7 @@ export const auditArchitectureSchema = z.object({
   regenerate: z
     .boolean()
     .optional()
-    .describe('Rewrite the generated Consumers section of every DOMAIN.md from the code before reporting (never edit it by hand)'),
+    .describe('Rewrite the generated Files and Consumers sections of every DOMAIN.md from the code before reporting (never edit them by hand)'),
 });
 export const auditArchitectureReadOnlySchema = z.object({});
 
@@ -17,7 +17,7 @@ const BASE_DESCRIPTION =
   "Run this app's Wayfinding Architecture checks and list its domains (from MAP.md and each DOMAIN.md). Reports: imports " +
   "of another domain's private files, child domains reached from outside their parent, children depending on their parent, " +
   'dependency cycles, rules without an existing "Enforced by" test, rules in two domains, Recipes naming missing files, ' +
-  'stale generated Consumers sections, top-level domains missing from MAP.md, and (with TypeORM) tables without one owner. ';
+  'stale generated Files and Consumers sections, top-level domains missing from MAP.md, and (with TypeORM) tables without one owner. ';
 
 export interface AuditArchitectureDeps {
   app: AppConfig;
@@ -36,7 +36,7 @@ export function auditArchitectureDescription(deps: Pick<AuditArchitectureDeps, '
   return (
     BASE_DESCRIPTION +
     (deps.scope ? 'Also lists the domains this branch touched and any ownership or structural edits to DOMAIN.md files. ' : '') +
-    (deps.allowRegenerate ? 'regenerate: true rewrites the generated Consumers sections. ' : 'Read-only. ') +
+    (deps.allowRegenerate ? 'regenerate: true rewrites the generated Files and Consumers sections. ' : 'Read-only. ') +
     'Run it before planning or changing code in a domain, and again before finishing.'
   );
 }

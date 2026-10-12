@@ -251,7 +251,8 @@ function AppCard({ app }: { app: AppConfig }) {
             {app.architecture && !dirty && (
               <ArchitectureTools
                 appId={app.id}
-                onUseSrcDir={(srcDir) => setArchitecture((current) => (current ? { ...current, srcDir } : current))}
+                srcDirs={app.architecture.srcDirs}
+                onChangeSrcDirs={(srcDirs) => setArchitecture((current) => (current ? { ...current, srcDirs } : current))}
               />
             )}
             {dirty && architecture && <p className="text-xs text-muted-foreground pl-[152px]">Save to apply.</p>}

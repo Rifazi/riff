@@ -13,7 +13,7 @@ import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
 import { architectureToolEntry } from '../tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from '../tool-defs-claude/architecture-audit-tool.js';
-import { architectureBriefingFor } from '../../architecture/architecture-context.js';
+import { architectureBriefingFor, promptForArchitecture } from '../../architecture/architecture-context.js';
 import { createClassifyTextTool } from '../helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
@@ -25,7 +25,7 @@ import type { HelperContext } from '../helpers/helper.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { createDocsSearchTools } from '../tool-defs/docs-search-tool.js';
-import { createSearchCodeTool } from '../tool-defs/code-search-tool.js';
+import { createSearchCodeTool, type SearchFocus } from '../tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from '../tool-defs/outline-tool.js';
 import { createFileTools } from '../tool-defs/file-tools.js';
 import { ReadMemo } from '../tool-defs/read-memo.js';
@@ -117,8 +117,12 @@ export async function runWorkstreamAgent({
     context: helperContext,
     checkCommands: app.checkCommands,
   });
-  const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
-  const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
+  // In an app that follows an architecture, search_code without a glob starts in the member's own paths.
+  const searchFocus: SearchFocus | undefined = app.architecture
+    ? async () => ({ label: 'your owned paths', paths: member.ownedPaths })
+    : undefined;
+  const base = promptForArchitecture((await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8')), app);
+  const teamRules = promptForArchitecture(await fs.readFile(TEAM_PROMPT_PATH, 'utf8'), app);
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
 
   // Steps the lead added after the plan (e.g. QA fixes) carry a brief.
@@ -287,7 +291,7 @@ export async function runWorkstreamAgent({
     const tools = [
       searchDocsToolClaude,
       readDocToolClaude,
-      createSearchCodeToolClaude({ repoRoot: worktreePath }),
+      createSearchCodeToolClaude({ repoRoot: worktreePath, focus: searchFocus }),
       createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
       createClassifyTextToolClaude(helperContext),
@@ -365,7 +369,7 @@ export async function runWorkstreamAgent({
   const tools: ToolSet = {
     search_docs: searchDocsTool,
     read_doc: readDocTool,
-    search_code: createSearchCodeTool({ repoRoot: worktreePath }),
+    search_code: createSearchCodeTool({ repoRoot: worktreePath, focus: searchFocus }),
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
     classify_text: createClassifyTextTool(helperContext),

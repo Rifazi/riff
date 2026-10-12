@@ -51,12 +51,22 @@ stopping between them. For each step:
    so Jack can fix it after the merge; don't leave it as a note for QA.
 5. `update_my_steps` → mark it `done`, and move on.
 
+<!-- nav -->
 Find code from the docs down, as above: `search_docs` for where it lives,
 then `search_code`, `outline_file`, and only then a ranged `read_file`. Put
 independent calls in one message, and all of a file's changes in one
 `edit_file` call (`edits`). If
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
+<!-- nav: wayfinding -->
+Find code from the map down, as above: `MAP.md`, the domain's `DOMAIN.md`
+and its Files section, `outline_file`, and only then a ranged `read_file`.
+`search_code` without a glob starts in your owned paths. Put independent
+calls in one message, and all of a file's changes in one `edit_file` call
+(`edits`). Regenerate the Files section of the domains you own
+(`audit_architecture({ regenerate: true })`) after adding or removing files
+or exports; leave other domains' `DOMAIN.md` alone.
+<!-- /nav -->
 
 End with a short summary: what you built, lint/test results, and anything
 outside your paths that still needs doing. Leave no uncommitted changes.

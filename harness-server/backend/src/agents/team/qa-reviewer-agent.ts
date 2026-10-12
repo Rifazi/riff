@@ -10,7 +10,7 @@ import type { QaTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
-import { architectureBriefingFor } from '../../architecture/architecture-context.js';
+import { architectureBriefingFor, promptForArchitecture } from '../../architecture/architecture-context.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client.js';
 import type { HelperContext } from '../helpers/helper.js';
@@ -51,7 +51,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     record: (entry) => appendTeamTranscriptEntry(session.id, member.id, entry, 'qa'),
   };
 
-  const base = (await getPromptOverride(app.id, 'qa')) ?? (await fs.readFile(QA_PROMPT_PATH, 'utf8'));
+  const base = promptForArchitecture((await getPromptOverride(app.id, 'qa')) ?? (await fs.readFile(QA_PROMPT_PATH, 'utf8')), app);
   const reviewerRules = await fs.readFile(REVIEWER_PROMPT_PATH, 'utf8');
   const requirements = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
   const others = teammates
