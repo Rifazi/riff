@@ -21,8 +21,10 @@ import {
   mergeProblem,
   roundOutcome,
   sendBackProblem,
+  STALE_CHECKOUT_NOTE,
   startable,
   teamStatusLines,
+  workstreamHandover,
 } from '../team/lead-core.js';
 
 // The coding lead's tools for the team he assigned (assign_team): he
@@ -131,9 +133,10 @@ export const reviewWorkstreamSchema = z.object({
     .describe('Show the full diff of just this repo-relative file instead of the overview of every change'),
 });
 export const reviewWorkstreamDescription =
-  "What a workstream's branch changes compared with the session branch: its commits, diff stat and diff (one " +
-  'line of context; pass path for one file in full context). For a failed one, also what it left uncommitted. ' +
-  'Review a branch before you merge it or send it back.';
+  "What a workstream's branch changes compared with the session branch: the engineer's report, the exports it " +
+  'adds or changes, its commits, diff stat and diff (one line of context; pass path for one file\'s whole diff). ' +
+  'For a failed one, also what it left uncommitted. Review a branch before you merge it or send it back. ' +
+  STALE_CHECKOUT_NOTE;
 
 export function createReviewWorkstreamExecute(deps: TeamLeadDeps) {
   return async ({ id, path }: z.infer<typeof reviewWorkstreamSchema>): Promise<string> => {
@@ -165,8 +168,10 @@ export function createReviewWorkstreamExecute(deps: TeamLeadDeps) {
     const worktree = memberWorktree(deps.sessionId, team, member);
     const leftover =
       member.status !== 'ready' && existsSync(worktree) ? (await shortStatus(worktree)).trim() : '';
+    const handover = workstreamHandover(member);
     return [
       `${member.id} (${member.title}) — ${member.status}, branch ${member.branch}`,
+      handover ? `Report:\n${handover}` : 'Report: (none filed)',
       `Steps:\n${steps}`,
       `Commits (${log.length}):\n${log.map((c) => `- ${c.hash.slice(0, 8)} ${c.message.split('\n')[0]}`).join('\n') || '- (none)'}`,
       leftover ? `Uncommitted in its checkout:\n${leftover}` : '',

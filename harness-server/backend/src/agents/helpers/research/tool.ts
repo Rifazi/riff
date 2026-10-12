@@ -22,7 +22,7 @@ import { reportHelperRedo, reportHelperRun, type HelperContext } from '../helper
 import { createDocsSearchTools } from '../../tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from '../../tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from '../../tool-defs/outline-tool.js';
-import { createFileExecutors, readFileDescription, readFileSchema } from '../../tool-defs/file-tools.js';
+import { createFileExecutors, readFileDescription, readFileSchema, type FileToolDeps } from '../../tool-defs/file-tools.js';
 import { createQaExecutors, runCheckedCommandSchema, runCheckedCommandDescription, type CheckCommand } from '../../tool-defs/qa-tools.js';
 import { generateLocal } from '../../local-llm.js';
 
@@ -56,6 +56,9 @@ export interface DelegateDeps {
   runHelper?: (prompt: string) => Promise<HelperRun>;
   // Answered delegations and the files behind them, per agent turn (see noteDelegateRead).
   ledger?: RedoLedger;
+  // Told of each read_file the helpers make, so the read memory
+  // (helpers/memory/) keeps what they read for free.
+  onHelperRead?: FileToolDeps['onRead'];
 }
 
 /**
@@ -111,7 +114,7 @@ export function noteDelegateRead(deps: DelegateDeps | null | undefined, filePath
 }
 
 async function runOllamaHelper(deps: DelegateDeps, prompt: string): Promise<HelperRun> {
-  const { readFileExecute } = createFileExecutors({ repoRoot: deps.repoRoot });
+  const { readFileExecute } = createFileExecutors({ repoRoot: deps.repoRoot, onRead: deps.onHelperRead });
   const readPaths = new Set<string>();
   const { searchDocsTool, readDocTool } = createDocsSearchTools({
     appId: deps.appId,

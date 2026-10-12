@@ -18,6 +18,8 @@ import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
 import { COMPACT_AT_TOKENS, hopLimits, loadApprovedDocsForCoding } from '../coding-agent.js';
 import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from '../helpers/research/tool.js';
 import { createDelegateToolClaude } from '../helpers/research/tool-claude.js';
+import { MEMORY_NOTE, notePaidRead, readMemoryDeps, recallToolEntry, rememberRead } from '../helpers/memory/tool.js';
+import { createRecallToolClaude } from '../helpers/memory/tool-claude.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
@@ -31,6 +33,11 @@ import { createQaTools } from '../tool-defs/qa-tools.js';
 import { createRunPrettierTool } from '../tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from '../tool-defs/npm-install-tool.js';
 import { createNoteForQaTool } from '../tool-defs/qa-notes-tool.js';
+import { createReportWorkstreamTool } from '../tool-defs/workstream-report-tool.js';
+import { createFinishStepTool, type FinishStepDeps } from '../tool-defs/finish-step-tool.js';
+import { createFinishStepToolClaude } from '../tool-defs-claude/finish-step-tool.js';
+import { createQaExecutors } from '../tool-defs/qa-tools.js';
+import { workstreamHandover } from './lead-core.js';
 import { createUpdateMyStepsTool } from '../tool-defs/team-steps-tool.js';
 import { createDocsSearchToolsClaude } from '../tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from '../tool-defs-claude/code-search-tool.js';
@@ -41,6 +48,7 @@ import { createQaToolsClaude } from '../tool-defs-claude/qa-tools.js';
 import { createRunPrettierToolClaude } from '../tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from '../tool-defs-claude/npm-install-tool.js';
 import { createNoteForQaToolClaude } from '../tool-defs-claude/qa-notes-tool.js';
+import { createReportWorkstreamToolClaude } from '../tool-defs-claude/workstream-report-tool.js';
 import { createUpdateMyStepsToolClaude } from '../tool-defs-claude/team-steps-tool.js';
 // No read_file compression here: a team member edits what it reads, and a
 // compressed read only sent it back for a ranged re-read (helpers/compress.ts).
@@ -95,7 +103,7 @@ export async function runWorkstreamAgent({
   restarted,
   abortSignal,
 }: RunWorkstreamParams): Promise<void> {
-  const { provider: roleProvider, model: roleModel, delegateModel } = await getRoleModelConfig('coding');
+  const { provider: roleProvider, model: roleModel, delegateModel, readMemory } = await getRoleModelConfig('coding');
   // When the member carries a localModel, spin it up on Ollama instead of the
   // cloud coding model — the lead set this via assign_team based on the
   // settings.ts localTeamModel setting.
@@ -114,6 +122,17 @@ export async function runWorkstreamAgent({
     context: helperContext,
     checkCommands: app.checkCommands,
   });
+  // The session's read memory (helpers/memory/), shared with Jack and the
+  // other engineers; this engineer's reads are filed under its branch.
+  const memoryDeps = readMemoryDeps({
+    enabled: readMemory !== false,
+    sessionId: session.id,
+    view: member.branch,
+    repoRoot: worktreePath,
+    reader: member.id,
+    context: helperContext,
+  });
+  if (delegateDeps) delegateDeps.onHelperRead = (filePath, read) => rememberRead(memoryDeps, filePath, read);
   const base = (await getPromptOverride(app.id, 'coding')) ?? (await fs.readFile(CODING_PROMPT_PATH, 'utf8'));
   const teamRules = await fs.readFile(TEAM_PROMPT_PATH, 'utf8');
   const { text: approvedDocs, planSteps } = await loadApprovedDocsForCoding(session, worktreePath, member.stepIds);
@@ -129,22 +148,32 @@ export async function runWorkstreamAgent({
     kind === 'plan'
       ? ''
       : `This round isn't building the approved plan: ${kind === 'qa-fix' ? 'QA reviewed the merged branch and sent it back' : 'the human asked for more work on the branch'}, and the lead split it across the team. Your steps' briefs say what to change. The plan above is context for what the feature is.\n\n`;
+  // A merged dependency comes with what it built and its API, so this
+  // engineer uses it without reading its files.
   const others = teammates
     .filter((t) => t.id !== member.id)
-    .map(
-      (t) =>
-        `- ${t.title} (${t.id}) owns ${t.ownedPaths.join(', ')}${member.dependsOn.includes(t.id) ? ' — already merged into your branch' : ''}`,
-    )
+    .map((t) => {
+      const line = `- ${t.title} (${t.id}) owns ${t.ownedPaths.join(', ')}`;
+      if (!member.dependsOn.includes(t.id)) return line;
+      const handover = workstreamHandover(t, { forDependent: true });
+      return `${line} — already merged into your branch${handover ? `:\n${handover.replace(/^/gm, '  ')}` : ''}`;
+    })
+    .join('\n');
+  // What the lead already read for this workstream (assign_team's context).
+  const startHere = (member.context ?? [])
+    .map((c) => `- ${c.path}${c.lines ? `:${c.lines}` : ''} — ${c.note}`)
     .join('\n');
   const brief =
     `\n\n${teamRules}\n\n# Your workstream: ${member.title} (${member.id})\n\n${roundNote}` +
     `Your branch: ${member.branch}\n\nYour steps, in order:\n${member.stepIds.map(stepLine).join('\n')}\n\n` +
     `Your owned paths (the only places you can write):\n${member.ownedPaths.map((p) => `- ${p}`).join('\n')}\n\n` +
+    (startHere ? `Start here (from your lead, who already read these):\n${startHere}\n\n` : '') +
     `Your teammates (don't write their paths):\n${others || '- (none)'}`;
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
   const systemPrompt =
     base +
     (delegateDeps ? DELEGATE_NOTE : '') +
+    (memoryDeps ? MEMORY_NOTE : '') +
     themeBriefingFor(worktreePath, 'coding') +
     repoInstructionsNote(worktreePath) +
     approvedDocs +
@@ -162,6 +191,7 @@ export async function runWorkstreamAgent({
   let contextStartEntryId = member.contextStartEntryId ?? null;
   if (freshAfterFailure) {
     handoffNote = await buildHandoff({
+      recall: Boolean(memoryDeps),
       reason: restarted ? 'The human stopped the previous run and restarted it fresh.' : 'The previous run ran out of steps and was restarted fresh.',
       entries: entriesSince(member.transcript, contextStartEntryId),
       repoRoot: worktreePath,
@@ -219,7 +249,8 @@ export async function runWorkstreamAgent({
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
-        reason: 'Your workstream conversation reached its tool-call budget and had grown large.',
+        recall: Boolean(memoryDeps),
+        reason: 'Your workstream conversation reached its context budget.',
         entries: contextLog.entries,
         repoRoot: worktreePath,
         branch: member.branch,
@@ -260,6 +291,16 @@ export async function runWorkstreamAgent({
   const scoped = { repoRoot: worktreePath, writablePaths: member.ownedPaths };
   const steps = { sessionId: session.id, stepIds: member.stepIds };
   const qaNoteDeps = { sessionId: session.id, from: member.title };
+  const reportDeps = { sessionId: session.id, memberId: member.id };
+  const { runCheckedCommandExecute } = createQaExecutors({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
+  const finishDeps: FinishStepDeps = {
+    sessionId: session.id,
+    repoRoot: worktreePath,
+    branch: async () => member.branch,
+    writablePaths: member.ownedPaths,
+    ownSteps: member.stepIds,
+    runCheck: (command) => runCheckedCommandExecute({ command }),
+  };
 
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
@@ -270,7 +311,10 @@ export async function runWorkstreamAgent({
     });
     const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
       ...scoped,
-      onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+      onRead: (filePath, read) => {
+        noteDelegateRead(delegateDeps, filePath);
+        notePaidRead(memoryDeps, filePath, read);
+      },
       readMemo,
     });
     const { gitCommitTool } = createGitToolsClaude({ ...scoped, onBranchCreated: noBranchCreation });
@@ -295,8 +339,11 @@ export async function runWorkstreamAgent({
       createRunPrettierToolClaude(scoped),
       createUpdateMyStepsToolClaude(steps),
       createNoteForQaToolClaude(qaNoteDeps),
+      createReportWorkstreamToolClaude(reportDeps),
+      createFinishStepToolClaude(finishDeps),
       ...(ownsPackageJson(member) ? [createRunNpmInstallToolClaude({ repoRoot: worktreePath })] : []),
       ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
+      ...(memoryDeps ? [createRecallToolClaude(memoryDeps)] : []),
     ];
     const toolNames = [
       'search_docs',
@@ -314,8 +361,11 @@ export async function runWorkstreamAgent({
       'run_prettier',
       'update_my_steps',
       'note_for_qa',
+      'report_workstream',
+      'finish_step',
       ...(ownsPackageJson(member) ? ['run_npm_install'] : []),
       ...(delegateDeps ? ['delegate'] : []),
+      ...(memoryDeps ? ['recall'] : []),
     ];
 
     const { sdkSessionId } = await runClaudeAgentTurn({
@@ -350,7 +400,10 @@ export async function runWorkstreamAgent({
   });
   const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
     ...scoped,
-    onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+    onRead: (filePath, read) => {
+      noteDelegateRead(delegateDeps, filePath);
+      notePaidRead(memoryDeps, filePath, read);
+    },
     readMemo,
   });
   const { gitCommitTool } = createGitTools({ ...scoped, onBranchCreated: noBranchCreation });
@@ -371,8 +424,11 @@ export async function runWorkstreamAgent({
     run_prettier: createRunPrettierTool(scoped),
     update_my_steps: createUpdateMyStepsTool(steps),
     note_for_qa: createNoteForQaTool(qaNoteDeps),
+    report_workstream: createReportWorkstreamTool(reportDeps),
+    finish_step: createFinishStepTool(finishDeps),
     ...(ownsPackageJson(member) ? { run_npm_install: createRunNpmInstallTool({ repoRoot: worktreePath }) } : {}),
     ...delegateToolEntry(delegateDeps, member.history),
+    ...recallToolEntry(memoryDeps, member.history),
   };
 
   const { updatedHistory } = await runAgentTurn({

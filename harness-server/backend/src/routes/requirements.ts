@@ -16,6 +16,8 @@ import { copyMeetingSource, readMeetingSourceAttachment } from '../sessions/meet
 import { copyReferenceDocs } from '../sessions/reference-docs.js';
 import { loadProgressBrief } from '../sessions/split-roadmap-load.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
+import { approveRequirements } from '../sessions/stage-actions.js';
+import { sendStageActionError } from './stage-action-reply.js';
 
 export async function registerRequirementsRoutes(app: FastifyInstance): Promise<void> {
   // Streams the requirements agent's turn back over SSE as it happens.
@@ -188,33 +190,11 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
   app.post<{ Params: { id: string } }>('/api/sessions/:id/requirements/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.requirementsPath) {
-      return reply.code(400).send({ error: 'no requirements document has been written yet' });
-    }
-
-    const filePath = path.join(config.harnessRoot, session.requirementsPath);
-    let raw: string;
     try {
-      raw = await fs.readFile(filePath, 'utf8');
-    } catch {
-      return reply
-        .code(400)
-        .send({ error: `${session.requirementsPath} doesn't exist on disk — write or restore its content before approving.` });
+      return await approveRequirements(session);
+    } catch (err) {
+      return sendStageActionError(reply, err);
     }
-    const updated = raw.replace(/^status:\s*\w+/m, 'status: approved');
-    await fs.writeFile(filePath, updated, 'utf8');
-
-    const updatedSession = await updateSession(session.id, {
-      requirementsStatus: 'approved',
-      stage: 'requirements-approved',
-      // Approving a single doc is the human keeping the feature as one.
-      splitProposal: null,
-      // A revision that got here via a mid-coding send-back needs the plan
-      // to reconcile against it too before coding resumes — flag Plan to
-      // auto-relay the note the moment it's reached.
-      ...(session.reopenedFromCoding ? { planRelayPending: true } : {}),
-    });
-    return updatedSession;
   });
 
   // Human-only. Marks the draft superseded rather than deleting it — git

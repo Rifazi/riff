@@ -1,14 +1,14 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { ExternalLink, NotebookPen } from 'lucide-react';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
-import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
+import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, sessionHref, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ErrorText, LoadingState, PageShell } from '@/components/DevSessions/PageShell';
@@ -36,6 +36,21 @@ function SessionView() {
     queryFn: () => api.getSession(sessionId!),
     enabled: Boolean(sessionId),
   });
+
+  // When Bridget approves a stage, follow her to the next one, as long as
+  // the human was watching the stage she just finished.
+  const router = useRouter();
+  const liveGroup = session ? stageGroupFor(session) : null;
+  const previousLive = useRef<StageGroup | null>(null);
+  useEffect(() => {
+    if (!session || !liveGroup) return;
+    const before = previousLive.current;
+    previousLive.current = liveGroup;
+    if (!session.coordinatorEnabled || !before || before === liveGroup) return;
+    const viewing = isStageGroup(stageParam) ? stageParam : before;
+    if (viewing === before) router.replace(sessionHref(session.id, liveGroup));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveGroup, session?.coordinatorEnabled]);
 
   const back = <BackButton fallbackHref={SESSIONS_HREF} />;
 

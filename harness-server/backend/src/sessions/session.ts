@@ -50,7 +50,7 @@ export interface TranscriptEntry {
   helper?: HelperRunStats;
 }
 
-export type HelperName = 'research' | 'classifier' | 'runner';
+export type HelperName = 'research' | 'classifier' | 'runner' | 'memory';
 
 export interface HelperRunStats {
   helper: HelperName;
@@ -136,6 +136,28 @@ export interface Workstream {
   ownedPaths: string[];
   // Workstream ids that must be merged before this one starts.
   dependsOn: string[];
+  // What the lead already read that this engineer needs, so it doesn't
+  // explore it again (assign_team's `context`).
+  context?: WorkstreamContextRef[];
+}
+
+export interface WorkstreamContextRef {
+  path: string;
+  // e.g. "40-120"; omitted for the whole file.
+  lines?: string;
+  note: string;
+}
+
+// What an engineer says it built (report_workstream), for the lead's review
+// and for the workstreams that depend on it. `fallback` = it never called
+// the tool, so this is its last message instead.
+export interface WorkstreamReport {
+  summary: string;
+  steps: { id: string; done: string }[];
+  interfaces: string[];
+  checks: string;
+  forLead: string[];
+  fallback?: boolean;
 }
 
 // "ready" = built and committed on its branch, waiting for the lead to
@@ -163,6 +185,12 @@ export interface CodingTeamMember extends Workstream {
   // once that run starts. sendBacks counts them (capped, team-lead-tools.ts).
   feedback?: string | null;
   sendBacks?: number;
+  // Set when its branch is handed to the lead (agents/team/coding-team.ts);
+  // cleared when it runs again.
+  report?: WorkstreamReport | null;
+  // The exported declarations its branch adds or changes, one line each
+  // (agents/team/changed-exports.ts).
+  changedExports?: string[];
 }
 
 // Something the coding agent (from = null) or a team engineer (from = its

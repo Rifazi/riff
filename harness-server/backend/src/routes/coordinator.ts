@@ -1,26 +1,54 @@
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
-import { getSession, updateSession } from '../sessions/session-store.js';
+import { appendTranscriptEntry, getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor, type StageGroup } from '../sessions/stage-group.js';
 import type { SessionRecord, TranscriptEntry } from '../sessions/session.js';
-import { decideNextAction, flattenTranscript, hasUnansweredQuestion } from '../agents/coordinator-agent.js';
+import {
+  decideGate,
+  decideNextAction,
+  flattenTranscript,
+  hasPendingQuestionTool,
+  hasUnansweredQuestion,
+  latestChecksFailed,
+  concernInLastMessage,
+} from '../agents/coordinator-agent.js';
 import { runRequirementsAgentTurn } from '../agents/requirements-agent.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { runCodingAgentTurn } from '../agents/coding-agent.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
-import { isTeamRunning } from '../agents/team/coding-team.js';
-import { isQaTeamRunning } from '../agents/team/qa-team.js';
+import { isTeamRunning, runCodingTeam } from '../agents/team/coding-team.js';
+import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
+import {
+  approveCoding,
+  approvePlan,
+  approveQa,
+  approveRequirements,
+  deliverSession,
+  planDelivery,
+  readQaResult,
+} from '../sessions/stage-actions.js';
 
-// Hard cap so a stuck/looping coordinator can't run away unattended — it
-// always stops and hands back to a human rather than looping forever.
-const MAX_ITERATIONS = 15;
+// Bridget, the coordinator, drives a session from requirements to a merge
+// request. Within a stage she keeps its agent going; once the stage's
+// deliverable is finished she approves it herself unless something needs
+// the human: a question, an issue the agent raises (decideGate), a
+// proposed split or theme, a team that needs attention, any QA result but
+// a clean pass, or a repo with no remote (shipping would merge into the
+// base branch, which she leaves to the human). Each run drives one stage
+// and ends when it advances; the stage tabs start the next run.
+
+// Agent turns per run, so a looping stage can't run away unattended.
+const MAX_TURNS = 30;
+const PERSONA = 'Bridget';
+// How long a team round may sit "assigned" for the tab to start it before
+// Bridget starts it herself, and how often she checks on a running one.
+const TEAM_START_GRACE_MS = 10_000;
+const TEAM_POLL_MS = 5_000;
 
 // The message that kicks off a stage's very first turn when the coordinator
-// finds it with an empty transcript. QA's already exists client-side today
-// in QaStage.tsx's own useEffect (unconditional, coordinator or not) —
-// duplicated here deliberately rather than shared, since that effect stays
-// exactly as-is for non-coordinator sessions.
+// finds it with an empty transcript. QA's already exists client-side in
+// QaStage.tsx's own useEffect for sessions without the coordinator.
 const KICKOFF_MESSAGE: Partial<Record<StageGroup, string>> = {
   plan: 'Please break the approved requirements into a concrete, reviewable step-by-step plan.',
   coding: 'Please implement the approved plan.',
@@ -30,6 +58,16 @@ const KICKOFF_MESSAGE: Partial<Record<StageGroup, string>> = {
 // Keep in sync with QA_RERUN_MESSAGE in QaStage.tsx.
 const QA_RERUN_MESSAGE =
   'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
+// Keep in sync with QA_TEAM_WRAPUP_MESSAGE in QaStage.tsx.
+const QA_TEAM_WRAPUP_MESSAGE = 'Your reviewers have finished. Write the QA report from their findings.';
+const NEXT_STEP_MESSAGE = 'Continue with the next step on the checklist.';
+
+const STAGE_DOC: Record<StageGroup, string> = {
+  requirements: 'requirements',
+  plan: 'plan',
+  coding: 'branch',
+  qa: 'QA report',
+};
 
 const RUN_TURN: Record<StageGroup, (session: SessionRecord, message: string, onEvent: (e: AgentEvent) => void) => Promise<SessionRecord>> = {
   requirements: runRequirementsAgentTurn,
@@ -40,8 +78,129 @@ const RUN_TURN: Record<StageGroup, (session: SessionRecord, message: string, onE
   qa: runQaAgentTurn,
 };
 
-function transcriptFor(session: SessionRecord, group: StageGroup): TranscriptEntry[] {
-  return session.transcripts[group];
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type Outcome = { kind: 'advanced' | 'stop'; reason: string } | { kind: 'not-ready' };
+
+/**
+ * Approves the stage when its deliverable is finished and nothing in it
+ * needs the human; says why not otherwise. 'not-ready' = keep driving.
+ */
+async function tryAdvance(session: SessionRecord, group: StageGroup, transcript: TranscriptEntry[]): Promise<Outcome> {
+  const gate = async (approve: () => Promise<unknown>, approved: string): Promise<Outcome> => {
+    if (hasPendingQuestionTool(transcript)) return { kind: 'stop', reason: 'Waiting for your answer to the question above.' };
+    const decision = await decideGate({ stageLabel: group, transcriptText: flattenTranscript(transcript) });
+    if (decision.action === 'stop') return { kind: 'stop', reason: decision.reason };
+    try {
+      await approve();
+    } catch (err) {
+      return { kind: 'stop', reason: err instanceof Error ? err.message : String(err) };
+    }
+    return { kind: 'advanced', reason: approved };
+  };
+
+  switch (group) {
+    case 'requirements':
+      if (!session.requirementsPath || session.requirementsStatus === 'approved') return { kind: 'not-ready' };
+      return gate(() => approveRequirements(session), 'Approved the requirements: nothing in them needs you. On to the plan.');
+    case 'plan':
+      if (!session.planPath || session.planStatus === 'approved') return { kind: 'not-ready' };
+      return gate(() => approvePlan(session), 'Approved the plan: nothing in it needs you. On to coding.');
+    case 'coding': {
+      const steps = session.codingPlan ?? [];
+      const finished =
+        Boolean(session.branch) &&
+        steps.length > 0 &&
+        steps.every((s) => s.status === 'done') &&
+        !session.teamDecisionPending &&
+        !session.codingReconciliationPending;
+      if (!finished) return { kind: 'not-ready' };
+      if (latestChecksFailed(transcript)) {
+        return { kind: 'stop', reason: 'Every step is done, but the latest lint or test run failed. Look at it before the branch goes to QA.' };
+      }
+      const concern = concernInLastMessage(transcript);
+      if (concern) {
+        return { kind: 'stop', reason: `Every step is done, but the coding agent's summary mentions "${concern}". Check it before the branch goes to QA.` };
+      }
+      return gate(() => approveCoding(session), 'Every step is done and nothing needs you: sent the branch to QA.');
+    }
+    case 'qa':
+      return tryShip(session);
+  }
+}
+
+/** A clean QA pass is marked reviewed and opened as a merge request. Anything else waits for the human. */
+async function tryShip(session: SessionRecord): Promise<Outcome> {
+  if (session.delivery && session.delivery.kind !== 'pushed') {
+    return { kind: 'stop', reason: `Already delivered: ${session.delivery.detail}` };
+  }
+  if (session.qaStatus !== 'reviewed') {
+    if (!session.qaReportPath || session.qaRerunPending) return { kind: 'not-ready' };
+    const result = await readQaResult(session);
+    if (result === 'fail') return { kind: 'stop', reason: 'QA failed the branch. Look at the report, then send it back for fixes or decide what to do.' };
+    if (result === 'pass-with-notes') {
+      return { kind: 'stop', reason: 'QA passed with notes. Decide whether to send them back for fixes or ship as is.' };
+    }
+    if (result !== 'pass') return { kind: 'not-ready' };
+    session = await approveQa(session);
+  }
+  try {
+    const plan = await planDelivery(session);
+    if (plan.kind === 'merge') {
+      return {
+        kind: 'stop',
+        reason: `QA passed and is marked reviewed. This repo has no remote, so shipping would merge into ${plan.baseBranch} — click Ship when you're ready.`,
+      };
+    }
+    const shipped = await deliverSession(session, plan);
+    const d = shipped.delivery!;
+    return { kind: 'advanced', reason: `QA passed. ${d.detail}${d.url ? ` ${d.url}` : ''}` };
+  } catch (err) {
+    return { kind: 'stop', reason: `QA passed, but shipping failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/**
+ * Lets a team round finish: waits while it runs, and starts an assigned or
+ * interrupted one if the tab hasn't within TEAM_START_GRACE_MS. Returns
+ * null once the round is done, or why it needs the human.
+ */
+async function settleTeam(
+  sessionId: string,
+  kind: 'coding' | 'qa',
+  shouldStop: () => Promise<boolean>,
+): Promise<string | null | 'off'> {
+  const running = kind === 'coding' ? isTeamRunning : isQaTeamRunning;
+  const run = kind === 'coding' ? runCodingTeam : runQaTeam;
+  let waitedToStart = 0;
+  for (;;) {
+    if (await shouldStop()) return 'off';
+    const session = await getSession(sessionId);
+    const team = kind === 'coding' ? session?.codingTeam : session?.qaTeam;
+    if (!team) return null;
+    if (running(sessionId)) {
+      await sleep(TEAM_POLL_MS);
+      continue;
+    }
+    if (team.status === 'assigned' || team.status === 'interrupted') {
+      if (waitedToStart < TEAM_START_GRACE_MS) {
+        waitedToStart += TEAM_POLL_MS;
+        await sleep(TEAM_POLL_MS);
+        continue;
+      }
+      // The tab didn't start it (it's closed, or on another stage).
+      await run(sessionId, () => {}).catch((err) => {
+        if (!running(sessionId)) throw err;
+      });
+      continue;
+    }
+    if (team.status === 'needs_attention') {
+      return kind === 'coding'
+        ? 'The coding team needs attention: a workstream failed or is waiting on a decision. See the Coding tab.'
+        : 'The QA team needs attention: a reviewer failed. See the QA tab.';
+    }
+    return null;
+  }
 }
 
 export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<void> {
@@ -53,78 +212,113 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     return updateSession(session.id, { coordinatorEnabled: enabled });
   });
 
-  // SSE, same framing as the per-stage /message endpoints — drives the
-  // current stage's own agent forward automatically (composing the
-  // follow-up messages, deciding when it looks ready) without ever
-  // approving/rejecting anything itself. Stops at MAX_ITERATIONS, when
-  // coordinatorEnabled is turned off mid-run, or when the decision function
-  // says "ready".
+  // SSE, same framing as the per-stage /message endpoints. Drives the
+  // current stage until it's approved (the run then ends, and the next
+  // stage's tab starts the next run) or something needs the human.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coordinator/run', async (request, reply) => {
     const sessionId = request.params.id;
     const initial = await getSession(sessionId);
     if (!initial) return reply.code(404).send({ error: 'session not found' });
 
-        startEventStream(reply);
-
+    startEventStream(reply);
     const send = (event: AgentEvent) => {
-      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
+    const startGroup = stageGroupFor(initial);
+    // What Bridget did stays in the stage's chat, not only in this stream.
+    // A stop she already noted (the tab reopened on the same stage) isn't repeated.
+    const note = async (group: StageGroup, text: string, isError = false) => {
+      const entry = `${PERSONA}: ${text}`;
+      const last = (await getSession(sessionId))?.transcripts[group].at(-1);
+      if (last?.role === 'system' && last.text === entry) return;
+      await appendTranscriptEntry(sessionId, group, { role: 'system', text: entry, ...(isError ? { isError } : {}) });
+    };
+    const stop = async (group: StageGroup, reason: string) => {
+      send({ type: 'coordinator_decision', action: 'ready', reason });
+      await note(group, reason);
+    };
+    const turnedOff = async () => !(await getSession(sessionId))?.coordinatorEnabled;
 
     try {
-      for (let i = 0; i < MAX_ITERATIONS; i++) {
+      for (let turns = 0; ; ) {
         const session = await getSession(sessionId);
         if (!session) break;
         if (!session.coordinatorEnabled) {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'Coordinator was turned off.' });
           break;
         }
-
         if (session.stage === 'split' || session.stage === 'abandoned') {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
           break;
         }
+        if (session.delivery && session.delivery.kind !== 'pushed') {
+          send({ type: 'coordinator_decision', action: 'ready', reason: `Delivered: ${session.delivery.detail}` });
+          break;
+        }
+        const group = stageGroupFor(session);
+        if (group !== startGroup) break;
         if (session.themeProposal) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to apply or dismiss the proposed theme.' });
+          await stop(group, 'Waiting for you to apply or dismiss the proposed theme.');
           break;
         }
         if (session.splitProposal) {
-          // Only a human can accept or dismiss a split.
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to accept or dismiss the proposed split.' });
+          await stop(group, 'Waiting for you to accept or dismiss the proposed split.');
           break;
         }
 
-        const group = stageGroupFor(session);
-        const transcript = transcriptFor(session, group);
-
-        // The team drives itself from the Coding tab once the lead has
-        // split the work; the coordinator only takes over follow-ups with
-        // the lead after a human has looked at what the team merged.
+        // Team rounds run on their own; Bridget waits for them, starting
+        // one herself if its tab isn't open to.
         const team = session.codingTeam;
-        if (group === 'coding' && (isTeamRunning(session.id) || team?.status === 'assigned' || team?.status === 'running')) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team runs on its own — start or watch it on the Coding tab.' });
-          break;
+        if (group === 'coding' && team && (isTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(team.status))) {
+          const problem = await settleTeam(sessionId, 'coding', turnedOff);
+          if (problem === 'off') continue;
+          if (problem) {
+            await stop(group, problem);
+            break;
+          }
+          continue;
         }
-        const lastEntryAt = transcript[transcript.length - 1]?.timestamp;
-        if (group === 'coding' && team?.finishedAt && (!lastEntryAt || lastEntryAt < team.finishedAt)) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team has finished — review the merged diff.' });
-          break;
-        }
-
-        // Same for QA's team: the QA tab runs it and hands its findings to
-        // the lead.
         const qaTeam = session.qaTeam;
         if (
           group === 'qa' &&
           !session.qaRerunPending &&
-          (isQaTeamRunning(session.id) || qaTeam?.status === 'assigned' || qaTeam?.status === 'running')
+          qaTeam &&
+          (isQaTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(qaTeam.status))
         ) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The QA team runs on its own — start or watch it on the QA tab.' });
+          const problem = await settleTeam(sessionId, 'qa', turnedOff);
+          if (problem === 'off') continue;
+          if (problem) {
+            await stop(group, problem);
+            break;
+          }
+          continue;
+        }
+
+        const transcript = session.transcripts[group];
+
+        // A finished stage is approved, or stops for the human with why.
+        const outcome = await tryAdvance(session, group, transcript);
+        if (outcome.kind === 'advanced') {
+          send({ type: 'coordinator_decision', action: 'advanced', reason: outcome.reason });
+          await note(group, outcome.reason);
+          break;
+        }
+        if (outcome.kind === 'stop') {
+          await stop(group, outcome.reason);
+          break;
+        }
+
+        if (turns >= MAX_TURNS) {
+          await stop(group, `Ran ${MAX_TURNS} turns without finishing the ${STAGE_DOC[group]} — stopping for you to look.`);
           break;
         }
 
         let message: string;
+        const steps = session.codingPlan ?? [];
         if (group === 'qa' && session.qaRerunPending) {
           message = QA_RERUN_MESSAGE;
+        } else if (group === 'qa' && qaTeam?.status === 'done' && !qaTeam.relayed) {
+          message = QA_TEAM_WRAPUP_MESSAGE;
         } else if (transcript.length === 0) {
           const kickoff = KICKOFF_MESSAGE[group];
           if (!kickoff) {
@@ -135,33 +329,36 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           }
           message = kickoff;
         } else if (hasUnansweredQuestion(transcript)) {
-          // Don't even ask the LLM — it can't see the question's actual
-          // text (flattenTranscript reduces a tool_call to
-          // "[called ask_multiple_choice]"), so it has no way to tell this
-          // apart from "stalled, safe to nudge" and would just compose a
-          // pointless check-in message instead of truly waiting.
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to answer a pending question.' });
+          // Checked before asking a model, which can't see the question's
+          // text and would answer it on the human's behalf.
+          await stop(group, 'Waiting for your answer to the question above.');
           break;
+        } else if (group === 'coding' && session.branch && steps.some((s) => s.status !== 'done') && !session.teamDecisionPending) {
+          // Steps left and nothing asked: the next one, no model needed.
+          message = NEXT_STEP_MESSAGE;
         } else {
           const decision = await decideNextAction({
             stageLabel: group,
             transcriptText: flattenTranscript(transcript),
             appId: session.appId,
           });
-          send({ type: 'coordinator_decision', action: decision.action, reason: decision.reason });
-          if (decision.action === 'ready' || !decision.message) break;
+          if (decision.action === 'ready' || !decision.message) {
+            // Nothing finished to approve, and the agent isn't going on by itself.
+            await stop(group, decision.reason || `The ${STAGE_DOC[group]} isn't finished and the agent stopped.`);
+            break;
+          }
+          send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
           message = decision.message;
         }
 
+        turns++;
         try {
           await RUN_TURN[group](session, message, send);
         } catch (err) {
-          send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+          const reason = err instanceof Error ? err.message : String(err);
+          send({ type: 'error', message: reason });
+          await note(group, `stopped: ${reason}`, true);
           break;
-        }
-
-        if (i === MAX_ITERATIONS - 1) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Hit the auto-continue limit — stopping for a human to review.' });
         }
       }
     } finally {

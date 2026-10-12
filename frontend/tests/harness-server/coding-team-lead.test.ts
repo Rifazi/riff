@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   dropProblem,
+  fallbackReport,
+  FALLBACK_REPORT_CHARS,
   leadReviewMessage,
   leadWrapUpMessage,
   MAX_SEND_BACKS,
@@ -10,6 +12,7 @@ import {
   sendBackProblem,
   startable,
   stuckDependencies,
+  workstreamHandover,
 } from '../../../harness-server/backend/src/agents/team/lead-core';
 import type { TeamMemberStatus } from '../../../harness-server/backend/src/sessions/session';
 
@@ -101,6 +104,45 @@ describe('what the lead is told', () => {
     expect(text).toContain('docs starts only once you merge');
     expect(text).toContain('merge_workstream');
     expect(text).not.toMatch(/\n\n\n/);
+  });
+
+  test("a finished branch comes with the engineer's report and changed exports", () => {
+    const report = {
+      summary: 'Adds the job store.',
+      steps: [{ id: 'api-step', done: 'jobs/job-store.ts: put/get/list' }],
+      interfaces: ['jobs/job-store.ts — putJob(job: Job): Promise<void>: saves a job'],
+      checks: 'lint ok, 42 tests pass',
+      forLead: ['routes/jobs.ts needs the new import after merge'],
+    };
+    const team = [m('api', 'ready', [], { report, changedExports: ['jobs/job-store.ts:12  export async function putJob(job: Job)'] })];
+    const text = leadReviewMessage(team, ['api'], 'feat', new Map([['api', 2]]));
+    expect(text).toContain('  Summary: Adds the job store.');
+    expect(text).toContain('  - api-step: jobs/job-store.ts: put/get/list');
+    expect(text).toContain('putJob(job: Job): Promise<void>');
+    expect(text).toContain('jobs/job-store.ts:12  export async function putJob');
+    expect(text).toContain('routes/jobs.ts needs the new import');
+    // Before the merge his checkout doesn't have the branch's changes.
+    expect(text).toContain("doesn't have a workstream's changes until you merge it");
+  });
+
+  test('a dependent gets the summary and interfaces, not the steps, checks or notes for the lead', () => {
+    const report = { summary: 'S', steps: [{ id: 'x', done: 'did x' }], interfaces: ['a.ts — f(): g'], checks: 'ok', forLead: ['look'] };
+    const text = workstreamHandover(m('api', 'merged', [], { report }), { forDependent: true });
+    expect(text).toContain('Summary: S');
+    expect(text).toContain('- a.ts — f(): g');
+    expect(text).not.toContain('did x');
+    expect(text).not.toContain('Checks');
+    expect(text).not.toContain('look');
+  });
+
+  test('an engineer that filed no report hands over its last message, cut short', () => {
+    expect(fallbackReport('  ')).toBeNull();
+    const long = fallbackReport('x'.repeat(FALLBACK_REPORT_CHARS + 50))!;
+    expect(long.fallback).toBe(true);
+    expect(long.summary.length).toBe(FALLBACK_REPORT_CHARS + 1);
+    expect(workstreamHandover(m('api', 'ready', [], { report: fallbackReport('Built it.') }))).toContain(
+      'Its last message (it filed no report): Built it.',
+    );
   });
 
   test('the wrap-up hands dropped steps back to the lead', () => {

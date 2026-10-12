@@ -7,9 +7,10 @@ import type { SessionRecord } from '@/lib/dev-sessions/types';
 import { COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 
 /**
- * Per-session opt-in toggle for the coordinator — off by default. Turning it
- * on doesn't do anything by itself; each stage auto-starts a
- * /coordinator/run when it mounts with an empty transcript and this flag on.
+ * Per-session toggle for Bridget, the coordinator — off by default. With it
+ * on she drives the session to a merge request: each stage's tab starts her
+ * (useCoordinatorAutoRun), and she approves a finished stage herself unless
+ * something needs the human (routes/coordinator.ts on the server).
  */
 export function CoordinatorControl({ session, streaming }: { session: SessionRecord; streaming: boolean }) {
   const queryClient = useQueryClient();
@@ -39,7 +40,7 @@ export function CoordinatorControl({ session, streaming }: { session: SessionRec
         {streaming && enabled
           ? `— ${COORDINATOR_PERSONA.name} is driving this stage…`
           : enabled
-            ? '— you still approve every stage'
+            ? '— approves each stage and opens the MR, stopping for questions or issues'
             : '— you drive every message'}
       </span>
     </label>

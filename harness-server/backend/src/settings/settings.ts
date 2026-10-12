@@ -39,6 +39,9 @@ export interface RoleModelConfig {
   // Coding only: the Ollama model the `delegate` tool's read-only helpers run
   // on (agents/helpers/research/tool.ts). Unset or '' = no delegate tool.
   delegateModel?: string;
+  // Coding only: keep every file read in the session and give the coding
+  // agent, Jack and the engineers `recall` (agents/helpers/memory/). Unset = on.
+  readMemory?: boolean;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';

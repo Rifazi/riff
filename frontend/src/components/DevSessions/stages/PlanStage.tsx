@@ -13,6 +13,7 @@ import { sessionHref, stageGroupFor } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { ExternalAnchor } from '../ExternalAnchor';
 import { ApprovalBar } from '../ApprovalBar';
+import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
@@ -160,16 +161,7 @@ export function PlanStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.planStatus, session.coordinatorEnabled, session.transcripts.plan.length, streaming]);
 
-  const kickedOffCoordinator = useRef(false);
-  useEffect(() => {
-    if (!session.coordinatorEnabled) return;
-    if (session.transcripts.plan.length > 0) return;
-    if (streaming) return;
-    if (kickedOffCoordinator.current) return;
-    kickedOffCoordinator.current = true;
-    void runCoordinator(sessionId, refresh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.coordinatorEnabled, session.transcripts.plan.length, streaming]);
+  useCoordinatorAutoRun({ session, group: 'plan', streaming, runCoordinator, refresh });
 
   // Requirements were revised and re-approved after a mid-coding send-back —
   // relay the note so the plan agent reconciles the checklist against it.

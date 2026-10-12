@@ -14,6 +14,7 @@ import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { DeliveryPanel } from '../DeliveryPanel';
 import { ApprovalBar } from '../ApprovalBar';
+import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
@@ -57,35 +58,43 @@ function ResultPill({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-// The headline verdict, so pass/fail is obvious before reading the report.
-function QaVerdict({ result }: { result: string | null }) {
-  if (result === 'pass')
-    return (
-      <Notice tone="green">
+const VERDICT: Record<string, { tone: 'green' | 'amber' | 'red'; icon: typeof CheckCircle2; title: string; hint?: string }> = {
+  pass: { tone: 'green', icon: CheckCircle2, title: 'QA passed' },
+  'pass-with-notes': {
+    tone: 'amber',
+    icon: TriangleAlert,
+    title: 'QA passed with notes',
+    hint: 'Nothing blocks, but there are notes to act on — send it back so they get fixed, or mark it reviewed as is.',
+  },
+  fail: { tone: 'red', icon: XCircle, title: 'QA failed', hint: 'Send it back for fixes, or reject the session.' },
+};
+
+// The headline verdict and the check results in one block, so pass/fail is
+// obvious before reading the report.
+function QaVerdict({ markdown }: { markdown: string }) {
+  const result = parseFrontmatterField(markdown, 'result');
+  const verdict = result ? VERDICT[result] : undefined;
+  const checks = (
+    <div className="flex flex-wrap gap-1.5">
+      {!verdict && <ResultPill label="result" value={result} />}
+      <ResultPill label="lint" value={parseFrontmatterField(markdown, 'lint')} />
+      <ResultPill label="unit tests" value={parseFrontmatterField(markdown, 'unit-tests')} />
+      <ResultPill label="integration tests" value={parseFrontmatterField(markdown, 'integration-tests')} />
+    </div>
+  );
+  if (!verdict) return checks;
+  const Icon = verdict.icon;
+  return (
+    <Notice tone={verdict.tone}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex items-center gap-2 font-semibold">
-          <CheckCircle2 className="h-4 w-4" /> QA passed
+          <Icon className="h-4 w-4" /> {verdict.title}
         </div>
-      </Notice>
-    );
-  if (result === 'pass-with-notes')
-    return (
-      <Notice tone="amber">
-        <div className="flex items-center gap-2 font-semibold">
-          <TriangleAlert className="h-4 w-4" /> QA passed with notes
-        </div>
-        <div className="mt-0.5 text-xs">Nothing blocks, but there are notes to act on — send it back so they get fixed, or mark it reviewed as is.</div>
-      </Notice>
-    );
-  if (result === 'fail')
-    return (
-      <Notice tone="red">
-        <div className="flex items-center gap-2 font-semibold">
-          <XCircle className="h-4 w-4" /> QA failed
-        </div>
-        <div className="mt-0.5 text-xs">Send it back for fixes, or reject the session.</div>
-      </Notice>
-    );
-  return null;
+        {checks}
+      </div>
+      {verdict.hint && <div className="mt-1 text-xs">{verdict.hint}</div>}
+    </Notice>
+  );
 }
 
 export function QaStage({ session }: { session: SessionRecord }) {
@@ -141,23 +150,26 @@ export function QaStage({ session }: { session: SessionRecord }) {
     }, attachments);
 
   useEffect(() => {
+    // With Bridget on, she kicks QA off (useCoordinatorAutoRun below).
+    if (session.coordinatorEnabled) return;
     if (session.stage !== 'qa-in-progress') return;
     const rerun = session.qaRerunPending;
     if (!rerun && session.transcripts.qa.length > 0) return;
     const approvalKey = session.codingApprovedAt ?? '';
     if (kickedOffForApproval.get(sessionId) === approvalKey) return;
     kickedOffForApproval.set(sessionId, approvalKey);
-    if (session.coordinatorEnabled) {
-      void runCoordinator(sessionId, refresh);
-    } else {
-      void handleSend(rerun ? QA_RERUN_MESSAGE : QA_KICKOFF_MESSAGE);
-    }
+    void handleSend(rerun ? QA_RERUN_MESSAGE : QA_KICKOFF_MESSAGE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.stage, session.qaRerunPending, session.codingApprovedAt]);
+
+  // Bridget kicks QA off, waits for its team, and ships a clean pass as an MR.
+  useCoordinatorAutoRun({ session, group: 'qa', streaming, runCoordinator, refresh });
 
   // Every reviewer reported: hand the findings to the lead, once per round.
   // A round that needs attention waits for the human (resume, or ask the lead).
   useEffect(() => {
+    // Bridget hands the findings over herself when she's driving.
+    if (session.coordinatorEnabled) return;
     if (!qaTeam || qaTeam.status !== 'done' || qaTeam.relayed || streaming || teamActive) return;
     const key = `${sessionId}:${qaTeam.round}`;
     if (wrappedUpRounds.has(key)) return;
@@ -237,41 +249,9 @@ export function QaStage({ session }: { session: SessionRecord }) {
           emptyText={teamActive ? 'Not written yet — the reviewers are still checking…' : 'Not written yet — QA is running…'}
           badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
           scrollFooter
-          notices={
-            markdown && (
-              <>
-                <QaVerdict result={qaResult} />
-                <div className="flex flex-wrap gap-1.5">
-                  <ResultPill label="result" value={qaResult} />
-                  <ResultPill label="lint" value={parseFrontmatterField(markdown, 'lint')} />
-                  <ResultPill label="unit tests" value={parseFrontmatterField(markdown, 'unit-tests')} />
-                  <ResultPill label="integration tests" value={parseFrontmatterField(markdown, 'integration-tests')} />
-                </div>
-              </>
-            )
-          }
+          notices={markdown && <QaVerdict markdown={markdown} />}
           footer={
             <>
-              {/* Nothing to fix on a clean pass. */}
-              {!delivered && qaResult !== 'pass' && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mt-3"
-                  onClick={() => sendBackMutation.mutate()}
-                  disabled={busy || sendBackMutation.isPending}
-                  title={
-                    reviewed
-                      ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
-                      : session.qaReportPath
-                      ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
-                      : `Reopen Coding without a QA report — e.g. if ${AGENT.name} was interrupted before reviewing anything.`
-                  }
-                >
-                  {sendBackMutation.isPending ? <Loader2 className="animate-spin" /> : <Wrench />}
-                  {sendBackMutation.isPending ? 'Sending back…' : session.qaReportPath ? 'Send back for fixes' : 'Reopen coding'}
-                </Button>
-              )}
               <ApprovalBar
                 approveLabel={reviewed ? 'Reviewed' : 'Mark reviewed'}
                 onApprove={() => approveMutation.mutate()}
@@ -281,6 +261,31 @@ export function QaStage({ session }: { session: SessionRecord }) {
                 onReject={() => rejectMutation.mutate()}
                 rejectDisabled={reviewed || busy}
                 rejectBusy={rejectMutation.isPending}
+                secondaryActions={
+                  // Nothing to fix on a clean pass.
+                  !delivered &&
+                  qaResult !== 'pass' && (
+                    <Button
+                      variant="outline"
+                      onClick={() => sendBackMutation.mutate()}
+                      disabled={busy || sendBackMutation.isPending}
+                      title={
+                        reviewed
+                          ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+                          : session.qaReportPath
+                            ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+                            : `Reopen Coding without a QA report — e.g. if ${AGENT.name} was interrupted before reviewing anything.`
+                      }
+                    >
+                      {sendBackMutation.isPending ? <Loader2 className="animate-spin" /> : <Wrench />}
+                      {sendBackMutation.isPending
+                        ? 'Sending back…'
+                        : session.qaReportPath
+                          ? 'Send back for fixes'
+                          : 'Reopen coding'}
+                    </Button>
+                  )
+                }
               />
               {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}
             </>

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { tool } from 'ai';
@@ -104,8 +105,12 @@ export interface FileToolDeps {
   writablePaths?: string[];
   /** Optional compressor applied to large full-file reads before they enter the agent's context. */
   compress?: (filePath: string, content: string) => Promise<string>;
-  /** Told of every read the agent makes (the research helper's redo check). */
-  onRead?: (filePath: string) => void;
+  /**
+   * Told of every read the agent makes, with the text read (before any
+   * compression) and the whole file's sha1: the research helper's redo
+   * check and the read memory (helpers/memory/).
+   */
+  onRead?: (filePath: string, read: { text: string; fileHash: string }) => void;
   /** Shared with the agent's other read tools and cleared on compaction; a fresh one when unset. */
   readMemo?: ReadMemo;
   /** Runs before every write and throws to refuse it (the lead's pending split decision). */
@@ -117,8 +122,8 @@ export function createFileExecutors(deps: FileToolDeps) {
   const readMemo = deps.readMemo ?? new ReadMemo();
 
   const readFileExecute = async (args: z.infer<typeof readFileSchema>): Promise<string> => {
-    const raw = await readFileText(args);
-    deps.onRead?.(args.path);
+    const { text: raw, fileHash } = await readFileText(args);
+    deps.onRead?.(args.path, { text: raw, fileHash });
     // Compress full-file reads (no offset/limit) — these are exploration reads.
     // Ranged reads (offset or limit specified) are left verbatim: the agent is
     // pinpointing text it's about to edit and needs it exact.
@@ -135,10 +140,13 @@ export function createFileExecutors(deps: FileToolDeps) {
     return result;
   };
 
-  const readFileText = async ({ path: requestedPath, offset, limit }: z.infer<typeof readFileSchema>): Promise<string> => {
-    const absolute = assertPathAllowed(requestedPath, ['.'], deps.repoRoot);
+  const readFileText = async (args: z.infer<typeof readFileSchema>): Promise<{ text: string; fileHash: string }> => {
+    const absolute = assertPathAllowed(args.path, ['.'], deps.repoRoot);
     const content = await fs.readFile(absolute, 'utf8');
+    return { text: pageOf(content, args), fileHash: createHash('sha1').update(content).digest('hex') };
+  };
 
+  const pageOf = (content: string, { offset, limit }: z.infer<typeof readFileSchema>): string => {
     const lines = content.split('\n');
     const totalLines = lines.length;
     if (offset === undefined && limit === undefined && totalLines <= DEFAULT_LINE_LIMIT && content.length <= READ_CHAR_LIMIT) {

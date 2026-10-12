@@ -5,6 +5,7 @@ import { createGoogle } from '@ai-sdk/google';
 import { query, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import type { ApiKeyProvider } from '../settings/settings.js';
 import { ollamaEndpoint, openAICompatBase } from '../settings/ollama.js';
+import { shouldCompact } from './compaction.js';
 
 const DEFAULT_TEST_MODEL: Record<ApiKeyProvider, string> = {
   anthropic: 'claude-haiku-4-5',
@@ -94,7 +95,7 @@ export type AgentEvent =
   | { type: 'tool_result'; toolCallId: string; content: unknown; isError: boolean }
   | { type: 'done'; text: string; isError: boolean }
   | { type: 'error'; message: string }
-  | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
+  | { type: 'coordinator_decision'; action: 'continue' | 'ready' | 'advanced'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats };
@@ -103,8 +104,9 @@ export type AgentEvent =
 // when a turn is cut off purely because it hit its own per-call step/turn
 // budget — not a real error — the wrapper transparently starts a fresh call
 // with a fresh budget, resuming the same underlying conversation rather than
-// replaying it. Capped so a confused agent can't spin indefinitely; worst
-// case per human message becomes (1 + this) * the per-call budget.
+// replaying it. Capped so a confused agent can't spin indefinitely: a turn
+// makes at most (1 + this) * the per-call budget model requests, however
+// many times compaction cuts it.
 const MAX_CONTINUATION_HOPS = 3;
 // How runAgentTurn's result text starts when the turn ran out of hops.
 export const OUT_OF_STEPS = 'This step needed more tool calls than';
@@ -117,20 +119,21 @@ const CONTINUATION_AFTER_COMPACTION_PROMPT =
   "finished. Continue from the state above: don't redo anything already committed or listed as done, just " +
   "proceed with the remaining work.";
 
-// Context compaction at a continuation hop: a context at or over `atTokens`
-// isn't resumed — the next hop starts a fresh conversation that opens with
+// Context compaction: once a conversation's context reaches `atTokens`, the
+// hop is cut as soon as the tool calls in flight have returned (not at its
+// step budget), and the next hop starts a fresh conversation that opens with
 // `handoff()` (agents/handoff.ts) instead. Every later step of a resumed
-// context re-reads all of it, so this bounds what one long turn can cost.
+// context re-reads all of it, so this bounds what each request can cost.
 // `systemPrompt`, when returned, replaces the turn's own for the fresh
 // conversation — a resumed turn's system prompt can be the short form that
 // leaves out what the conversation's first turn already carried.
 export interface CompactionOptions {
   atTokens: number;
   handoff: () => Promise<{ prompt: string; systemPrompt?: string }>;
-  // Tool-call steps per hop and the number of hops, in place of the
-  // defaults (20 and MAX_CONTINUATION_HOPS). Compaction is only checked
-  // between hops, so shorter hops let it act before the context gets
-  // large; the coding agents use 10 × 6, which keeps the same total.
+  // Model requests per hop and the number of continuation hops, in place
+  // of the defaults (20 and MAX_CONTINUATION_HOPS). Together they set the
+  // turn's request budget, stepsPerHop × (1 + maxHops); a hop cut short for
+  // compaction only spends the requests it made.
   stepsPerHop?: number;
   maxHops?: number;
 }
@@ -166,14 +169,14 @@ export interface RunAgentTurnResult {
   contextTokens: number;
 }
 
-// Compaction only pays off when the conversation has grown well past where
-// it started: a context that begins near atTokens (long approved docs)
-// would otherwise be compacted, at the cost of a handoff, after every hop.
-const MIN_GROWTH_TO_COMPACT = 20_000;
-
-function shouldCompact(compaction: CompactionOptions | undefined, contextTokens: number, startTokens: number): boolean {
-  return Boolean(compaction) && contextTokens >= compaction!.atTokens && contextTokens - startTokens >= MIN_GROWTH_TO_COMPACT;
+// A turn's request budget across all its hops (see CompactionOptions).
+function requestBudget(compaction: CompactionOptions | undefined, defaultSteps: number): { perHop: number; total: number } {
+  const perHop = compaction?.stepsPerHop ?? defaultSteps;
+  return { perHop, total: perHop * (1 + (compaction?.maxHops ?? MAX_CONTINUATION_HOPS)) };
 }
+
+const outOfStepsText = (budget: number) =>
+  `${OUT_OF_STEPS} one turn's ${budget} model requests could cover — consider splitting the plan/checklist step further.`;
 
 interface RunAgentTurnOnceResult extends RunAgentTurnResult {
   // 'tool-calls' means stopWhen cut the step loop off while the model still
@@ -183,18 +186,28 @@ interface RunAgentTurnOnceResult extends RunAgentTurnResult {
   finishReason: string | null;
   // The prompt size of this call's first model request.
   startTokens: number;
+  // Model requests this call made.
+  requests: number;
+}
+
+interface HopParams {
+  // This hop's request cap.
+  maxSteps: number;
+  // The prompt size the conversation started at, when this hop resumes one
+  // (a fresh conversation measures its own first request).
+  conversationStart?: number;
 }
 
 /**
- * Runs a single streamText call, capped at 20 tool-call steps. The security
+ * Runs a single streamText call, capped at `maxSteps` tool-call steps and
+ * cut early once the context is due for compaction. The security
  * boundary here is simply which tools are in the `tools` object passed in —
  * unlike the previous Claude-Code-CLI-based engine there's no separate
  * built-in tool set to disable: the model can only ever call what's in that
  * object, full stop.
  */
-async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTurnOnceResult> {
-  const { systemPrompt, tools, provider, model, apiKey, history, prompt, onEvent } = params;
-  const steps = params.compaction?.stepsPerHop ?? 20;
+async function runAgentTurnOnce(params: RunAgentTurnParams & HopParams): Promise<RunAgentTurnOnceResult> {
+  const { systemPrompt, tools, provider, model, apiKey, history, prompt, onEvent, compaction } = params;
 
   let fullText = '';
   let sawError = false;
@@ -219,7 +232,17 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
       instructions: cache ? { role: 'system', content: systemPrompt, providerOptions: cache } : systemPrompt,
       tools,
       messages,
-      stopWhen: stepCountIs(steps),
+      stopWhen: [
+        stepCountIs(params.maxSteps),
+        // After a tool step, so the tool results are in and the next hop
+        // compacts (runAgentTurn below).
+        ({ steps }) => {
+          const last = steps.at(-1);
+          if (!compaction || last?.finishReason !== 'tool-calls') return false;
+          const start = params.conversationStart ?? steps[0]?.usage.inputTokens ?? 0;
+          return shouldCompact(compaction, last.usage.inputTokens ?? 0, start);
+        },
+      ],
       abortSignal: params.abortSignal,
     });
 
@@ -280,38 +303,56 @@ async function runAgentTurnOnce(params: RunAgentTurnParams): Promise<RunAgentTur
     };
 
     onEvent({ type: 'done', text: fullText, isError: sawError });
-    return { updatedHistory, resultText: fullText, isError: sawError, finishReason, usage, contextTokens, startTokens };
+    return {
+      updatedHistory,
+      resultText: fullText,
+      isError: sawError,
+      finishReason,
+      usage,
+      contextTokens,
+      startTokens,
+      requests: allSteps.length,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { updatedHistory: history, resultText: message, isError: true, finishReason: null, usage: ZERO_USAGE, contextTokens: 0, startTokens: 0 };
+    return {
+      updatedHistory: history,
+      resultText: message,
+      isError: true,
+      finishReason: null,
+      usage: ZERO_USAGE,
+      contextTokens: 0,
+      startTokens: 0,
+      requests: 0,
+    };
   }
 }
 
 /**
  * Wraps runAgentTurnOnce with automatic continuation: if a call is cut off
- * purely because it exhausted its 20-step budget (finishReason 'tool-calls'
- * rather than a genuine 'stop'), transparently re-invokes with the
- * accumulated history plus a short internal nudge, up to
- * MAX_CONTINUATION_HOPS times, instead of surfacing that as a dead end.
+ * by its step budget or for compaction (finishReason 'tool-calls' rather
+ * than a genuine 'stop'), transparently re-invokes — with the accumulated
+ * history plus a short internal nudge, or a fresh conversation from a
+ * handoff — until the turn's request budget is spent, instead of surfacing
+ * that as a dead end.
  */
 export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAgentTurnResult> {
   const { tracked: onEvent, stats: toolOutput } = trackToolOutput(rawParams.onEvent);
   const params = { ...rawParams, onEvent };
+  const budget = requestBudget(params.compaction, 20);
   let hop = 0;
   let currentHistory = params.history;
   let currentPrompt = params.prompt;
   let systemPrompt = params.systemPrompt;
   const compress = params.compressHistory;
   const sendHistory = compress ? await compress(currentHistory) : currentHistory;
-  let result = await runAgentTurnOnce({ ...params, history: sendHistory, prompt: currentPrompt });
+  let result = await runAgentTurnOnce({ ...params, history: sendHistory, prompt: currentPrompt, maxSteps: budget.perHop });
   let usage = result.usage;
+  let used = result.requests;
   let conversationStart = result.startTokens;
-  const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
 
-  while (result.finishReason === 'tool-calls' && hop < maxHops && !params.abortSignal?.aborted) {
-    hop += 1;
-    onEvent({ type: 'continuation', hop, maxHops });
+  while (result.finishReason === 'tool-calls' && used < budget.total && !params.abortSignal?.aborted) {
     const compacting = shouldCompact(params.compaction, result.contextTokens, conversationStart);
     if (compacting) {
       const handoff = await params.compaction!.handoff();
@@ -320,22 +361,32 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
       currentHistory = [];
       currentPrompt = `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`;
     } else {
+      hop += 1;
+      onEvent({ type: 'continuation', hop, maxHops: Math.ceil(budget.total / budget.perHop) - 1 });
       // currentHistory stays as the canonical (uncompressed) history for
       // compaction/handoff decisions and the final updatedHistory return.
       currentHistory = result.updatedHistory;
       currentPrompt = CONTINUATION_PROMPT;
     }
     const hopHistory = compress ? await compress(currentHistory) : currentHistory;
-    result = await runAgentTurnOnce({ ...params, systemPrompt, history: hopHistory, prompt: currentPrompt });
+    result = await runAgentTurnOnce({
+      ...params,
+      systemPrompt,
+      history: hopHistory,
+      prompt: currentPrompt,
+      maxSteps: Math.min(budget.perHop, budget.total - used),
+      conversationStart: compacting ? undefined : conversationStart,
+    });
     usage = addUsage(usage, result.usage);
+    used += result.requests;
     if (compacting) conversationStart = result.startTokens;
   }
   onEvent({ type: 'usage', usage, toolOutput });
 
-  if (result.finishReason === 'tool-calls' && hop >= maxHops) {
+  if (result.finishReason === 'tool-calls' && used >= budget.total) {
     return {
       updatedHistory: result.updatedHistory,
-      resultText: `${OUT_OF_STEPS} ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
+      resultText: outOfStepsText(budget.total),
       isError: true,
       usage,
       contextTokens: result.contextTokens,
@@ -419,10 +470,16 @@ interface RunClaudeAgentTurnOnceResult extends RunClaudeAgentTurnResult {
   startTokens: number;
   // The raw `result` message's subtype ('success' | 'error_max_turns' |
   // 'error_during_execution' | ...) — null if the stream threw before any
-  // `result` message arrived. The wrapper below only auto-continues on
-  // 'error_max_turns' specifically, never on a genuine execution error.
+  // `result` message arrived — or 'context_budget' when this call cut the
+  // hop for compaction. The wrapper below only auto-continues on those two,
+  // never on a genuine execution error.
   subtype: string | null;
+  // Model requests this call made.
+  requests: number;
 }
+
+// The subtype runClaudeAgentTurnOnce reports when it cut a hop for compaction.
+const CONTEXT_BUDGET = 'context_budget';
 
 // Caps agentic round-trips within one human turn — same ceiling as the
 // AI-SDK engine's stepCountIs(20). Left unset, the SDK has no default cap,
@@ -431,8 +488,8 @@ interface RunClaudeAgentTurnOnceResult extends RunClaudeAgentTurnResult {
 // before ever returning to the human.
 const MAX_TURNS_PER_STEP = 20;
 
-async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise<RunClaudeAgentTurnOnceResult> {
-  const { systemPrompt, createMcpServer, toolNames, model, resumeSessionId, prompt, cwd, onEvent } = params;
+async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopParams): Promise<RunClaudeAgentTurnOnceResult> {
+  const { systemPrompt, createMcpServer, toolNames, model, resumeSessionId, prompt, cwd, onEvent, compaction } = params;
   const allowedTools = toolNames.map((n) => `mcp__${CLAUDE_MCP_SERVER_NAME}__${n}`);
 
   let sdkSessionId: string | null = resumeSessionId;
@@ -444,14 +501,31 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
   let contextTokens = 0;
   let startTokens = 0;
 
-  // The SDK takes a controller, not a signal: one per query(), following the caller's signal.
-  let abortController: AbortController | undefined;
-  if (params.abortSignal) {
-    const controller = new AbortController();
-    if (params.abortSignal.aborted) controller.abort();
-    else params.abortSignal.addEventListener('abort', () => controller.abort(), { once: true });
-    abortController = controller;
-  }
+  // The SDK takes a controller, not a signal: one per query(), following
+  // the caller's signal, and also how this call cuts the hop for compaction.
+  const abortController = new AbortController();
+  if (params.abortSignal?.aborted) abortController.abort();
+  else params.abortSignal?.addEventListener('abort', () => abortController.abort(), { once: true });
+
+  // A cut for compaction waits until every tool call the model made has its
+  // result, so no tool is cut off mid-run; the SDK session isn't resumed
+  // after it. With no `result` message then, usage comes from the requests'
+  // own usage (each request's content blocks arrive as messages that share
+  // its id and usage).
+  const unanswered = new Set<string>();
+  const requestUsage = new Map<string, TokenUsage>();
+  let cutForContext = false;
+  const cutUsage = (): TokenUsage => [...requestUsage.values()].reduce(addUsage, ZERO_USAGE);
+  const cutResult = (): RunClaudeAgentTurnOnceResult => ({
+    sdkSessionId,
+    resultText: '',
+    isError: false,
+    subtype: CONTEXT_BUDGET,
+    usage: cutUsage(),
+    contextTokens,
+    startTokens,
+    requests: requestUsage.size,
+  });
 
   const stream = query({
     prompt,
@@ -461,14 +535,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
       tools: [], // disable every built-in tool — only the MCP tools below are available
       mcpServers: { [CLAUDE_MCP_SERVER_NAME]: createMcpServer() },
       allowedTools,
-      maxTurns: params.compaction?.stepsPerHop ?? MAX_TURNS_PER_STEP,
+      maxTurns: params.maxSteps,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       permissionPrompts: 'none',
       ...CLAUDE_ISOLATION,
       ...(model ? { model } : {}),
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
-      ...(abortController ? { abortController } : {}),
+      abortController,
     },
   });
 
@@ -494,11 +568,18 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
           if (u) {
             contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
             if (!startTokens) startTokens = contextTokens;
+            requestUsage.set(message.message.id, {
+              input: u.input_tokens ?? 0,
+              output: u.output_tokens ?? 0,
+              cacheRead: u.cache_read_input_tokens ?? 0,
+              cacheWrite: u.cache_creation_input_tokens ?? 0,
+            });
           }
           for (const block of message.message.content) {
             if (block.type === 'text') {
               onEvent({ type: 'assistant_text', text: block.text });
             } else if (block.type === 'tool_use') {
+              unanswered.add(block.id);
               onEvent({ type: 'tool_call', toolCallId: block.id, name: block.name, input: block.input });
             }
           }
@@ -506,9 +587,11 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
         }
         case 'user': {
           const content = message.message.content;
+          let answered = false;
           if (Array.isArray(content)) {
             for (const block of content) {
               if (block.type === 'tool_result') {
+                answered = unanswered.delete(block.tool_use_id) || answered;
                 onEvent({
                   type: 'tool_result',
                   toolCallId: block.tool_use_id,
@@ -517,6 +600,11 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
                 });
               }
             }
+          }
+          const start = params.conversationStart ?? startTokens;
+          if (answered && unanswered.size === 0 && shouldCompact(compaction, contextTokens, start)) {
+            cutForContext = true;
+            abortController.abort();
           }
           break;
         }
@@ -551,14 +639,16 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
     // turn into a raw, unretried error the human would see instead of the
     // continuation loop below picking it up).
     if (gotResult) {
-      return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens };
+      return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens, requests: requestUsage.size };
     }
+    if (cutForContext) return cutResult();
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
-    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens, startTokens };
+    return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens, startTokens, requests: requestUsage.size };
   }
 
-  return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens };
+  if (cutForContext && !gotResult) return cutResult();
+  return { sdkSessionId, resultText, isError, subtype, usage, contextTokens, startTokens, requests: requestUsage.size };
 }
 
 /**
@@ -567,44 +657,59 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams): Promise
  * failure) and a session id came back, transparently resumes that same
  * server-side session with a fresh turn budget instead of surfacing a dead
  * end — a genuinely new query()/CLI-subprocess instance that picks up right
- * where the last one stopped, no context replay needed. Any other error
- * subtype, or a thrown exception, returns immediately as before.
+ * where the last one stopped, no context replay needed. A call cut for
+ * compaction ('context_budget') continues in a fresh conversation from a
+ * handoff. Either way, only until the turn's request budget is spent. Any
+ * other error subtype, or a thrown exception, returns immediately as before.
  */
 export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): Promise<RunClaudeAgentTurnResult> {
   const { tracked: onEvent, stats: toolOutput } = trackToolOutput(rawParams.onEvent);
   const params = { ...rawParams, onEvent };
+  const budget = requestBudget(params.compaction, MAX_TURNS_PER_STEP);
   let hop = 0;
   let systemPrompt = params.systemPrompt;
-  let result = await runClaudeAgentTurnOnce(params);
+  let result = await runClaudeAgentTurnOnce({ ...params, maxSteps: budget.perHop });
   let usage = result.usage;
+  let used = result.requests;
   let conversationStart = result.startTokens;
-  const maxHops = params.compaction?.maxHops ?? MAX_CONTINUATION_HOPS;
+  const unfinished = () =>
+    result.subtype === CONTEXT_BUDGET || (result.subtype === 'error_max_turns' && Boolean(result.sdkSessionId));
 
-  while (result.subtype === 'error_max_turns' && result.sdkSessionId && hop < maxHops && !params.abortSignal?.aborted) {
-    hop += 1;
-    onEvent({ type: 'continuation', hop, maxHops });
-    if (shouldCompact(params.compaction, result.contextTokens, conversationStart)) {
+  while (unfinished() && used < budget.total && !params.abortSignal?.aborted) {
+    const maxSteps = Math.min(budget.perHop, budget.total - used);
+    if (result.subtype === CONTEXT_BUDGET || shouldCompact(params.compaction, result.contextTokens, conversationStart)) {
       const handoff = await params.compaction!.handoff();
       onEvent({ type: 'compacted', contextTokens: result.contextTokens });
       systemPrompt = handoff.systemPrompt ?? systemPrompt;
       result = await runClaudeAgentTurnOnce({
         ...params,
         systemPrompt,
+        maxSteps,
         resumeSessionId: null,
         prompt: `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`,
       });
       conversationStart = result.startTokens;
     } else {
-      result = await runClaudeAgentTurnOnce({ ...params, systemPrompt, resumeSessionId: result.sdkSessionId, prompt: CONTINUATION_PROMPT });
+      hop += 1;
+      onEvent({ type: 'continuation', hop, maxHops: Math.ceil(budget.total / budget.perHop) - 1 });
+      result = await runClaudeAgentTurnOnce({
+        ...params,
+        systemPrompt,
+        maxSteps,
+        conversationStart,
+        resumeSessionId: result.sdkSessionId,
+        prompt: CONTINUATION_PROMPT,
+      });
     }
     usage = addUsage(usage, result.usage);
+    used += result.requests;
   }
   onEvent({ type: 'usage', usage, toolOutput });
 
-  if (result.subtype === 'error_max_turns' && hop >= maxHops) {
+  if (unfinished() && used >= budget.total) {
     return {
       sdkSessionId: result.sdkSessionId,
-      resultText: `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`,
+      resultText: outOfStepsText(budget.total),
       isError: true,
       usage,
       contextTokens: result.contextTokens,

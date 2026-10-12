@@ -6,6 +6,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
@@ -15,9 +24,11 @@ import { autoRunStopReason, progressOf } from '@/lib/dev-sessions/auto-run';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
+import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
 import { CodingTeamPanel, EarlierTeamRounds } from '../CodingTeam';
+import { CollapsibleSection } from '../CollapsibleSection';
 import { DiffViewer } from '../DiffViewer';
 import { QaNotes } from '../QaNotes';
 import { Badge } from '@/components/ui/badge';
@@ -153,17 +164,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     },
   });
 
-  useEffect(() => {
-    if (teamMode) return;
-    if (!session.coordinatorEnabled) return;
-    if (session.transcripts.coding.length > 0) return;
-    if (streaming) return;
-    const key = `${sessionId}:codingCoordinator`;
-    if (kicked.has(key)) return;
-    kicked.add(key);
-    void runCoordinator(sessionId, refresh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.coordinatorEnabled, session.transcripts.coding.length, streaming]);
+  // Bridget runs the steps and any team rounds, and sends the branch to QA
+  // once every step is done and nothing needs the human.
+  useCoordinatorAutoRun({ session, group: 'coding', streaming, runCoordinator, refresh });
 
   // stepTurn: an automatic "do the next checklist step" message (kickoff,
   // Continue, auto-run) — the only kind the server may route to the light
@@ -349,7 +352,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // Rounds that are over — e.g. the team QA's send-back retired, while Jack
   // works the fixes alone or with a new team.
   const earlierRounds = (
-    <EarlierTeamRounds rounds={session.codingTeamHistory ?? []} steps={plan ?? []} branch={session.branch} />
+    <EarlierTeamRounds rounds={session.codingTeamHistory ?? []} steps={plan ?? []} />
   );
 
   const leadChat = (
@@ -395,7 +398,6 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               teamStatus={teamStatus}
               teamFinished={teamFinished}
               steps={plan ?? []}
-              branch={session.branch}
               entriesFor={entriesFor}
               runningTools={team.runningTools}
               canStart={canStartTeam}
@@ -414,40 +416,49 @@ export function CodingStage({ session }: { session: SessionRecord }) {
             {earlierRounds}
             {plan && plan.length > 0 && (
               <div className="flex-shrink-0 space-y-2">
-                <CodingPlanChecklist steps={plan} />
-                {showStepControls && (
-                  <div className="flex flex-wrap items-center gap-4">
-                    {!autoRun && (
-                      <Button size="sm" onClick={() => void handleSend(CONTINUE_MESSAGE, undefined, true)}>
-                        <Play />
-                        Continue to next step
-                      </Button>
-                    )}
-                    <label
-                      className="flex items-center gap-2 text-sm text-foreground"
-                      title={
-                        session.coordinatorEnabled
-                          ? `${COORDINATOR_PERSONA.name} is already driving this session — turn the coordinator off to use this.`
-                          : 'Continue through each remaining step without clicking — still stops for your approval before QA.'
-                      }
-                    >
-                      <Switch
-                        checked={autoRun}
-                        disabled={session.coordinatorEnabled}
-                        onCheckedChange={(checked) =>
-                          checked
-                            ? void runAutoLoop()
-                            : stopAutoRun(
-                                streaming
-                                  ? 'you turned it off. The step already running will finish, then nothing more is sent.'
-                                  : null,
-                              )
-                        }
-                      />
-                      Auto-run remaining steps
-                    </label>
-                  </div>
-                )}
+                <CodingPlanChecklist
+                  steps={plan}
+                  actions={
+                    showStepControls && (
+                      <>
+                        {!autoRun && (
+                          <Button
+                            size="sm"
+                            className="h-7"
+                            onClick={() => void handleSend(CONTINUE_MESSAGE, undefined, true)}
+                            title="Continue to the next step"
+                          >
+                            <Play />
+                            Continue
+                          </Button>
+                        )}
+                        <label
+                          className="flex items-center gap-2 text-xs text-foreground"
+                          title={
+                            session.coordinatorEnabled
+                              ? `${COORDINATOR_PERSONA.name} is already driving this session — turn the coordinator off to use this.`
+                              : 'Continue through each remaining step without clicking — still stops for your approval before QA.'
+                          }
+                        >
+                          <Switch
+                            checked={autoRun}
+                            disabled={session.coordinatorEnabled}
+                            onCheckedChange={(checked) =>
+                              checked
+                                ? void runAutoLoop()
+                                : stopAutoRun(
+                                    streaming
+                                      ? 'you turned it off. The step already running will finish, then nothing more is sent.'
+                                      : null,
+                                  )
+                            }
+                          />
+                          Auto-run
+                        </label>
+                      </>
+                    )
+                  }
+                />
                 {autoRunStopped && !autoRun && <Notice tone="amber">Auto-run stopped: {autoRunStopped}</Notice>}
               </div>
             )}
@@ -483,30 +494,28 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               </div>
             )}
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-4">
-            <DiffViewer diff={diffData?.diff ?? null} />
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
             {diffData && diffData.commits.length > 0 && (
-              <div>
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Commits</div>
+              <CollapsibleSection icon={GitCommit} title="Commits" aside={diffData.commits.length} bare className="-mt-2">
                 <ul className="space-y-1">
                   {diffData.commits.map((c) => (
                     <li key={c.hash} className="flex items-start gap-2 text-sm text-foreground">
-                      <GitCommit className="w-4 h-4 mt-0.5 text-muted-foreground flex-shrink-0" />
                       <span className="font-mono text-xs text-muted-foreground mt-0.5">{c.hash.slice(0, 8)}</span>
                       <span>{c.message}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
+              </CollapsibleSection>
             )}
+            <DiffViewer diff={diffData?.diff ?? null} />
           </div>
           <div className="flex-shrink-0 px-4 pb-4 space-y-2">
-            {!approved && <QaNotes notes={session.qaNotes ?? []} title="Notes for QA — sent when QA starts" />}
+            {!approved && <QaNotes notes={session.qaNotes ?? []} title="Notes for QA — sent when QA starts" bare />}
             {plan && !allStepsDone && !approved && (
-              <Notice tone="amber">
+              <div className="text-xs text-warning">
                 {plan.filter((s) => s.status === 'done').length} of {plan.length} planned steps done — approving now
                 sends this partial implementation to QA.
-              </Notice>
+              </div>
             )}
             <ApprovalBar
               approveLabel={approved ? 'Approved — QA started' : 'Approve diff and start QA'}
@@ -519,43 +528,44 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               onReject={() => rejectMutation.mutate()}
               rejectDisabled={approved || busy}
               rejectBusy={rejectMutation.isPending}
+              secondaryActions={
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSendBackForm(true)}
+                  disabled={approved || busy}
+                  title="Reopen Requirements to revise something already partially implemented, without abandoning this branch"
+                >
+                  <Undo2 />
+                  Send back to Requirements
+                </Button>
+              }
             />
-            {!showSendBackForm ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-2 text-muted-foreground"
-                onClick={() => setShowSendBackForm(true)}
-                disabled={approved || busy}
-                title="Reopen Requirements to revise something already partially implemented, without abandoning this branch"
-              >
-                <Undo2 />
-                Send back to Requirements
-              </Button>
-            ) : (
-              <div className="mt-3 space-y-2">
-                <label className="block text-xs font-medium text-muted-foreground">
-                  What needs to change in the requirements?
-                </label>
-                <textarea
+            <Dialog
+              open={showSendBackForm}
+              onOpenChange={(open) => {
+                if (open || sendBackMutation.isPending) return;
+                setShowSendBackForm(false);
+                setSendBackNote('');
+              }}
+            >
+              <DialogContent className="sm:max-w-[480px]">
+                <DialogHeader>
+                  <DialogTitle>Send back to Requirements</DialogTitle>
+                  <DialogDescription>
+                    Reopens Requirements to revise something already partially implemented. This branch is kept, and
+                    the note is relayed to the requirements agent.
+                  </DialogDescription>
+                </DialogHeader>
+                <Textarea
                   value={sendBackNote}
                   onChange={(e) => setSendBackNote(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="This note is relayed to the requirements agent."
+                  rows={4}
+                  placeholder="What needs to change in the requirements?"
+                  autoFocus
                 />
                 <ErrorText>{sendBackMutation.error ? (sendBackMutation.error as Error).message : null}</ErrorText>
-                <div className="flex gap-2">
+                <DialogFooter>
                   <Button
-                    size="sm"
-                    onClick={() => sendBackMutation.mutate(sendBackNote)}
-                    disabled={!sendBackNote.trim() || sendBackMutation.isPending}
-                  >
-                    {sendBackMutation.isPending && <Loader2 className="animate-spin" />}
-                    {sendBackMutation.isPending ? 'Sending…' : 'Confirm'}
-                  </Button>
-                  <Button
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       setShowSendBackForm(false);
@@ -565,9 +575,16 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                   >
                     Cancel
                   </Button>
-                </div>
-              </div>
-            )}
+                  <Button
+                    onClick={() => sendBackMutation.mutate(sendBackNote)}
+                    disabled={!sendBackNote.trim() || sendBackMutation.isPending}
+                  >
+                    {sendBackMutation.isPending && <Loader2 className="animate-spin" />}
+                    {sendBackMutation.isPending ? 'Sending…' : 'Send back'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       }

@@ -361,6 +361,10 @@ function RoleModelRow({
                 ? { lightModel: value.lightModel }
                 : {}),
               ...(value.useLocalModel !== undefined ? { useLocalModel: value.useLocalModel } : {}),
+              // The local-helper settings live on the same config and aren't provider-specific.
+              ...(value.localTeamModel !== undefined ? { localTeamModel: value.localTeamModel } : {}),
+              ...(value.delegateModel !== undefined ? { delegateModel: value.delegateModel } : {}),
+              ...(value.readMemory !== undefined ? { readMemory: value.readMemory } : {}),
             })
           }
         >
@@ -742,6 +746,62 @@ function DelegateModelRow({
   );
 }
 
+/**
+ * Read memory: every file read in a session is kept on disk, so the coding
+ * agent, Jack and the engineers can `recall` exact lines instead of reading a
+ * file again.
+ */
+function ReadMemoryRow({
+  value,
+  onSave,
+  saving,
+}: {
+  value: RoleModelConfig;
+  onSave: (config: RoleModelConfig) => void;
+  saving: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const enabled = value.readMemory !== false;
+  const { data: status } = useQuery({ queryKey: ['read-memory'], queryFn: api.getReadMemory });
+  const clear = useMutation({
+    mutationFn: api.clearReadMemory,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['read-memory'] }),
+  });
+  const megabytes = status ? (status.bytes / 1_000_000).toFixed(status.bytes >= 10_000_000 ? 0 : 1) : null;
+  return (
+    <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
+      <div>
+        <div className="font-medium text-foreground">Read memory</div>
+        <div className="text-xs text-muted-foreground">
+          Every file read in a session is kept on this machine. Instead of reading a file again, the coding agent, Jack
+          and the engineers recall the exact lines they need, with the built-in Qwen picking them. Kept per session, up
+          to about 8 MB each.
+        </div>
+      </div>
+      <div className="flex gap-3 items-center">
+        <Switch
+          checked={enabled}
+          disabled={saving}
+          onCheckedChange={(on) => onSave({ ...value, readMemory: on })}
+          aria-label="Keep files read in a session for the agents to recall"
+        />
+        <span className="text-xs text-muted-foreground">
+          {status
+            ? status.sessions > 0
+              ? `${megabytes} MB across ${status.sessions} ${status.sessions === 1 ? 'session' : 'sessions'}`
+              : 'Nothing stored yet'
+            : ''}
+        </span>
+        {status && status.sessions > 0 && (
+          <Button size="sm" variant="outline" className="h-7 text-xs ml-auto" disabled={clear.isPending} onClick={() => clear.mutate()}>
+            {clear.isPending ? 'Clearing…' : 'Clear'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Coordinator only: decide on Riff's built-in local model first, falling back to the coordinator's model. */
 function LocalCoordinatorRow({
   value,
@@ -874,6 +934,11 @@ export function DevAgentSettings() {
                 value={settings.models.coding}
                 ollamaModels={ollamaModels?.models.filter((m) => m.tools).map((m) => m.name) ?? []}
                 localModel={settings.localModel}
+                saving={saveModelMutation.isPending}
+                onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
+              />
+              <ReadMemoryRow
+                value={settings.models.coding}
                 saving={saveModelMutation.isPending}
                 onSave={(config) => saveModelMutation.mutate({ role: 'coding', config })}
               />

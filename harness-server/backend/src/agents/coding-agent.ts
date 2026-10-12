@@ -45,7 +45,9 @@ import {
   TEAM_LEAD_TOOL_NAMES,
   teamDecisionGuard,
 } from './tool-defs/team-lead-tools.js';
-import { createQaTools } from './tool-defs/qa-tools.js';
+import { createQaExecutors, createQaTools } from './tool-defs/qa-tools.js';
+import { createFinishStepTool, type FinishStepDeps } from './tool-defs/finish-step-tool.js';
+import { createFinishStepToolClaude } from './tool-defs-claude/finish-step-tool.js';
 import { createRunPrettierTool } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
 import { createNoteForQaTool } from './tool-defs/qa-notes-tool.js';
@@ -64,6 +66,9 @@ import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-to
 import { createNoteForQaToolClaude } from './tool-defs-claude/qa-notes-tool.js';
 import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
+import { MEMORY_NOTE, notePaidRead, readMemoryDeps, recallToolEntry, rememberRead } from './helpers/memory/tool.js';
+import { createRecallToolClaude } from './helpers/memory/tool-claude.js';
+import { SESSION_VIEW } from './helpers/memory/core.js';
 import { stageHelperContext } from './helpers/helper.js';
 // No read_file compression here: this agent edits what it reads, and a
 // compressed read only sent it back for a ranged re-read (helpers/compress.ts).
@@ -91,6 +96,7 @@ const TOOL_NAMES = [
   'run_prettier',
   'run_npm_install',
   'note_for_qa',
+  'finish_step',
 ];
 
 // Jack decides whether work runs as a team (tool-defs/assign-team-tool.ts
@@ -110,17 +116,19 @@ const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
   `mark it done) and stop.`;
 
 // See SessionRecord.codingContext: a turn starts a fresh conversation when
-// the last one ended at or above FRESH_CONTEXT_AT_TOKENS, and a continuation
-// hop inside a turn compacts at COMPACT_AT_TOKENS (sdk-client.ts). Every
-// request re-reads the whole context, so a turn's cache reads are its
-// request count times its average size: hops of 10 tool-call steps let
-// compaction act every 10 steps instead of every 20, and 7 continuations
-// keep the per-turn ceiling at 80 steps. On the Claude engine every hop is a
-// new query(), which boots a Claude Code subprocess and reconnects the MCP
-// server, so it takes hops of 20 (same 80-step ceiling) and checks for
-// compaction half as often.
-const FRESH_CONTEXT_AT_TOKENS = 60_000;
-export const COMPACT_AT_TOKENS = 70_000;
+// the last one ended at or above FRESH_CONTEXT_AT_TOKENS, and inside a turn
+// a conversation is cut and compacted as soon as its context reaches
+// COMPACT_AT_TOKENS and the tool calls in flight have returned
+// (sdk-client.ts). Every request re-reads the whole context, so the cut
+// keeps the average request small: measured on the Claude engine, a
+// conversation starts near 29k and grows ~3.5k per request, so a 55k cut
+// lands every 7-8 requests at ~42k on average, where a 20-request hop used
+// to run to 90-118k. hopLimits only sets the turn's request budget (80 on
+// either engine) and how often a step-budget hop checks in; on the Claude
+// engine every hop is a new query(), which boots a Claude Code subprocess
+// and reconnects the MCP server, so it takes hops of 20.
+const FRESH_CONTEXT_AT_TOKENS = 50_000;
+export const COMPACT_AT_TOKENS = 55_000;
 
 export function hopLimits(provider: Provider): { stepsPerHop: number; maxHops: number } {
   return provider === 'claude' ? { stepsPerHop: 20, maxHops: 3 } : { stepsPerHop: 10, maxHops: 7 };
@@ -176,6 +184,18 @@ export async function runCodingAgentTurn(
     context: helperContext,
     checkCommands: app.checkCommands,
   });
+  // The read memory (helpers/memory/): every file read in this session, by
+  // this agent, its helpers and Jack's engineers, for `recall`.
+  const memoryDeps = readMemoryDeps({
+    enabled: roleConfig.readMemory !== false,
+    sessionId: session.id,
+    view: SESSION_VIEW,
+    repoRoot: app.repoRoot,
+    reader: 'coding',
+    context: helperContext,
+  });
+  if (delegateDeps) delegateDeps.onHelperRead = (filePath, read) => rememberRead(memoryDeps, filePath, read);
+  const helperNotes = (delegateDeps ? DELEGATE_NOTE : '') + (memoryDeps ? MEMORY_NOTE : '');
   const efforts = await planStepEfforts(session);
   const targetStepId = nextCodingStepId(session, efforts);
   const teamKind: CodingTeamKind = options.qaFix
@@ -214,6 +234,7 @@ export async function runCodingAgentTurn(
   let handoffNote = '';
   if (freshReason) {
     handoffNote = await buildHandoff({
+      recall: Boolean(memoryDeps),
       reason: freshReason,
       entries: entriesSince(session.transcripts.coding, contextStartEntryId),
       repoRoot: app.repoRoot,
@@ -240,7 +261,7 @@ export async function runCodingAgentTurn(
   const basePrompt = override ?? promptTemplate;
   const isFirstTurn = !hasContext || freshReason !== null;
 
-  let systemPrompt = basePrompt + (delegateDeps ? DELEGATE_NOTE : '');
+  let systemPrompt = basePrompt + helperNotes;
   const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
@@ -295,6 +316,19 @@ export async function runCodingAgentTurn(
   // and merging of the engineers' branches whenever a team round exists,
   // and build_solo while the split decision is pending.
   const guard = teamDecisionGuard(session.id);
+  // finish_step: format, commit, lint, test and mark done in one request.
+  const { runCheckedCommandExecute } = createQaExecutors({
+    repoRoot: app.repoRoot,
+    checkCommands: app.checkCommands,
+    helperContext,
+  });
+  const finishDeps: FinishStepDeps = {
+    sessionId: session.id,
+    repoRoot: app.repoRoot,
+    branch: async () => (await getSession(session.id))?.branch ?? null,
+    guard,
+    runCheck: (command) => runCheckedCommandExecute({ command }),
+  };
   const leadDeps = { sessionId: session.id, repoRoot: app.repoRoot };
   const withLeadTools = Boolean(session.codingTeam);
   const withBuildSolo = Boolean(session.teamDecisionPending);
@@ -323,7 +357,8 @@ export async function runCodingAgentTurn(
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
-        reason: 'The conversation reached its tool-call budget mid-step and had grown large.',
+        recall: Boolean(memoryDeps),
+        reason: 'The conversation reached its context budget mid-step.',
         entries: contextLog.entries,
         repoRoot: app.repoRoot,
         branch: latest?.branch ?? session.branch,
@@ -343,7 +378,7 @@ export async function runCodingAgentTurn(
         prompt: handoff,
         systemPrompt:
           basePrompt +
-          (delegateDeps ? DELEGATE_NOTE : '') +
+          helperNotes +
           themeBriefingFor(app.repoRoot, 'coding') +
           (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
@@ -416,7 +451,10 @@ export async function runCodingAgentTurn(
       });
       const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
         repoRoot: app.repoRoot,
-        onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+        onRead: (filePath, read) => {
+          noteDelegateRead(delegateDeps, filePath);
+          notePaidRead(memoryDeps, filePath, read);
+        },
         readMemo,
         guard,
       });
@@ -462,7 +500,9 @@ export async function runCodingAgentTurn(
             createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
+            createFinishStepToolClaude(finishDeps),
             ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
+            ...(memoryDeps ? [createRecallToolClaude(memoryDeps)] : []),
           ],
         });
 
@@ -478,6 +518,7 @@ export async function runCodingAgentTurn(
           ...(withLeadTools ? TEAM_LEAD_TOOL_NAMES : []),
           ...(withBuildSolo ? ['build_solo'] : []),
           ...(delegateDeps ? ['delegate'] : []),
+          ...(memoryDeps ? ['recall'] : []),
         ],
         model: turnModel,
         resumeSessionId: session.claudeSessionIds.coding,
@@ -503,7 +544,10 @@ export async function runCodingAgentTurn(
       const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, readMemo });
       const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
         repoRoot: app.repoRoot,
-        onRead: (filePath) => noteDelegateRead(delegateDeps, filePath),
+        onRead: (filePath, read) => {
+          noteDelegateRead(delegateDeps, filePath);
+          notePaidRead(memoryDeps, filePath, read);
+        },
         readMemo,
         guard,
       });
@@ -547,7 +591,9 @@ export async function runCodingAgentTurn(
         run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
+        finish_step: createFinishStepTool(finishDeps),
         ...delegateToolEntry(delegateDeps, session.histories.coding),
+        ...recallToolEntry(memoryDeps, session.histories.coding),
       };
 
       const {

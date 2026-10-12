@@ -146,6 +146,8 @@ export interface HandoffParams {
   branch?: string | null;
   baseBranch?: string;
   checklist?: { id: string; title: string; status: string }[] | null;
+  // The agent has `recall` (helpers/memory/): point it there for files it read.
+  recall?: boolean;
 }
 
 export async function buildHandoff(params: HandoffParams): Promise<string> {
@@ -185,6 +187,11 @@ export async function buildHandoff(params: HandoffParams): Promise<string> {
     if (lastText) parts.push(`## Your last message in the previous conversation\n\n${clip(lastText, 2000)}`);
   }
   if (changed.length > 0) parts.push(`## Files you changed\n\n${changed.map((p) => `- ${p}`).join('\n')}`);
-  if (read.length > 0) parts.push(`## Files you read (not changed)\n\n${read.slice(0, 40).map((p) => `- ${p}`).join('\n')}`);
+  if (read.length > 0) {
+    const heading = params.recall
+      ? '## Files you read (not changed): `recall` what you need from them instead of reading them again'
+      : '## Files you read (not changed)';
+    parts.push(`${heading}\n\n${read.slice(0, 40).map((p) => `- ${p}`).join('\n')}`);
+  }
   return parts.join('\n\n');
 }

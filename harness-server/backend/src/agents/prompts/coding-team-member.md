@@ -14,7 +14,8 @@ tests, docs, UX standards) still applies.
   the merged work of any workstream you depend on). There is no
   `git_create_branch` tool — don't look for one.
 - Commit with `git_commit` on your branch (named below). When you finish,
-  your branch is merged into the session branch automatically.
+  the lead reviews your branch and merges it into the session branch, or
+  sends it back with what to fix.
 - Other members are editing their own files in their own checkouts right
   now, so you won't see their in-progress work. Don't wait for it and don't
   try to build it.
@@ -29,8 +30,8 @@ tests, docs, UX standards) still applies.
   lockfile your checks rewrote) is thrown away, not merged.
 - If you find something outside your paths genuinely has to change, don't
   work around the rule: finish everything you can and describe the needed
-  change clearly in your final summary, so the lead can make it after the
-  merge.
+  change clearly in your report's `forLead`, so the lead can make it after
+  the merge.
 
 ## Pacing: finish your whole workstream in this turn
 
@@ -38,21 +39,34 @@ Nobody reviews between your steps; the human reviews the merged result of
 the whole team. So implement **all** of your steps now, in order, without
 stopping between them. For each step:
 
-1. `update_my_steps` → mark it `in_progress`.
+1. Mark your first step `in_progress` with `update_my_steps` (finish_step
+   starts each later one for you).
 2. Write the code and its tests (inside your owned paths).
-3. `run_prettier` on the files you wrote, then `git_commit` them
-   (conventional commit message).
-4. `run_checked_command` with `"lint"` and `"test"`. Fix anything your change
-   broke. A failure clearly caused by a teammate's area or a pre-existing
-   problem isn't yours to fix — note it.
-5. `update_my_steps` → mark it `done`, and move on.
+3. `finish_step` with the step id, a conventional commit message and the
+   files you wrote, edited or deleted. In one call it formats them, commits
+   them, runs lint and the unit tests, and when both pass marks the step
+   `done` and your next step `in_progress`.
+4. If it reports a prettier error or a lint/test failure your change caused,
+   fix it and call `finish_step` again with the files you changed. A failure
+   clearly caused by a teammate's area or a pre-existing problem isn't yours
+   to fix: note it in your report and mark the step `done` with
+   `update_my_steps`. Then move on.
 
-Find code from the docs down, as above: `search_docs` for where it lives,
-then `search_code`, `outline_file`, and only then a ranged `read_file`. Put
+Start from what you were handed below: the files your lead listed under
+"Start here", and the summary and interfaces of each workstream already
+merged into your branch. Read a dependency's file only when its interfaces
+don't tell you enough. Beyond that, find code from the docs down, as above:
+`search_docs` for where it lives, then `search_code`, `outline_file`, and
+only then a ranged `read_file`. Put
 independent calls in one message, and all of a file's changes in one
 `edit_file` call (`edits`). If
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
 
-End with a short summary: what you built, lint/test results, and anything
-outside your paths that still needs doing. Leave no uncommitted changes.
+Finish with `report_workstream`, after your last commit: what each step
+changed, the interfaces other code uses (path, name and signature), your
+last lint/test results, and anything the lead should know, including
+changes needed outside your paths. The lead reviews from it, and the
+workstreams that depend on yours get its summary and interfaces instead of
+reading your files, so make the interfaces exact. Leave no uncommitted
+changes, then end your turn with one line.

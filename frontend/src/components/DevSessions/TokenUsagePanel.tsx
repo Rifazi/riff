@@ -643,6 +643,7 @@ function LocalSavings({
 }) {
   const research = local.byHelper.research;
   const classifier = local.byHelper.classifier;
+  const memory = local.byHelper.memory;
   return (
     <div className="rounded-lg border border-success/40 bg-success/10 p-4">
       <div className="text-xs font-medium text-muted-foreground">
@@ -666,6 +667,13 @@ function LocalSavings({
             {research.tasks === 1 ? "question" : "questions"} answered · saved
             ≈{compact(research.savedTokens)} · {compact(sum(research.usage))}{" "}
             local tokens, free
+          </div>
+        )}
+        {memory && (
+          <div>
+            Read memory: {full(memory.useful)} of {full(memory.tasks)}{" "}
+            {memory.tasks === 1 ? "recall" : "recalls"} answered from
+            files already read · saved ≈{compact(memory.savedTokens)}
           </div>
         )}
         {classifier && (

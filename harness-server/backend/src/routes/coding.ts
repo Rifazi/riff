@@ -12,6 +12,8 @@ import { baseBranchFor } from '../apps/apps.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam, type TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
+import { approveCoding } from '../sessions/stage-actions.js';
+import { sendStageActionError } from './stage-action-reply.js';
 
 // Mirrors the frontmatter rewrite the approve/reject routes already do for
 // their own doc — revert to draft on disk too, not just on the session
@@ -134,17 +136,11 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.branch) {
-      return reply.code(400).send({ error: 'no commits exist on a branch yet' });
+    try {
+      return await approveCoding(session);
+    } catch (err) {
+      return sendStageActionError(reply, err);
     }
-    // The coding agent's notes go over with the branch (qa-agent.ts).
-    return updateSession(session.id, {
-      stage: 'qa-in-progress',
-      codingApprovedAt: new Date().toISOString(),
-      qaNotes: [],
-      qaHandoffNotes: session.qaNotes,
-      qaRerunPending: session.transcripts.qa.length > 0,
-    });
   });
 
   // Human-only. Reopens Requirements mid-coding instead of rejecting the

@@ -9,6 +9,7 @@ import { stageGroupFor } from '../sessions/stage-group.js';
 import { uniqueSessionKey } from '../sessions/session-keys.js';
 import { cleanupTeamWorktrees } from '../agents/team/coding-team.js';
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
+import { removeReadMemory } from '../agents/helpers/memory/store.js';
 import { listApps } from '../apps/apps-store.js';
 import { loadSplitRoadmap } from '../sessions/split-roadmap-load.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -110,6 +111,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
 
     await removeMeetingSource(session.sourceMeeting);
     await removeAllReferenceDocs({ kind: 'session', sessionId: session.id });
+    await removeReadMemory(session.id);
     await cleanupTeamWorktrees(session);
     await deleteSession(session.id);
     return reply.code(204).send();

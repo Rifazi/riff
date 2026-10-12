@@ -12,10 +12,10 @@ export interface CoordinatorDecision {
   reason: string;
 }
 
-// Deliberately tool-less: the coordinator only ever decides "keep going" or
-// "stop for a human" — it never writes a file, runs a command, or (most
-// importantly) approves/rejects anything itself. Every actual approval
-// stays a human click, same rule as everywhere else in this app.
+// Deliberately tool-less: this decision only ever says "keep going" or
+// "stop" — it never writes a file or runs a command. Approving a finished
+// stage is a separate decision (decideGate below) that Bridget acts on in
+// routes/coordinator.ts.
 export const DECISION_INSTRUCTIONS = `You are a lightweight coordinator supervising one stage of a multi-stage AI development pipeline (requirements -> plan -> coding -> QA) for a target repo. You do not write files, run commands, or approve anything yourself — you only decide, given the conversation so far, whether the stage's own agent should be sent another message to keep working, or whether the work looks ready for a human to review and approve.
 
 Respond with ONLY a single JSON object, no other text, matching exactly one of these shapes:
@@ -163,4 +163,117 @@ export async function decideNextAction(params: {
     const { text } = await generateText({ model: languageModel, system: systemPrompt, prompt });
     return parseDecision(text);
   }
+}
+
+export interface GateDecision {
+  action: 'approve' | 'stop';
+  reason: string;
+}
+
+// Bridget approves a finished stage on the human's behalf only when nothing
+// in it needs them. Stopping is always the safe answer.
+export const GATE_INSTRUCTIONS = `You decide whether a finished stage of an AI development pipeline (requirements -> plan -> coding -> QA) can be approved without a human. The stage's agent has produced its deliverable (a requirements document, a plan, or a finished branch). You see the end of its conversation.
+
+Respond with ONLY a single JSON object, no other text:
+{"action": "approve", "reason": "<one sentence>"}
+{"action": "stop", "reason": "<one sentence naming what needs the human>"}
+
+"stop" when the agent's recent messages raise anything a human should decide or know before going on: an open question, an assumption it asks to have confirmed, a choice between options, a risk or concern, something it could not do or verify, failing or skipped checks (even ones it calls pre-existing, flaky or unrelated), a blocker, or work it says is incomplete.
+
+"approve" when the agent simply reports what it produced. A closing courtesy that only asks for approval or feedback ("Let me know if you'd like changes", "Ready for your review", "Shall I proceed?") is not an open question.`;
+
+function tryParseGate(raw: string): GateDecision | null {
+  try {
+    const match = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(match ? match[0] : raw) as Partial<GateDecision>;
+    if (parsed.action === 'approve' || parsed.action === 'stop') return { action: parsed.action, reason: String(parsed.reason ?? '') };
+  } catch {
+    // unparseable
+  }
+  return null;
+}
+
+/**
+ * Whether a finished stage can be approved without the human. Same models
+ * as decideNextAction: the built-in Qwen first, then the coordinator's
+ * configured model. Anything unclear stops.
+ */
+export async function decideGate(params: { stageLabel: string; transcriptText: string }): Promise<GateDecision> {
+  const coordinatorConfig = await getRoleModelConfig('coordinator');
+  const { provider, model } = coordinatorConfig;
+  const prompt = `Stage: ${params.stageLabel}\n\nEnd of the conversation:\n${params.transcriptText || '(nothing)'}\n\nApprove or stop?`;
+  const stop = (reason: string): GateDecision => ({ action: 'stop', reason });
+
+  if (coordinatorConfig.useLocalModel !== false) {
+    try {
+      const decision = tryParseGate(await generateLocal({ system: GATE_INSTRUCTIONS, prompt, maxTokens: 120 }));
+      if (decision) return decision;
+    } catch (err) {
+      console.warn('[coordinator] local model unavailable for the gate, using', model, '—', err instanceof Error ? err.message : err);
+    }
+  }
+  try {
+    if (provider === 'claude') {
+      return tryParseGate(await runClaudeSingleShot({ systemPrompt: GATE_INSTRUCTIONS, prompt, model })) ?? stop("Couldn't tell whether this needs you.");
+    }
+    const apiKey = await getApiKey(provider);
+    if (apiKey === null) return stop(`No API key configured for ${provider}.`);
+    const languageModel = await resolveLanguageModel(provider as ApiKeyProvider, model, apiKey);
+    const { text } = await generateText({ model: languageModel, system: GATE_INSTRUCTIONS, prompt });
+    return tryParseGate(text) ?? stop("Couldn't tell whether this needs you.");
+  } catch (err) {
+    return stop(`Couldn't check whether this needs you (${err instanceof Error ? err.message : String(err)}).`);
+  }
+}
+
+/** A question tool the agent called after the human's last message (the text "?" heuristic left out: the gate reads text). */
+export function hasPendingQuestionTool(entries: TranscriptEntry[]): boolean {
+  let lastUserIndex = -1;
+  entries.forEach((e, i) => {
+    if (e.role === 'user') lastUserIndex = i;
+  });
+  return entries.slice(lastUserIndex + 1).some((e) => e.role === 'tool_call' && QUESTION_TOOL_NAMES.has(stripToolPrefix(e.toolName)));
+}
+
+/**
+ * Whether the latest lint/test result in a stage's chat failed: a
+ * run_checked_command report, or finish_step saying its checks failed.
+ * Checked without a model, since a failure the agent calls "pre-existing"
+ * reads like a pass to a small one.
+ */
+export function latestChecksFailed(entries: TranscriptEntry[]): boolean {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.role !== 'tool_result') continue;
+    const name = stripToolPrefix(e.toolName);
+    if (name !== 'run_checked_command' && name !== 'finish_step') continue;
+    const text = toolResultText(e.toolResult);
+    if (name === 'finish_step') {
+      if (/still in progress: (lint|test) failed/.test(text)) return true;
+      if (/lint and tests passed/.test(text)) return false;
+      continue;
+    }
+    return !/\bsucceeded\.$/.test(text.split('\n')[0].trim());
+  }
+  return false;
+}
+
+function toolResultText(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (Array.isArray(result)) {
+    return result.map((b) => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n');
+  }
+  return JSON.stringify(result ?? '');
+}
+
+// Words in a coding agent's closing message that mean something may be
+// wrong. Matched without a model: the small one approved "2 tests fail, they
+// look pre-existing" every time. A false match only stops for the human.
+const CONCERN_WORDS =
+  /\b(fail(s|ed|ing|ure|ures)?|couldn'?t|could not|unable to|not (been )?(verified|tested)|untested|unverified|skipped|blocked|pre-?existing|flaky|workaround)\b/i;
+
+/** The first worrying phrase in the agent's last message, or null. */
+export function concernInLastMessage(entries: TranscriptEntry[]): string | null {
+  const last = [...entries].reverse().find((e) => e.role === 'assistant')?.text ?? '';
+  return CONCERN_WORDS.exec(last)?.[0] ?? null;
 }

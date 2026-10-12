@@ -37,7 +37,6 @@ export interface CodingTeamPanelProps {
   teamStatus: TeamStatus;
   teamFinished: boolean;
   steps: CodingPlanStep[];
-  branch: string | null;
   entriesFor: (member: CodingTeamMember) => TranscriptEntry[];
   runningTools: Record<string, string | null>;
   canStart: boolean;
@@ -52,7 +51,7 @@ export interface CodingTeamPanelProps {
 }
 
 /** Coding tab in team mode. */
-export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatus, past, ...rest }: CodingTeamPanelProps) {
+export function CodingTeamPanel({ round, kind, members, steps, teamStatus, past, ...rest }: CodingTeamPanelProps) {
   const lead = TEAM_LEAD_PERSONA.name;
   const teamStepIds = members.flatMap((m) => m.stepIds);
   const doneSteps = steps.filter((s) => teamStepIds.includes(s.id) && s.status === 'done').length;
@@ -79,16 +78,7 @@ export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatu
       members={members}
       teamStatus={teamStatus}
       past={past}
-      progress={{
-        done: doneSteps,
-        total: teamStepIds.length,
-        label: 'steps done',
-        aside: branch && (
-          <span className="break-all">
-            {lead} merges into <code className="text-foreground">{branch}</code>
-          </span>
-        ),
-      }}
+      progress={{ done: doneSteps, total: teamStepIds.length, label: 'steps done' }}
       finishedNote={finishedNote}
       renderDetails={(member, persona) => (
         <>
@@ -97,8 +87,9 @@ export function CodingTeamPanel({ round, kind, members, steps, branch, teamStatu
             steps={member.stepIds.map(
               (id) => steps.find((s) => s.id === id) ?? { id, title: id, status: 'pending' as const },
             )}
-          />
-          <PathChips icon={FolderLock} label="Owns" paths={member.ownedPaths} />
+          >
+            <PathChips icon={FolderLock} label="Owns" paths={member.ownedPaths} />
+          </CodingPlanChecklist>
         </>
       )}
       emptyHint={(member, persona) => {
@@ -131,11 +122,9 @@ const KIND_LABEL: Record<CodingTeamState['kind'], string> = {
 export function EarlierTeamRounds({
   rounds,
   steps,
-  branch,
 }: {
   rounds: CodingTeamState[];
   steps: CodingPlanStep[];
-  branch: string | null;
 }) {
   return (
     <EarlierRounds
@@ -152,7 +141,6 @@ export function EarlierTeamRounds({
           teamStatus={pastTeamStatus(team.status)}
           teamFinished
           steps={steps}
-          branch={branch}
           entriesFor={(m) => m.transcript}
           runningTools={{}}
           canStart={false}

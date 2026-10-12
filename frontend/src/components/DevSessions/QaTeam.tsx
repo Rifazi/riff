@@ -22,7 +22,7 @@ const CHECK_META: Record<QaTeamCheck['status'], { variant: NonNullable<BadgeProp
 function ChecksRow({ checks }: { checks: QaTeamCheck[] }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-      <span>Checks alongside the review:</span>
+      <span>Checks:</span>
       {checks.map((c) => (
         <Badge key={c.command} variant={CHECK_META[c.status].variant} className="gap-1">
           {c.status === 'running' && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -98,6 +98,7 @@ export function QaTeamPanel({ team, teamStatus, past, ...rest }: QaTeamPanelProp
     <TeamPanel
       {...rest}
       label="QA team"
+      collapsible
       round={team.round}
       lead={QA_LEAD_PERSONA}
       memberNoun="reviewers"
@@ -114,8 +115,9 @@ export function QaTeamPanel({ team, teamStatus, past, ...rest }: QaTeamPanelProp
             title={`${persona.name}'s criteria · ${member.title}`}
             steps={criteriaItems(member)}
             countLabel={(done, total) => `${done} of ${total} met`}
-          />
-          <PathChips icon={ScanSearch} label="Focus" paths={member.focusPaths} />
+          >
+            <PathChips icon={ScanSearch} label="Focus" paths={member.focusPaths} />
+          </CodingPlanChecklist>
           <FindingsSummary member={member} />
         </>
       )}

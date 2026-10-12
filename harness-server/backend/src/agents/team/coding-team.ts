@@ -29,7 +29,8 @@ import {
 import { runCodingAgentTurn, suggestedBranchName } from '../coding-agent.js';
 import type { AgentEvent } from '../sdk-client.js';
 import { runWorkstreamAgent } from './workstream-agent.js';
-import { leadReviewMessage, leadWrapUpMessage, roundOutcome, startable, stuckDependencies } from './lead-core.js';
+import { fallbackReport, leadReviewMessage, leadWrapUpMessage, roundOutcome, startable, stuckDependencies } from './lead-core.js';
+import { changedExports } from './changed-exports.js';
 import {
   isTeamRunning,
   memberKey,
@@ -187,13 +188,15 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   const build = async (member: CodingTeamMember, latest: SessionRecord, worktreePath: string, signal: AbortSignal) => {
     const restartedNow = restarted.delete(member.id);
     await setStatus(member.id, 'running', member.feedback ? 'Working on the lead’s feedback.' : null);
-    // The run below reads the feedback from `member`; it's one-shot.
-    if (member.feedback) {
-      await mutateSession(sessionId, (s) => {
-        const m = s.codingTeam?.members.find((x) => x.id === member.id);
-        if (m) m.feedback = null;
-      });
-    }
+    // The run below reads the feedback from `member`; it's one-shot. Its
+    // report describes the branch as it was, so this run files a new one.
+    await mutateSession(sessionId, (s) => {
+      const m = s.codingTeam?.members.find((x) => x.id === member.id);
+      if (!m) return;
+      m.feedback = null;
+      m.report = null;
+      m.changedExports = [];
+    });
     const onEvent = (event: AgentEvent) => emit({ type: 'team_member_event', memberId: member.id, event });
 
     // Light-model routing: a workstream whose steps are all tagged light
@@ -240,6 +243,21 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     });
   };
 
+  // What the lead and the dependent workstreams read instead of the branch's
+  // files: the engineer's report (or its last message, if it filed none) and
+  // the exports the branch adds or changes.
+  const attachHandover = async (member: CodingTeamMember) => {
+    const exports = await changedExports(app.repoRoot, member.branch, sessionBranch).catch(() => []);
+    const transcript = (await getSession(sessionId))?.codingTeam?.members.find((m) => m.id === member.id)?.transcript ?? [];
+    const lastText = [...transcript].reverse().find((e) => e.role === 'assistant')?.text;
+    await mutateSession(sessionId, (s) => {
+      const m = s.codingTeam?.members.find((x) => x.id === member.id);
+      if (!m) return;
+      m.changedExports = exports;
+      m.report ??= fallbackReport(lastText);
+    });
+  };
+
   // Leaves the branch clean and inside its owned paths for the lead to
   // review, or fails it with why. A run that errored (out of steps or
   // usage) still has its work committed, so the lead can judge what's there.
@@ -259,6 +277,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`, member.ownedPaths);
     }
     const commits = await commitCount(worktreePath, sessionBranch, member.branch);
+    if (commits > 0) await attachHandover(member);
     if (runError) {
       await setStatus(member.id, 'failed', `${runError}${commits ? ` (${commits} commit${commits === 1 ? '' : 's'} on ${member.branch})` : ''}`);
       return;

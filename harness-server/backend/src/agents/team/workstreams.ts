@@ -17,6 +17,21 @@ export const workstreamSchema = z.object({
   dependsOn: z
     .array(z.string())
     .describe('Ids of workstreams that must be finished and merged before this one starts. Empty to start immediately.'),
+  context: z
+    .array(
+      z.object({
+        path: z.string().describe('Repo-relative file'),
+        lines: z.string().optional().describe('Line range, e.g. "40-120"; omit for the whole file'),
+        note: z.string().describe('One line: what is there that this engineer needs'),
+      }),
+    )
+    .max(8)
+    .optional()
+    .describe(
+      'Up to 8 places you already read that this engineer needs (the code it changes or calls, a pattern to ' +
+        'follow, the config it touches), each with one line on what is there. It starts from these instead of ' +
+        'searching the repo again.',
+    ),
 });
 
 // The longest dependency chain may be at most this share of all the work.

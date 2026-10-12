@@ -80,6 +80,8 @@ export const assignTeamDescription =
   '- If the app has a UI theme, the root entry and the shared UI components go in one workstream the view ' +
   'workstreams depend on.\n\n' +
   'Look before you split: read the plan and search_code / outline_file the areas involved so ownedPaths are right. ' +
+  "Then give each workstream the places you read that its engineer needs as `context` (path, line range, one " +
+  "line on what is there): engineers start from those instead of searching the repo again. " +
   'Commit or discard any uncommitted work first. The call is rejected if paths overlap, an unfinished step is ' +
   'unassigned, or nothing could run in parallel. Once it succeeds, end your turn: tell the human in a few lines who ' +
   'builds what and why. The team starts when your turn ends. Don\'t write code yourself in the same turn.\n\n' +

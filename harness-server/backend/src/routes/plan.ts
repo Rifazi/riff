@@ -6,14 +6,14 @@ import { startEventStream } from './sse.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor } from '../sessions/stage-group.js';
-import { loadSplitRoadmap } from '../sessions/split-roadmap-load.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { getJiraSettings } from '../settings/settings-store.js';
 import { createTicketsFromPlan, type JiraPlanRecord } from '../jira/create-tickets-from-plan.js';
 import { JiraError } from '../jira/jira-client.js';
-import { tryCompressPlanPreamble } from '../agents/helpers/compress.js';
+import { approvePlan } from '../sessions/stage-actions.js';
+import { sendStageActionError } from './stage-action-reply.js';
 
 export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
   // Streams the plan agent's turn back over SSE as it happens.
@@ -133,65 +133,11 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { ignoreDependencies?: boolean } }>('/api/sessions/:id/plan/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.planPath) {
-      return reply.code(400).send({ error: 'no plan document has been written yet' });
-    }
-
-    // A part of a split feature branches off the base branch, so code from
-    // a part it builds on is only there once that part has shipped. The
-    // human can still go ahead (e.g. they merged it by hand).
-    if (!request.body?.ignoreDependencies && !session.branch) {
-      const roadmap = await loadSplitRoadmap(session);
-      const self = roadmap?.parts.find((p) => p.sessionId === session.id);
-      if (roadmap && self && self.blockedBy.length > 0) {
-        const waiting = self.blockedBy.map((i) => roadmap.parts[i]);
-        return reply.code(409).send({
-          error:
-            `This part builds on ${waiting.map((p) => `"${p.title}"`).join(', ')}, which ${waiting.length > 1 ? "haven't" : "hasn't"} ` +
-            'shipped yet, so coding would start without that code.',
-          code: 'dependencies_not_shipped',
-          blockedBy: waiting.map((p) => ({ sessionId: p.sessionId, title: p.title, sessionKey: p.sessionKey })),
-        });
-      }
-    }
-
-    const filePath = path.join(config.harnessRoot, session.planPath);
-    let raw: string;
     try {
-      raw = await fs.readFile(filePath, 'utf8');
-    } catch {
-      return reply.code(400).send({ error: `${session.planPath} doesn't exist on disk — write or restore its content before approving.` });
+      return await approvePlan(session, { ignoreDependencies: request.body?.ignoreDependencies });
+    } catch (err) {
+      return sendStageActionError(reply, err);
     }
-    // Parse with matter so we can update frontmatter properly (adding
-    // preambleSummary) while also flipping status to approved.
-    const parsed = matter(raw);
-    parsed.data.status = 'approved';
-
-    // Compress the preamble (everything before ## Steps) once at approval
-    // time. planExcerpt() uses this on every coding hop instead of the full
-    // text, saving 5k–10k chars per hop on large plans.
-    const stepsIdx = parsed.content.search(/^##\s+(\S+\s+)?steps\b/im);
-    if (stepsIdx >= 0) {
-      const preamble = parsed.content.slice(0, stepsIdx);
-      const summary = await tryCompressPlanPreamble(preamble).catch(() => null);
-      if (summary) parsed.data.preambleSummary = summary;
-    }
-
-    await fs.writeFile(filePath, matter.stringify(parsed.content, parsed.data), 'utf8');
-
-    // A plan re-approved as part of a mid-coding send-back round trip
-    // resumes the SAME branch — it jumps straight back to coding-review
-    // (skipping plan-approved, which would otherwise wait for the coding
-    // stage's own from-scratch kickoff) and flags coding to relay the
-    // reconciliation context on its next turn instead of creating a new
-    // branch.
-    const resuming = session.reopenedFromCoding && Boolean(session.branch);
-    const updatedSession = await updateSession(session.id, {
-      planStatus: 'approved',
-      stage: resuming ? 'coding-review' : 'plan-approved',
-      ...(resuming ? { codingReconciliationPending: true } : {}),
-    });
-    return updatedSession;
   });
 
   // Human-only. Creates one Jira issue per plan step (skipping any step

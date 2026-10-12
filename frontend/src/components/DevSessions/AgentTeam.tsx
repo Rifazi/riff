@@ -21,6 +21,7 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import type { QaReviewerStatus, TeamMemberStatus, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona, TeamPersona } from '@/lib/dev-sessions/agents';
 import { AgentAvatar, ChatPane } from './ChatPane';
+import { CollapsibleSection } from './CollapsibleSection';
 
 // The team board both teams use: Jack's coding team (CodingTeam.tsx) and
 // Tess's QA team (QaTeam.tsx). It knows members, statuses, logs and the
@@ -56,22 +57,6 @@ function StatusPill({ status }: { status: MemberStatus }) {
       <StatusIcon status={status} />
       {meta.label}
     </Badge>
-  );
-}
-
-/** The lead followed by the team — the one "this is a team" visual. */
-function TeamFaces({ lead, personas }: { lead: AgentPersona; personas: TeamPersona[] }) {
-  return (
-    <div className="flex items-center flex-shrink-0">
-      <AgentAvatar agent={lead} />
-      <div className="flex -space-x-1.5 ml-1">
-        {personas.map((p) => (
-          <div key={p.name} className="rounded-full ring-2 ring-card">
-            <AgentAvatar agent={p} size="sm" />
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -179,7 +164,7 @@ export interface TeamPanelProps<M extends TeamMemberView> {
   members: M[];
   teamStatus: TeamStatus;
   teamFinished: boolean;
-  progress: { done: number; total: number; label: string; aside?: React.ReactNode };
+  progress: { done: number; total: number; label: string };
   /** Anything else the summary card shows (the QA team's checks). */
   extra?: React.ReactNode;
   /** Shown once the round is over. */
@@ -208,6 +193,11 @@ export interface TeamPanelProps<M extends TeamMemberView> {
   leadActive: boolean;
   /** An earlier round, read only: no lead tab (the lead's chat is the current one). */
   past?: boolean;
+  /**
+   * The board folds down to its summary line with the lead's chat under it.
+   * Open while the team works, folded once it has finished, until toggled.
+   */
+  collapsible?: boolean;
 }
 
 const LEAD_TAB = '__lead__';
@@ -245,6 +235,7 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
     leadChat,
     leadActive,
     past,
+    collapsible,
   } = props;
   // Keyed on the titles so each persona keeps its identity across refetches:
   // the member logs' ChatPane rows are memoized on it.
@@ -252,10 +243,13 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
   const personas = useMemo(
     () => (JSON.parse(titlesKey) as string[]).map((title, i) => personaFor(i, title)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [titlesKey]
+    [titlesKey],
   );
 
   const [picked, setPicked] = useState<string | null>(null);
+  const [collapsedPick, setCollapsedPick] = useState<boolean | null>(null);
+  const canCollapse = Boolean(collapsible && !past);
+  const collapsed = canCollapse && (collapsedPick ?? teamFinished);
   // An earlier round is opened to read its members' logs.
   const defaultTab = past
     ? (lineup[0]?.id ?? LEAD_TAB)
@@ -305,27 +299,53 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
 
   const tabClass = (active: boolean) =>
     `inline-flex items-center gap-1.5 rounded-full border pl-1 pr-2.5 py-1 text-sm transition-colors ${
-      active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-card-foreground hover:bg-muted'
+      active
+        ? 'border-primary/40 bg-primary/10 text-primary'
+        : 'border-border bg-card text-card-foreground hover:bg-muted'
     }`;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3">
-      <Card className="flex-shrink-0 p-3 space-y-2.5">
-        <div className="flex flex-wrap items-center gap-3">
-          <TeamFaces lead={lead} personas={personas} />
+      <Card className="flex-shrink-0 p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-muted-foreground" />
-              {label}
-              {round > 1 && (
-                <span className="font-normal text-muted-foreground">
-                  · round {round}
-                  {roundNote}
-                </span>
-              )}
-            </div>
+            {(() => {
+              const title = (
+                <>
+                  {canCollapse && (
+                    <ChevronDown
+                      className={`w-4 h-4 text-muted-foreground transition-transform ${collapsed ? '-rotate-90' : ''}`}
+                    />
+                  )}
+                  <Users className="w-4 h-4 text-muted-foreground" />
+                  {label}
+                  {round > 1 && (
+                    <span className="font-normal text-muted-foreground">
+                      · round {round}
+                      {roundNote}
+                    </span>
+                  )}
+                </>
+              );
+              return canCollapse ? (
+                <button
+                  type="button"
+                  onClick={() => setCollapsedPick(!collapsed)}
+                  aria-expanded={!collapsed}
+                  title={
+                    collapsed ? `Show the ${memberNoun}` : `Fold the ${memberNoun} away and show ${lead.name}'s chat`
+                  }
+                  className="text-sm font-semibold text-foreground flex items-center gap-1.5 rounded-md -ml-1 px-1 hover:bg-muted transition-colors"
+                >
+                  {title}
+                </button>
+              ) : (
+                <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">{title}</div>
+              );
+            })()}
             <div className="text-xs text-muted-foreground">
-              {lead.name} (lead) + {lineup.length} {memberNoun} · {summary}
+              {lead.name} (lead) + {lineup.length} {memberNoun} · {summary} · {progress.done} of {progress.total}{' '}
+              {progress.label}
             </div>
           </div>
           {canStart && (
@@ -341,58 +361,52 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
             </Button>
           )}
         </div>
-        <div>
-          <div className="flex justify-between text-xs text-muted-foreground mb-1">
-            <span>
-              {progress.done} of {progress.total} {progress.label}
-            </span>
-            {progress.aside}
-          </div>
-          <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full bg-success transition-all"
-              style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
-            />
-          </div>
+        <div className="h-1 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full bg-success transition-all"
+            style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
+          />
         </div>
-        {extra}
+        {!collapsed && extra}
         {teamFinished && finishedNote && (
           <div className={`text-xs ${finishedNote.ok ? 'text-success' : 'text-warning'}`}>{finishedNote.text}</div>
         )}
 
-        <div role="tablist" className="flex flex-wrap gap-1.5 pt-0.5">
-          {lineup.map((m, i) => (
-            <button
-              key={m.id}
-              role="tab"
-              type="button"
-              aria-selected={selected === m.id}
-              onClick={() => setPicked(m.id)}
-              className={tabClass(selected === m.id)}
-              title={`${personas[i].name} · ${m.title} — ${STATUS_META[m.status].label}`}
-            >
-              <AgentAvatar agent={personas[i]} size="xs" />
-              <span className="font-medium">{personas[i].name}</span>
-              <StatusIcon status={m.status} className="w-3.5 h-3.5 text-muted-foreground" />
-            </button>
-          ))}
-          {!past && (
-            <button
-              role="tab"
-              type="button"
-              aria-selected={selected === LEAD_TAB}
-              onClick={() => setPicked(LEAD_TAB)}
-              className={tabClass(selected === LEAD_TAB)}
-            >
-              <AgentAvatar agent={lead} size="xs" />
-              <span className="font-medium">{lead.name}</span>
-              <span className="text-xs text-muted-foreground">lead</span>
-            </button>
-          )}
-        </div>
+        {!collapsed && (
+          <div role="tablist" className="flex flex-wrap gap-1.5 pt-0.5">
+            {lineup.map((m, i) => (
+              <button
+                key={m.id}
+                role="tab"
+                type="button"
+                aria-selected={selected === m.id}
+                onClick={() => setPicked(m.id)}
+                className={tabClass(selected === m.id)}
+                title={`${personas[i].name} · ${m.title} — ${STATUS_META[m.status].label}`}
+              >
+                <AgentAvatar agent={personas[i]} size="xs" />
+                <span className="font-medium">{personas[i].name}</span>
+                <StatusIcon status={m.status} className="w-3.5 h-3.5 text-muted-foreground" />
+              </button>
+            ))}
+            {!past && (
+              <button
+                role="tab"
+                type="button"
+                aria-selected={selected === LEAD_TAB}
+                onClick={() => setPicked(LEAD_TAB)}
+                className={tabClass(selected === LEAD_TAB)}
+              >
+                <AgentAvatar agent={lead} size="xs" />
+                <span className="font-medium">{lead.name}</span>
+                <span className="text-xs text-muted-foreground">lead</span>
+              </button>
+            )}
+          </div>
+        )}
       </Card>
 
-      {member ? (
+      {member && !collapsed ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
           <div className="flex-shrink-0 space-y-2">
             {renderDetails(member, personas[selectedIndex])}
@@ -405,7 +419,9 @@ export function TeamPanel<M extends TeamMemberView>(props: TeamPanelProps<M>) {
                 <div className="space-y-1.5">
                   <div
                     className={`text-xs ${
-                      member.status === 'failed' || member.status === 'blocked' ? 'text-destructive' : 'text-muted-foreground'
+                      member.status === 'failed' || member.status === 'blocked'
+                        ? 'text-destructive'
+                        : 'text-muted-foreground'
                     }`}
                   >
                     {member.note}
@@ -476,7 +492,6 @@ export function EarlierRounds<T extends TeamRoundView>({
   personaFor: (index: number, title: string) => TeamPersona;
   renderRound: (round: T) => React.ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
   const [viewing, setViewing] = useState<T | null>(null);
   if (rounds.length === 0) return null;
   const statusMeta: Record<TeamRoundView['status'], { label: string; variant: NonNullable<BadgeProps['variant']> }> = {
@@ -487,60 +502,43 @@ export function EarlierRounds<T extends TeamRoundView>({
     interrupted: { label: 'Interrupted', variant: 'warning' },
   };
   return (
-    <Card className="flex-shrink-0 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted transition-colors"
-      >
-        <ChevronDown
-          className={`w-4 h-4 flex-shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`}
-        />
-        <Users className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
-        <span className="font-medium text-foreground">Earlier team rounds</span>
-        <span className="text-xs text-muted-foreground">{rounds.length}</span>
-      </button>
-      {open && (
-        <div className="border-t border-border p-1.5 space-y-1">
-          {[...rounds].reverse().map((team) => {
-            const status = statusMeta[team.status];
-            const when = roundWhen(team.startedAt);
-            return (
-              <button
-                key={team.round}
-                type="button"
-                onClick={() => setViewing(team)}
-                className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-2 text-left hover:bg-muted transition-colors"
-                title={`Open round ${team.round}'s logs`}
-              >
-                <div className="flex -space-x-1.5 flex-shrink-0">
-                  {team.members.map((m, i) => (
-                    <div key={m.id} className="rounded-full ring-2 ring-card">
-                      <AgentAvatar agent={personaFor(i, m.title)} size="xs" />
-                    </div>
-                  ))}
+    <CollapsibleSection icon={Users} title="Earlier team rounds" aside={rounds.length} bodyClassName="p-1.5 space-y-1">
+      {[...rounds].reverse().map((team) => {
+        const status = statusMeta[team.status];
+        const when = roundWhen(team.startedAt);
+        return (
+          <button
+            key={team.round}
+            type="button"
+            onClick={() => setViewing(team)}
+            className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2.5 py-2 text-left hover:bg-muted transition-colors"
+            title={`Open round ${team.round}'s logs`}
+          >
+            <div className="flex -space-x-1.5 flex-shrink-0">
+              {team.members.map((m, i) => (
+                <div key={m.id} className="rounded-full ring-2 ring-card">
+                  <AgentAvatar agent={personaFor(i, m.title)} size="xs" />
                 </div>
-                <span className="text-sm font-semibold text-foreground whitespace-nowrap">Round {team.round}</span>
-                <span className="text-sm text-foreground whitespace-nowrap">{kindLabel(team)}</span>
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {team.members.length} {memberNoun}
-                  {when ? ` · ${when}` : ''}
-                </span>
-                <Badge variant={status.variant} className="ml-auto">
-                  {status.label}
-                </Badge>
-              </button>
-            );
-          })}
-        </div>
-      )}
+              ))}
+            </div>
+            <span className="text-sm font-semibold text-foreground whitespace-nowrap">Round {team.round}</span>
+            <span className="text-sm text-foreground whitespace-nowrap">{kindLabel(team)}</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              {team.members.length} {memberNoun}
+              {when ? ` · ${when}` : ''}
+            </span>
+            <Badge variant={status.variant} className="ml-auto">
+              {status.label}
+            </Badge>
+          </button>
+        );
+      })}
       <Dialog open={viewing !== null} onOpenChange={(o) => !o && setViewing(null)}>
         <DialogContent className="max-w-5xl w-[95vw] h-[88vh] p-4 gap-0 flex flex-col overflow-hidden">
           <DialogTitle className="sr-only">Team round {viewing?.round}</DialogTitle>
           {viewing && <React.Fragment key={viewing.round}>{renderRound(viewing)}</React.Fragment>}
         </DialogContent>
       </Dialog>
-    </Card>
+    </CollapsibleSection>
   );
 }

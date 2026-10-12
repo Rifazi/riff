@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronRight, Tags, Terminal, Users } from 'lucide-react';
+import { ChevronRight, History, Tags, Terminal, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { HelperName, HelperRunStats, TranscriptEntry } from '@/lib/dev-sessions/types';
 
@@ -12,6 +12,7 @@ export const HELPER_TOOLS: Record<string, HelperName> = {
   delegate: 'research',
   classify_text: 'classifier',
   run_checked_command: 'runner',
+  recall: 'memory',
 };
 
 export function helperFor(toolName: string): HelperName | null {
@@ -52,6 +53,27 @@ function toolResultValue(result: unknown): unknown {
     return null;
   }
 }
+
+/**
+ * Whether a helper run went wrong, the same rule for every helper card: the
+ * tool errored (including a call the engine rejected), or the helper itself
+ * reported a failure in its result. A helper that found nothing hasn't failed.
+ */
+function helperFailed(helper: HelperName, resultEntry: TranscriptEntry | undefined): boolean {
+  if (!resultEntry) return false;
+  if (resultEntry.isError) return true;
+  const text = toolResultText(resultEntry.toolResult);
+  if (/<tool_use_error>/.test(text)) return true;
+  if (helper === 'research') return /Helper failed|Failed, do yourself/.test(text);
+  if (helper === 'runner') {
+    const lower = text.toLowerCase();
+    return !!text && !(lower.includes('passed') || lower.includes('succeeded'));
+  }
+  return false;
+}
+
+// Live runs and failed ones open by default; older successful ones stay collapsed.
+const opensOnLoad = (callEntry: TranscriptEntry, failed: boolean) => failed || callEntry.id.startsWith('overlay-');
 
 const approxTokens = (chars: number) => {
   const t = Math.round(chars / 4);
@@ -110,14 +132,14 @@ function ResearchDialog({
   const input = callEntry.toolInput as { tasks?: { task?: string; paths?: string[] }[] } | undefined;
   const tasks = input?.tasks ?? [];
   const savedBadge = stats?.savedTokens ? ` · saved ≈${approxTokens((stats.savedTokens ?? 0) * 4)}` : '';
-  const isError = resultEntry?.isError ?? false;
+  const isError = helperFailed('research', resultEntry);
   return (
     <HelperDialog
       icon={Users}
       label={`Research helper — ${tasks.length} ${tasks.length === 1 ? 'question' : 'questions'}`}
       badge={stats ? `${stats.useful}/${stats.tasks} answered${stats.model ? ` · ${stats.model}` : ''}${savedBadge}` : undefined}
       isError={isError}
-      startOpen={callEntry.id.startsWith('overlay-')}
+      startOpen={opensOnLoad(callEntry, isError)}
     >
       <div className="space-y-2 text-xs">
         <ol className="ml-4 list-decimal space-y-1 text-muted-foreground break-words">
@@ -153,7 +175,7 @@ function ClassifierDialog({
 }) {
   const input = callEntry.toolInput as { text?: string; labels?: string[]; mode?: string } | undefined;
   const labels = input?.labels ?? [];
-  const isError = resultEntry?.isError ?? false;
+  const isError = helperFailed('classifier', resultEntry);
 
   const value =
     resultEntry && !isError
@@ -174,7 +196,7 @@ function ClassifierDialog({
       label={`Classifier — ${input?.mode === 'multi' ? 'any' : 'one'} of ${labels.length} labels`}
       badge={pickedList ? `${pickedList}${model ? ` · ${model}` : ''}` : model ?? undefined}
       isError={isError}
-      startOpen={callEntry.id.startsWith('overlay-')}
+      startOpen={opensOnLoad(callEntry, isError)}
     >
       <div className="space-y-2 text-xs">
         <div className="text-muted-foreground space-y-0.5">
@@ -224,19 +246,57 @@ function RunnerDialog({
 }) {
   const input = callEntry.toolInput as { command?: string } | undefined;
   const command = input?.command ?? 'check';
-  const isError = resultEntry?.isError ?? false;
+  const isError = helperFailed('runner', resultEntry);
   const result = resultEntry ? toolResultText(resultEntry.toolResult) : '';
-  const passed = result.toLowerCase().includes('passed') || result.toLowerCase().includes('succeeded');
+  const passed = !isError;
   const savedBadge = stats?.savedTokens ? ` · saved ≈${approxTokens((stats.savedTokens ?? 0) * 4)}` : '';
   return (
     <HelperDialog
       icon={Terminal}
       label={`Runner — ${command}`}
-      badge={stats ? `${passed ? 'passed' : 'failed'}${stats.model ? ` · ${stats.model}` : ''}${savedBadge}` : (passed ? 'passed' : 'failed')}
-      isError={isError || (!passed && !!result)}
-      startOpen={callEntry.id.startsWith('overlay-') || !passed}
+      badge={
+        !resultEntry
+          ? 'running…'
+          : `${passed ? 'passed' : 'failed'}${stats?.model ? ` · ${stats.model}` : ''}${savedBadge}`
+      }
+      isError={isError}
+      startOpen={opensOnLoad(callEntry, isError)}
     >
       <div className="whitespace-pre-wrap break-all text-xs text-muted-foreground font-mono">{result}</div>
+    </HelperDialog>
+  );
+}
+
+// --- read memory (`recall`) ---------------------------------------------------
+
+function MemoryDialog({
+  callEntry,
+  resultEntry,
+  stats,
+}: {
+  callEntry: TranscriptEntry;
+  resultEntry?: TranscriptEntry;
+  stats: HelperRunStats | null;
+}) {
+  const input = callEntry.toolInput as { question?: string; paths?: string[] } | undefined;
+  const result = resultEntry ? toolResultText(resultEntry.toolResult) : '';
+  const found = Boolean(stats?.useful);
+  const failed = helperFailed('memory', resultEntry);
+  const savedBadge = stats?.savedTokens ? ` · saved ≈${approxTokens(stats.savedTokens * 4)}` : '';
+  return (
+    <HelperDialog
+      icon={History}
+      label={`Read memory — ${input?.question ?? 'recall'}`}
+      badge={stats ? `${found ? 'recalled' : 'not in memory'}${savedBadge}` : undefined}
+      isError={failed}
+      startOpen={opensOnLoad(callEntry, failed)}
+    >
+      <div className="space-y-2 text-xs">
+        {input?.paths?.length ? <div className="font-mono text-muted-foreground opacity-60">in {input.paths.join(', ')}</div> : null}
+        {resultEntry && (
+          <div className="whitespace-pre-wrap break-all text-muted-foreground font-mono">{result}</div>
+        )}
+      </div>
     </HelperDialog>
   );
 }
@@ -257,5 +317,6 @@ export function HelperBubble({
 }) {
   if (helper === 'research') return <ResearchDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
   if (helper === 'runner') return <RunnerDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
+  if (helper === 'memory') return <MemoryDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
   return <ClassifierDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
 }

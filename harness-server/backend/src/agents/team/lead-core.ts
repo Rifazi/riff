@@ -1,4 +1,4 @@
-import type { CodingTeamMember, TeamMemberStatus } from '../../sessions/session.js';
+import type { CodingTeamMember, TeamMemberStatus, WorkstreamReport } from '../../sessions/session.js';
 
 // Pure rules for a coding team whose lead (Jack) reviews and merges every
 // workstream's branch himself: when a member can start, what the lead is
@@ -7,7 +7,17 @@ import type { CodingTeamMember, TeamMemberStatus } from '../../sessions/session.
 // tested from frontend/tests/harness-server/coding-team-lead.test.ts.
 
 type Member = Pick<CodingTeamMember, 'id' | 'title' | 'status' | 'dependsOn' | 'stepIds' | 'note' | 'branch'> &
-  Partial<Pick<CodingTeamMember, 'sendBacks' | 'feedback'>>;
+  Partial<Pick<CodingTeamMember, 'sendBacks' | 'feedback' | 'report' | 'changedExports'>>;
+
+// How much of an engineer's last message stands in for a report it never filed.
+export const FALLBACK_REPORT_CHARS = 1_200;
+
+// Before a merge the lead's checkout is the session branch, which doesn't
+// have the workstream's changes: read_file there shows the old code.
+export const STALE_CHECKOUT_NOTE =
+  "Your checkout is the session branch: it doesn't have a workstream's changes until you merge it, so read_file " +
+  "shows the old code. Review from the engineer's report and review_workstream's diff (pass path for one file's " +
+  'whole diff), and run lint and tests after merging.';
 
 // The lead can send one workstream back this many times per round, so a
 // review loop can't run forever.
@@ -110,6 +120,38 @@ export function teamStatusLines(members: Member[], commitsAhead: Map<string, num
     .join('\n');
 }
 
+/** A report built from an engineer's last message, for one that never called report_workstream. */
+export function fallbackReport(lastText: string | null | undefined): WorkstreamReport | null {
+  const text = (lastText ?? '').trim();
+  if (!text) return null;
+  const summary = text.length > FALLBACK_REPORT_CHARS ? `${text.slice(0, FALLBACK_REPORT_CHARS)}…` : text;
+  return { summary, steps: [], interfaces: [], checks: '', forLead: [], fallback: true };
+}
+
+/**
+ * What a workstream hands on: its report and the exports its branch changed.
+ * `forDependent` leaves out what only the lead needs (steps, checks, notes).
+ */
+export function workstreamHandover(member: Member, options: { forDependent?: boolean } = {}): string {
+  const r = member.report;
+  const lines: string[] = [];
+  if (r) {
+    lines.push(r.fallback ? `Its last message (it filed no report): ${r.summary}` : `Summary: ${r.summary}`);
+    if (!options.forDependent) {
+      for (const step of r.steps) lines.push(`- ${step.id}: ${step.done}`);
+    }
+    if (r.interfaces.length) lines.push('Interfaces:', ...r.interfaces.map((i) => `- ${i}`));
+    if (!options.forDependent) {
+      if (r.checks) lines.push(`Checks: ${r.checks}`);
+      if (r.forLead.length) lines.push('For you:', ...r.forLead.map((n) => `- ${n}`));
+    }
+  }
+  if (member.changedExports?.length) lines.push('Exports it adds or changes:', ...member.changedExports.map((e) => `- ${e}`));
+  return lines.join('\n');
+}
+
+const indent = (text: string) => text.replace(/^/gm, '  ');
+
 /**
  * The message for the lead's turn when workstreams need his decision: which
  * finished or failed, the whole team's state, and what he can do.
@@ -119,11 +161,14 @@ export function leadReviewMessage(members: Member[], ids: string[], sessionBranc
   const news = ids
     .map((id) => byId.get(id))
     .filter((m): m is NonNullable<typeof m> => Boolean(m))
-    .map((m) =>
-      m.status === 'ready'
-        ? `- ${m.id} (${m.title}) finished: ${commitsAhead.get(m.id) ?? '?'} commit(s) on ${m.branch}, ready for your review.`
-        : `- ${m.id} (${m.title}) failed: ${m.note ?? 'no reason recorded'}.`,
-    );
+    .map((m) => {
+      const head =
+        m.status === 'ready'
+          ? `- ${m.id} (${m.title}) finished: ${commitsAhead.get(m.id) ?? '?'} commit(s) on ${m.branch}, ready for your review.`
+          : `- ${m.id} (${m.title}) failed: ${m.note ?? 'no reason recorded'}.`;
+      const handover = workstreamHandover(m);
+      return handover ? `${head}\n${indent(handover)}` : head;
+    });
   const waiting = members.filter((m) => m.status === 'waiting' && m.dependsOn.some((d) => byId.get(d)?.status !== 'merged'));
   return [
     '[Team update] You are the lead: the team builds in parallel, and you decide what lands on ' +
@@ -137,6 +182,7 @@ export function leadReviewMessage(members: Member[], ids: string[], sessionBranc
     'For each finished workstream: review_workstream it (commits, diff stat, diff), check it does what its steps ' +
       'ask and fits with what is already merged, then merge_workstream it, or send_back_workstream with exactly ' +
       'what to fix.',
+    STALE_CHECKOUT_NOTE,
     'For each failed one: review what it committed. Merge it if its steps are actually done, send it back with ' +
       'guidance to finish, drop_workstreams to build its steps yourself after the team, or leave it for the human.',
     waiting.length

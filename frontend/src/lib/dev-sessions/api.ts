@@ -299,6 +299,13 @@ export const api = {
   clearClassificationCache: () =>
     fetch(apiUrl('/api/settings/classification-cache/clear'), { method: 'POST' }).then(noContent),
 
+  // The read memory's size on disk across sessions (agents' `recall`).
+  getReadMemory: () =>
+    fetch(apiUrl('/api/settings/read-memory')).then((r) => json<{ sessions: number; bytes: number }>(r)),
+
+  // Forgets every session's reads.
+  clearReadMemory: () => fetch(apiUrl('/api/settings/read-memory/clear'), { method: 'POST' }).then(noContent),
+
   testCredential: (input: { provider: Provider; apiKey?: string; model?: string; endpoint?: string }) =>
     fetch(apiUrl('/api/settings/test'), {
       method: 'POST',

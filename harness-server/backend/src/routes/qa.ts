@@ -7,15 +7,12 @@ import { getSession, updateSession } from '../sessions/session-store.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
-import { getApp } from '../apps/apps-store.js';
-import { baseBranchFor } from '../apps/apps.js';
-import { deliver, detectDelivery } from '../repo/delivery.js';
-import { buildDeliveryText } from '../repo/delivery-text.js';
-import { resolveBaseBranch } from '../repo/git.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
+import { approveQa, deliverSession, planDelivery } from '../sessions/stage-actions.js';
+import { sendStageActionError } from './stage-action-reply.js';
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -161,21 +158,17 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Human-only. Reaching "done" never pushes, merges, or opens an MR by
-  // itself — that's the separate, explicitly-clicked /delivery below.
+  // Marks QA reviewed (the human, or Bridget on a clean pass). Reaching
+  // "done" never pushes, merges, or opens an MR by itself — that's the
+  // separate /delivery below.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.qaReportPath) {
-      return reply.code(400).send({ error: 'no QA report has been written yet' });
+    try {
+      return await approveQa(session);
+    } catch (err) {
+      return sendStageActionError(reply, err);
     }
-
-    const filePath = path.join(config.harnessRoot, session.qaReportPath);
-    const raw = await fs.readFile(filePath, 'utf8');
-    const updated = raw.replace(/^status:\s*\S+/m, 'status: reviewed');
-    await fs.writeFile(filePath, updated, 'utf8');
-
-    return updateSession(session.id, { qaStatus: 'reviewed', stage: 'done' });
   });
 
   // What shipping this branch would do, worked out from the repo (see
@@ -183,33 +176,24 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>('/api/sessions/:id/delivery', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.branch) return reply.code(400).send({ error: 'no branch to deliver yet' });
-    const app = await getApp(session.appId);
     try {
-      return await detectDelivery(app.repoRoot, session.branch, await resolveBaseBranch(app.repoRoot, baseBranchFor(app)));
+      return await planDelivery(session);
     } catch (err) {
-      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      return sendStageActionError(reply, err);
     }
   });
 
-  // Human-only: merges the reviewed branch into the base branch (local
-  // repo) or pushes it and opens an MR/PR (repo with a remote). Only after
-  // QA is marked reviewed — no agent tool reaches this.
+  // Merges the reviewed branch into the base branch (local repo) or pushes
+  // it and opens an MR/PR (repo with a remote). Only after QA is marked
+  // reviewed. The human's Ship button, or Bridget after a clean QA pass
+  // (an MR only — she never merges into the base branch herself).
   app.post<{ Params: { id: string } }>('/api/sessions/:id/delivery', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.branch) return reply.code(400).send({ error: 'no branch to deliver yet' });
-    if (session.qaStatus !== 'reviewed') return reply.code(400).send({ error: 'mark QA reviewed before shipping' });
-    if (session.delivery && session.delivery.kind !== 'pushed') {
-      return reply.code(400).send({ error: `already delivered: ${session.delivery.detail}` });
-    }
-    const app = await getApp(session.appId);
     try {
-      const plan = await detectDelivery(app.repoRoot, session.branch, await resolveBaseBranch(app.repoRoot, baseBranchFor(app)));
-      const result = await deliver(app.repoRoot, plan, await buildDeliveryText(session, app.repoRoot, plan.baseBranch));
-      return updateSession(session.id, { delivery: result });
+      return await deliverSession(session);
     } catch (err) {
-      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      return sendStageActionError(reply, err);
     }
   });
 

@@ -264,36 +264,40 @@ into steps they can follow along with. So:
       `search_code` before writing a new one from scratch); don't defer
       tests to a later step or leave them for QA to notice their absence.
       A step that adds testable logic without a test for it isn't done.
-   b. Run `run_prettier` on exactly those files (only what you just wrote —
-      never the whole repo) so formatting is clean *before* it's committed,
-      not as an afterthought.
-   c. `git_commit` the (now-formatted) files, including any tests you wrote.
-   d. **Verify before stopping** — call `run_checked_command` with `"lint"`,
-      then with `"test"`. If either fails because of something your step
-      introduced, fix it and re-run before moving on; don't leave a step
-      you know is broken. (A pre-existing failure unrelated to your change
-      isn't yours to fix — note it in your summary instead.)
-   e. Once lint and tests are clean, call `write_coding_plan` again with
-      just those two steps: this one `done`, the next `in_progress`. Then **stop** —
+   b. **Finish it with one `finish_step` call** — the step id, a
+      conventional commit message, and exactly the files you wrote, edited
+      or deleted (never the whole repo). It formats them with prettier,
+      commits them, runs lint and then the unit tests, and when both pass
+      marks this step `done` and the next one `in_progress`. Don't make
+      separate `run_prettier`, `git_commit`, `run_checked_command` and
+      `write_coding_plan` calls for this; they're for partial commits and
+      checkpoints.
+   c. If finish_step reports a prettier error or failing lint/tests caused
+      by your step, fix it and call finish_step again with the files you
+      changed (the earlier commit stays). Don't leave a step you know is
+      broken. (A pre-existing failure unrelated to your change isn't yours
+      to fix — note it in your summary, and mark the step done with
+      `write_coding_plan`.)
+   d. Once finish_step says the step is done, **stop** —
       summarize what you did, note the lint/test results, and end your
       turn. Do not start the next step in the same turn. The human reviews
       the diff so far and sends the next message (e.g. "continue", "looks
       good, keep going", or feedback) before you proceed.
-   f. **Self-checkpoint if a step is running long.** Each turn has a limited
+   e. **Self-checkpoint if a step is running long.** Each turn has a limited
       tool-call budget. If you're already roughly 12-15 tool calls into the
       *current* step with real work still remaining, don't try to power
       through — stop at the next safe, lint-clean point, commit what's
       done, and call `write_coding_plan` with the current step (still
       `in_progress`) followed by a new `pending` step for the remainder, then
-      end your turn as in (e). It's fine if that means a step turns into
+      end your turn as in (d). It's fine if that means a step turns into
       two; a clean checkpoint beats running out of budget mid-edit.
 3. Exception: if the human explicitly says to do it all in one go (e.g.
    "just implement everything", "don't stop between steps"), chain as many
    steps as needed in that turn instead — the checklist and step-by-step
    pacing are for reviewability, not a rule to enforce on someone who
    doesn't want it. Still write tests, format, lint, test, and
-   `write_coding_plan`-checkpoint after each step even when chaining,
-   exactly as in (a)-(e) above — don't skip verification just because
+   checkpoint (finish_step) after each step even when chaining,
+   exactly as in (a)-(c) above — don't skip verification just because
    you're not stopping, and don't let the checklist go stale just because
    you're not ending the turn. If chaining
    this many steps together ends up exceeding the turn's tool-call budget

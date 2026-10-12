@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,8 @@ interface ApprovalBarProps {
   onReject?: () => void;
   rejectDisabled?: boolean;
   rejectBusy?: boolean;
+  /** Other ways out of the stage (send back…), in the same row between Approve and Reject. */
+  secondaryActions?: React.ReactNode;
 }
 
 export function ApprovalBar({
@@ -26,6 +28,7 @@ export function ApprovalBar({
   onReject,
   rejectDisabled,
   rejectBusy,
+  secondaryActions,
 }: ApprovalBarProps) {
   const [confirmingReject, setConfirmingReject] = useState(false);
 
@@ -35,6 +38,7 @@ export function ApprovalBar({
         {busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
         {busy ? 'Working…' : approveLabel}
       </Button>
+      {secondaryActions}
       {onReject && (
         <Button variant="outline" onClick={() => setConfirmingReject(true)} disabled={rejectDisabled || rejectBusy}>
           {rejectBusy ? <Loader2 className="animate-spin" /> : <XCircle className="text-destructive" />}

@@ -147,6 +147,11 @@ export async function diffAgainstBase(
   ]);
 }
 
+// A file's content on a branch or commit, without checking it out.
+export async function showFileAt(repoRoot: string, ref: string, filePath: string): Promise<string> {
+  return client(repoRoot).show([`${ref}:${filePath}`]);
+}
+
 export async function diffStatAgainstBase(repoRoot: string, branchName: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<string> {
   const git = client(repoRoot);
   return git.raw(['diff', '--stat', `${baseBranch}...${branchName}`]);

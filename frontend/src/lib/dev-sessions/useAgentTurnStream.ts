@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { COORDINATOR_PERSONA } from './agents';
 import { useQueryClient } from '@tanstack/react-query';
 import { postSSE } from './sse-client';
 import type { AgentEvent, AttachmentInput, TranscriptEntry } from './types';
@@ -80,7 +81,9 @@ export function useAgentTurnStream() {
         {
           id: nextId(),
           role: 'system',
-          text: `Coordinator: ${event.action === 'continue' ? 'continuing' : 'ready for review'} — ${event.reason}`,
+          text: `${COORDINATOR_PERSONA.name}: ${
+            event.action === 'continue' ? 'continuing' : event.action === 'advanced' ? 'approved' : 'stopped for you'
+          } — ${event.reason}`,
           timestamp: new Date().toISOString(),
         },
       ]);

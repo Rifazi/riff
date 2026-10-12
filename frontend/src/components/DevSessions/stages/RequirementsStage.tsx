@@ -11,6 +11,7 @@ import { sessionHref, stageGroupFor } from '@/lib/dev-sessions/stage';
 import { meetingKickoffMessage, splitKickoffMessage, THEME_MIGRATION_KICKOFF, themeMigrationKickoffMessage } from '@/lib/dev-sessions/meeting';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
+import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { SplitLinks, SplitProposalCard } from '../SplitPanel';
@@ -126,19 +127,16 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, kickoff, session.transcripts.requirements.length, streaming]);
 
-  // Coordinator auto-start: the moment this stage is reached with
-  // coordinator mode on and nothing said yet, drive it automatically.
-  useEffect(() => {
-    if (!session.coordinatorEnabled) return;
-    if (session.meetingKickoffPending || session.splitKickoffPending) return;
-    if (session.transcripts.requirements.length > 0) return;
-    if (streaming) return;
-    const key = `${sessionId}:requirementsCoordinator`;
-    if (kicked.has(key)) return;
-    kicked.add(key);
-    void runCoordinator(sessionId, refresh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.coordinatorEnabled, session.transcripts.requirements.length, streaming]);
+  // Bridget picks up after each agent turn and approves the document once
+  // nothing in it needs the human.
+  useCoordinatorAutoRun({
+    session,
+    group: 'requirements',
+    streaming,
+    runCoordinator,
+    refresh,
+    blocked: session.meetingKickoffPending || session.splitKickoffPending,
+  });
 
   useEffect(() => {
     if (!session.requirementsRelayPending) kicked.delete(`${sessionId}:requirementsRelay`);

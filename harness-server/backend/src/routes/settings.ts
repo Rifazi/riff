@@ -11,6 +11,7 @@ import {
 import { listOllamaModels, testOllama } from '../settings/ollama.js';
 import { testClaudeLogin, testProviderCredential } from '../agents/sdk-client.js';
 import { classificationCacheStatus, clearClassificationCache } from '../agents/helpers/classifier/classifier.js';
+import { clearReadMemory, readMemoryStatus } from '../agents/helpers/memory/store.js';
 import { testJiraConnection } from '../jira/jira-client.js';
 
 export async function registerSettingsRoutes(app: FastifyInstance): Promise<void> {
@@ -49,6 +50,9 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         }
         if (roleModelConfig?.delegateModel !== undefined && typeof roleModelConfig.delegateModel !== 'string') {
           return reply.code(400).send({ error: 'delegateModel must be a string' });
+        }
+        if (roleModelConfig?.readMemory !== undefined && typeof roleModelConfig.readMemory !== 'boolean') {
+          return reply.code(400).send({ error: 'readMemory must be a boolean' });
         }
       }
     }
@@ -159,6 +163,19 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
   app.post('/api/settings/classification-cache/clear', async (_request, reply) => {
     try {
       await clearClassificationCache();
+      return { ok: true };
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // The read memory's size on disk across sessions (agents/helpers/memory/).
+  app.get('/api/settings/read-memory', async () => readMemoryStatus());
+
+  // Forgets every session's reads; agents read files again as needed.
+  app.post('/api/settings/read-memory/clear', async (_request, reply) => {
+    try {
+      await clearReadMemory();
       return { ok: true };
     } catch (err) {
       return reply.code(500).send({ ok: false, error: err instanceof Error ? err.message : String(err) });

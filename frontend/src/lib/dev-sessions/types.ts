@@ -29,7 +29,7 @@ export interface TranscriptEntry {
   helper?: HelperRunStats;
 }
 
-export type HelperName = 'research' | 'classifier' | 'runner';
+export type HelperName = 'research' | 'classifier' | 'runner' | 'memory';
 
 export interface HelperRunStats {
   helper: HelperName;
@@ -468,7 +468,7 @@ export type AgentEvent =
   | { type: 'tool_result'; toolCallId: string; content: unknown; isError: boolean }
   | { type: 'done'; text: string; isError: boolean }
   | { type: 'error'; message: string }
-  | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
+  | { type: 'coordinator_decision'; action: 'continue' | 'ready' | 'advanced'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage };
@@ -500,6 +500,8 @@ export interface RoleModelConfig {
   localTeamModel?: string;
   // Coding only: the Ollama model the delegate tool's read-only helpers run on. ''/unset = off.
   delegateModel?: string;
+  // Coding only: keep every file read in a session for the agents' `recall`. Unset = on.
+  readMemory?: boolean;
 }
 
 export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';

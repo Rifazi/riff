@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, ChevronRight, FileCode, FileText, GitBranch, Package, Paperclip, Search, Send, Terminal, Wrench, X } from 'lucide-react';
+import { Check, ChevronRight, FileCode, FileText, GitBranch, GitCommitHorizontal, Package, Paperclip, Search, Send, Terminal, Wrench, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -50,6 +50,7 @@ function toolIcon(name: string): ToolIcon {
   if (name === 'write_file' || name === 'edit_file') return FileCode;
   if (name.startsWith('run_') || name === 'get_diff') return Terminal;
   if (name === 'git_create_branch') return GitBranch;
+  if (name === 'finish_step' || name === 'git_commit') return GitCommitHorizontal;
   if (name === 'run_npm_install') return Package;
   return Wrench;
 }
@@ -80,6 +81,13 @@ function resultBadge(name: string, input: unknown, text: string, isError: boolea
     case 'run_npm_install': return '✓ installed';
     case 'run_prettier': return '✓ formatted';
     case 'git_create_branch': return '✓ created';
+    case 'git_commit': return '✓ committed';
+    case 'finish_step': {
+      if (text.startsWith('Nothing committed')) return '✗ prettier failed';
+      const failed = /still in progress: (lint|test) failed/.exec(text);
+      if (failed) return `✗ ${failed[1]} failed`;
+      return '✓ step done';
+    }
     case 'write_plan_doc': return '✓ saved';
     case 'run_checked_command': {
       const lower = text.toLowerCase();
@@ -230,10 +238,13 @@ function ToolCallBubble({ entry, result }: { entry: TranscriptEntry; result?: Tr
   // Live SSE overlay entries open by default; historical ones stay collapsed.
   const [open, setOpen] = useState(() => entry.id.startsWith('overlay-'));
   const name = stripToolPrefix(entry.toolName);
-  const isError = result?.isError ?? entry.isError ?? false;
   const keyArg = summarizeToolInput(entry.toolInput);
   const rText = result ? resultText(result.toolResult) : null;
-  const badge = rText !== null ? resultBadge(name, entry.toolInput, rText, isError) : null;
+  const errored = result?.isError ?? entry.isError ?? false;
+  const badge = rText !== null ? resultBadge(name, entry.toolInput, rText, errored) : null;
+  // Red whenever something went wrong: the call errored, or the tool ran and
+  // reported a failure (failing checks, prettier) — the same rule as the helper cards.
+  const isError = errored || Boolean(badge?.startsWith('✗'));
   const Icon = toolIcon(name);
 
   return (
@@ -417,7 +428,6 @@ interface ChatEntryProps {
   /** For a local helper's result: the stats of that run, recorded just before it. */
   helperStats?: HelperRunStats | null;
   /** For an assistant message: true when helpers ran during this turn. */
-  usedHelpers?: boolean;
   /** For a regular tool_call: its paired tool_result (absorbed into this bubble). */
   toolResult?: TranscriptEntry;
 }
@@ -434,7 +444,6 @@ const ChatEntry = React.memo(function ChatEntry({
   disabled,
   helperResult,
   helperStats,
-  usedHelpers,
   toolResult,
 }: ChatEntryProps) {
   if (entry.role === 'user') {
@@ -451,18 +460,12 @@ const ChatEntry = React.memo(function ChatEntry({
       <div className="flex gap-2 items-start">
         <AgentAvatar agent={agent} size="sm" />
         <div className="flex flex-col gap-1 max-w-[85%] min-w-0">
-          <div
-            className={`rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm break-words ${
-              usedHelpers ? 'bg-success/10 text-foreground ring-1 ring-success/30' : 'bg-muted text-foreground'
-            }`}
-          >
+          {/* One look for every agent message; helper runs show as their own cards. */}
+          <div className="rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm break-words bg-muted text-foreground">
             <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-pre:my-2">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text ?? ''}</ReactMarkdown>
             </div>
           </div>
-          {usedHelpers && (
-            <span className="text-[10px] text-success/70 font-medium px-1">↑ used local helpers</span>
-          )}
         </div>
       </div>
     );
@@ -646,17 +649,6 @@ export function ChatPane({
         {(() => {
           // Pre-pass: mark assistant entries that followed helper tool calls in
           // their turn (between the previous user/assistant boundary and this one).
-          const assistantWithHelpers = new Set<string>();
-          let turnHadHelper = false;
-          for (const e of entries) {
-            if (e.role === 'user') { turnHadHelper = false; continue; }
-            if (e.role === 'tool_result' && helperFor(stripToolPrefix(e.toolName ?? ''))) { turnHadHelper = true; }
-            if (e.role === 'assistant') {
-              if (turnHadHelper) assistantWithHelpers.add(e.id);
-              turnHadHelper = false;
-            }
-          }
-
           // Pre-pass: pair each regular tool_call with its tool_result so both
           // can be shown in a single chip. By toolCallId when both carry it —
           // parallel calls can finish out of order — else in order per toolName
@@ -747,7 +739,6 @@ export function ChatPane({
                 disabled={disabled}
                 helperResult={helperResult}
                 helperStats={helperStats}
-                usedHelpers={entry.role === 'assistant' ? assistantWithHelpers.has(entry.id) : undefined}
                 toolResult={entry.role === 'tool_call' ? callToResult.get(entry.id) : undefined}
               />
             );
