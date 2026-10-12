@@ -401,6 +401,41 @@ export async function hasUncommittedChanges(repoRoot: string): Promise<boolean> 
   return out.trim().length > 0;
 }
 
+/**
+ * What a branch changed since it left `baseBranch`: its files (repo-relative)
+ * and the diff of the files `docPathspec` matches. With `branch` checked out
+ * (or omitted), uncommitted and untracked work counts too, and an untracked
+ * doc shows as a new file. Null when there's no common history to compare.
+ */
+export async function branchChanges(
+  repoRoot: string,
+  baseBranch: string,
+  docPathspec: string,
+  branch?: string
+): Promise<{ files: string[]; docDiff: string } | null> {
+  const git = client(repoRoot);
+  try {
+    const current = (await git.status()).current ?? '';
+    const live = !branch || branch === current;
+    const head = live ? 'HEAD' : branch;
+    const mergeBase = (await git.raw(['merge-base', baseBranch, head])).trim();
+    const range = live ? [mergeBase] : [`${mergeBase}..${head}`];
+    const tracked = await git.raw(['diff', '--name-only', ...range, '--', '.', ':(exclude)node_modules']);
+    const untracked = live ? await git.raw(['ls-files', '--others', '--exclude-standard']) : '';
+    const files = [...new Set([...tracked.split('\n'), ...untracked.split('\n')].map((f) => f.trim()).filter(Boolean))];
+    let docDiff = await git.raw(['diff', ...range, '--', docPathspec]);
+    if (live) {
+      const newDocs = await git.raw(['ls-files', '--others', '--exclude-standard', '--', docPathspec]);
+      for (const file of newDocs.split('\n').map((f) => f.trim()).filter(Boolean)) {
+        docDiff += `\ndiff --git a/${file} b/${file}\nnew file mode 100644\n`;
+      }
+    }
+    return { files, docDiff };
+  } catch {
+    return null;
+  }
+}
+
 /** `git status --short` for the working tree, node_modules left out. */
 export async function shortStatus(repoRoot: string): Promise<string> {
   return client(repoRoot).raw(['status', '--short', '--', '.', ':(exclude)node_modules']);

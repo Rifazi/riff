@@ -272,7 +272,13 @@ into steps they can follow along with. So:
       then with `"test"`. If either fails because of something your step
       introduced, fix it and re-run before moving on; don't leave a step
       you know is broken. (A pre-existing failure unrelated to your change
-      isn't yours to fix — note it in your summary instead.)
+      isn't yours to fix — note it in your summary instead.) A check that
+      can't run at all — a missing script, a missing dependency, a config
+      error — is not pre-existing: it's yours. `run_checked_command`
+      installs every package's declared dependencies itself, so if it still
+      can't run, fix the scripts or config until it does. Never hand QA a
+      branch whose lint and tests you haven't seen pass, and never use
+      `note_for_qa` to ask QA to run them for you.
    e. Once lint and tests are clean, call `write_coding_plan` again with
       just those two steps: this one `done`, the next `in_progress`. Then **stop** —
       summarize what you did, note the lint/test results, and end your

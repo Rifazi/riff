@@ -6,6 +6,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
+import { ensureDependencies } from '../../repo/dependencies.js';
 import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
 import { reportHelperRun, type HelperContext } from '../helpers/helper.js';
 import { generateLocal } from '../local-llm.js';
@@ -136,6 +137,10 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
   const runCheckedCommandExecute = async ({ command }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
     const script = deps.checkCommands?.[command] ?? DEFAULT_SCRIPTS[command];
     const timeoutMs = TIMEOUTS_MS[command];
+    // A fresh worktree or a just-scaffolded package has nothing installed,
+    // and every check would fail on that instead of on the code.
+    const installs = await ensureDependencies(deps.repoRoot);
+    const installNote = installs.length ? `${installs.join('\n')}\n\n` : '';
     // Whole seconds: some filesystems store mtimes that coarsely.
     const startedAt = Math.floor(Date.now() / 1000) * 1000;
     try {
@@ -144,7 +149,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
         timeout: timeoutMs,
         maxBuffer: 10_000_000,
       });
-      let text = `${script} succeeded.`;
+      let text = `${installNote}${script} succeeded.`;
       if (command === 'test') {
         text += `\n\n${(await readJunitSummary(deps.repoRoot, startedAt)) ?? '(no junit.xml found to summarize)'}`;
       }
@@ -154,7 +159,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
       const timedOut = e.killed ? ' (TIMED OUT)' : '';
-      let text = `${script} failed${timedOut}.`;
+      let text = `${installNote}${script} failed${timedOut}.`;
       if (command === 'test') {
         const junit = await readJunitSummary(deps.repoRoot, startedAt);
         if (junit) text += `\n\n${junit}`;

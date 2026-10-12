@@ -88,6 +88,29 @@ export interface AppConfig {
   repoUrl: string | null;
   // Read from the repo's theme/theme.json; null when it has no theme.
   theme: AppThemeSummary | null;
+  // The architecture the agents follow; null when none.
+  architecture: ArchitectureConfig | null;
+}
+
+// Mirrors harness-server's architecture/architecture.ts.
+export interface ArchitectureConfig {
+  kind: 'wayfinding';
+  // Repo-relative folder the domains live under.
+  srcDir: string;
+  // A domain's one public file, e.g. service.ts.
+  interfaceFile: string;
+}
+
+// What GET /api/apps/:id/architecture/audit returns: the report the agents'
+// audit_architecture tool shows, plus its counts.
+export interface ArchitectureAudit {
+  audit: {
+    srcDirExists: boolean;
+    mapExists: boolean;
+    domains: { id: string }[];
+    problems: { kind: string; file: string; message: string }[];
+  };
+  report: string;
 }
 
 export interface AppThemeSummary {
@@ -112,6 +135,8 @@ export interface AppWriteResult extends AppConfig {
   git?: SetupSteps & { baseBranch: string };
   // Only when a theme was picked while adding the app.
   themeResult?: SetupSteps;
+  // Only when the app follows an architecture and it was just set up or changed.
+  architectureResult?: SetupSteps;
 }
 
 export type ThemeMode = 'light' | 'dark';

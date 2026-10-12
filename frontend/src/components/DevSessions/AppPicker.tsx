@@ -1,127 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { invoke } from '@tauri-apps/api/core';
-import { FolderOpen, Loader2, Plus } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/dev-sessions/api';
+import { NewAppOnboarding } from './NewAppOnboarding';
 
 const ADD_NEW = '__add_new_app__';
 
-function folderName(path: string): string {
-  return (
-    path
-      .replace(/[\\/]+$/, '')
-      .split(/[\\/]/)
-      .pop() ?? ''
-  );
-}
-
-function prettifyName(raw: string): string {
-  return raw
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
-/** Inline "add an app" form: pick a repo folder, confirm the name, done. */
-function AddAppForm({ onAdded, onCancel }: { onAdded: (appId: string) => void; onCancel?: () => void }) {
-  const queryClient = useQueryClient();
-  const [repoRoot, setRepoRoot] = useState('');
-  const [name, setName] = useState('');
-  const [nameTouched, setNameTouched] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const updatePath = (path: string) => {
-    setRepoRoot(path);
-    if (!nameTouched) setName(prettifyName(folderName(path)));
-  };
-
-  const browse = async () => {
-    try {
-      const picked = await invoke<string | null>('pick_app_repo_folder');
-      if (picked) updatePath(picked);
-    } catch {
-      // Picker unavailable (e.g. plain browser dev) — the path field still works.
-    }
-  };
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const check = await api.validateApp(repoRoot.trim());
-      if (!check.ok) throw new Error(check.error ?? 'That folder cannot be used as an app.');
-      return api.createApp({ name: name.trim(), repoRoot: repoRoot.trim() });
-    },
-    onSuccess: async (app) => {
-      setNotice(app.docsInitialized ? `Created docs/ in ${app.name} for the agents to search.` : null);
-      await queryClient.invalidateQueries({ queryKey: ['apps'] });
-      onAdded(app.id);
-    },
-  });
-
-  return (
-    <div
-      className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2"
-      onKeyDown={(e) => {
-        // Can sit inside another form (New session) — Enter adds the app, never submits that.
-        if (e.key !== 'Enter' || !(e.target instanceof HTMLInputElement)) return;
-        e.preventDefault();
-        if (repoRoot.trim() && name.trim() && !createMutation.isPending) createMutation.mutate();
-      }}
-    >
-      <div className="text-xs font-medium text-foreground">Add a new app — the repository the agents will work on</div>
-      <div className="flex gap-2">
-        <Input
-          value={repoRoot}
-          onChange={(e) => updatePath(e.target.value)}
-          placeholder="/Users/you/my-repo"
-          className="font-mono text-xs bg-card"
-          autoFocus
-        />
-        <Button type="button" size="sm" variant="outline" className="h-9 bg-card" onClick={browse}>
-          <FolderOpen />
-          Browse…
-        </Button>
-      </div>
-      <Input
-        value={name}
-        onChange={(e) => {
-          setName(e.target.value);
-          setNameTouched(true);
-        }}
-        placeholder="App name"
-        className="bg-card"
-      />
-      {createMutation.isError && (
-        <div className="text-xs text-destructive">{(createMutation.error as Error).message}</div>
-      )}
-      {notice && <div className="text-xs text-success">{notice}</div>}
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={!repoRoot.trim() || !name.trim() || createMutation.isPending}
-          onClick={() => createMutation.mutate()}
-        >
-          {createMutation.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-          {createMutation.isPending ? 'Adding…' : 'Add app'}
-        </Button>
-        {onCancel && (
-          <Button type="button" size="sm" variant="ghost" onClick={onCancel} disabled={createMutation.isPending}>
-            Cancel
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /**
- * App selector with an inline "Add new app…" option, so a new repository can
- * be registered right where a session is being started.
+ * App selector with an "Add new app…" option that opens the new-app
+ * onboarding, so a repository can be registered and set up right where a
+ * session is being started.
  */
 export function AppPicker({
   value,
@@ -148,37 +41,56 @@ export function AppPicker({
 
   const noApps = apps && apps.length === 0;
 
-  if (noApps || adding) {
-    return (
-      <div className="w-full basis-full">
-        {noApps && <div className="text-xs text-muted-foreground mb-2">No apps yet — add the first one.</div>}
-        <AddAppForm
-          onAdded={(id) => {
+  const onboarding = (
+    <Dialog open={adding} onOpenChange={setAdding}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <DialogHeader>
+          <DialogTitle>Add an app</DialogTitle>
+          <DialogDescription>Set up the repository the agents will work on. Only the repository is required.</DialogDescription>
+        </DialogHeader>
+        <NewAppOnboarding
+          onDone={(app) => {
             setAdding(false);
-            onChange(id);
+            onChange(app.id);
           }}
-          onCancel={noApps ? undefined : () => setAdding(false)}
+          onCancel={() => setAdding(false)}
         />
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (noApps) {
+    return (
+      <div className="w-full basis-full flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+        <span className="text-sm text-muted-foreground">No apps yet. Add the repository the agents will work on.</span>
+        <Button type="button" size="sm" onClick={() => setAdding(true)}>
+          <Plus />
+          Add your first app
+        </Button>
+        {onboarding}
       </div>
     );
   }
 
   return (
-    <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}>
-      <SelectTrigger className={`bg-card ${triggerClassName}`}>
-        <SelectValue placeholder={apps ? 'Choose an app' : 'Loading…'} />
-      </SelectTrigger>
-      <SelectContent>
-        {apps?.map((a) => (
-          <SelectItem key={a.id} value={a.id}>
-            {a.name}
+    <>
+      <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}>
+        <SelectTrigger className={`bg-card ${triggerClassName}`}>
+          <SelectValue placeholder={apps ? 'Choose an app' : 'Loading…'} />
+        </SelectTrigger>
+        <SelectContent>
+          {apps?.map((a) => (
+            <SelectItem key={a.id} value={a.id}>
+              {a.name}
+            </SelectItem>
+          ))}
+          {apps && apps.length > 0 && <SelectSeparator />}
+          <SelectItem value={ADD_NEW} className="text-primary">
+            ＋ Add new app…
           </SelectItem>
-        ))}
-        {apps && apps.length > 0 && <SelectSeparator />}
-        <SelectItem value={ADD_NEW} className="text-primary">
-          ＋ Add new app…
-        </SelectItem>
-      </SelectContent>
-    </Select>
+        </SelectContent>
+      </Select>
+      {onboarding}
+    </>
   );
 }

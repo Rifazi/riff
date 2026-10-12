@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { listSessions } from '../sessions/session-store.js';
 import { validateRepoRoot, ensureDocsDir, slugifyAppId, LEGACY_APP_ID, type AppConfig, type CheckCommands } from './apps.js';
 import { setupGitRepo, type GitSetupResult } from '../repo/git.js';
+import type { ArchitectureConfig } from '../architecture/architecture.js';
 
 // Deliberately separate from backend/.env, same treatment as
 // local-settings.json — this is runtime-editable via the Apps page, no
@@ -62,7 +63,12 @@ export interface AppWriteResult {
   git?: GitSetupResult;
 }
 
-export async function createApp(input: { name: string; repoRoot: string; checkCommands?: CheckCommands }): Promise<AppWriteResult> {
+export async function createApp(input: {
+  name: string;
+  repoRoot: string;
+  checkCommands?: CheckCommands;
+  architecture?: ArchitectureConfig | null;
+}): Promise<AppWriteResult> {
   const resolved = validateRepoRoot(input.repoRoot);
   const docsInitialized = ensureDocsDir(resolved);
   const git = await setupGitRepo(resolved, { docsCreated: docsInitialized });
@@ -81,6 +87,7 @@ export async function createApp(input: { name: string; repoRoot: string; checkCo
     repoRoot: resolved,
     baseBranch: git.baseBranch,
     ...(input.checkCommands ? { checkCommands: input.checkCommands } : {}),
+    ...(input.architecture ? { architecture: input.architecture } : {}),
   };
   await writeApps([...apps, app]);
   return { app, docsInitialized, git };
@@ -88,7 +95,8 @@ export async function createApp(input: { name: string; repoRoot: string; checkCo
 
 export async function updateApp(
   id: string,
-  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands }
+  // architecture: null turns it off; undefined leaves it as it is.
+  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null }
 ): Promise<AppWriteResult> {
   const apps = await readApps();
   const index = apps.findIndex((a) => a.id === id);
@@ -106,6 +114,8 @@ export async function updateApp(
     ...(resolvedRepoRoot && git ? { repoRoot: resolvedRepoRoot, baseBranch: git.baseBranch } : {}),
     ...(patch.checkCommands !== undefined ? { checkCommands: patch.checkCommands } : {}),
   };
+  if (patch.architecture === null) delete updated.architecture;
+  else if (patch.architecture) updated.architecture = patch.architecture;
   const next = [...apps];
   next[index] = updated;
   await writeApps(next);

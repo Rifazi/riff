@@ -2,6 +2,8 @@ import type { TeamKind } from './useTeamRun';
 import type {
   AppConfig,
   AppPrompts,
+  ArchitectureAudit,
+  ArchitectureConfig,
   AppWriteResult,
   CheckCommands,
   ClassificationCacheEntry,
@@ -20,6 +22,7 @@ import type {
   RoleModelConfig,
   SessionRecord,
   SettingsResponse,
+  SetupSteps,
   SplitRoadmap,
   AppThemeState,
   ThemeApplyResult,
@@ -74,6 +77,7 @@ export const api = {
     checkCommands?: CheckCommands;
     theme?: ThemeDefinition;
     basedOn?: string | null;
+    architecture?: ArchitectureConfig | null;
   }) =>
     fetch(apiUrl('/api/apps'), {
       method: 'POST',
@@ -81,7 +85,10 @@ export const api = {
       body: JSON.stringify(input),
     }).then((r) => json<AppWriteResult>(r)),
 
-  updateApp: (id: string, patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands }) =>
+  updateApp: (
+    id: string,
+    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null }
+  ) =>
     fetch(apiUrl(`/api/apps/${id}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -113,6 +120,12 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(draft),
     }).then((r) => json<ThemeApplyResult>(r)),
+
+  getArchitectureAudit: (appId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/architecture/audit`)).then((r) => json<ArchitectureAudit>(r)),
+
+  setupArchitecture: (appId: string) =>
+    fetch(apiUrl(`/api/apps/${appId}/architecture/setup`), { method: 'POST' }).then((r) => json<SetupSteps>(r)),
 
   getThemeAudit: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/theme/audit`)).then((r) => json<ThemeAudit>(r)),
 

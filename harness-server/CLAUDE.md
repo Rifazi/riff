@@ -194,7 +194,9 @@ below) — never inside the target repo.
 
 9. User asked for the app to break a too-big feature into separate
    requirements. The requirements agent got a `propose_split` tool
-   (`tool-defs/propose-split-tool.ts`): 2-8 parts in build order, each with
+   (`tool-defs/propose-split-tool.ts`): 2+ parts in build order (no upper
+   limit since step 39; the agent splits into the smallest deliverables by
+   default), each with
    a self-contained brief and `dependsOn` (earlier indexes only). It only
    records `session.splitProposal`; the human-only
    `/requirements/split/accept` creates one child session per part (key
@@ -1033,6 +1035,86 @@ below) — never inside the target repo.
    above the approve bar on the Coding tab (pending) and above the chat on
    the QA tab (handed over). Typechecked only; the test
    (`frontend/tests/harness-server/qa-notes.test.ts`) hasn't been run.
+38. User asked for apps to optionally follow Wayfinding Architecture
+   (https://github.com/Rifazi/wayfinding-architecture), per app. `AppConfig.architecture`
+   (`architecture/architecture.ts`: `{ kind: 'wayfinding', srcDir, interfaceFile }`,
+   default `src` / `service.ts`; missing = none) is set on the Apps page (card →
+   Architecture, or the Add-app form) and validated by `parseArchitectureConfig`
+   (paths stay inside the repo). PATCH with `architecture: null` turns it off.
+   - **Setup** (`architecture/setup.ts`): turning it on or changing it writes `MAP.md`
+     (only if missing; it's the team's file from then on) and `docs/wayfinding.md`
+     (Riff's guide, marked by `GUIDE_MARKER`, refreshed but never written over a
+     hand-written file), committed on the base branch like a theme. On any other
+     branch nothing is written and a warning says to use "Set up files"
+     (`POST /api/apps/:id/architecture/setup`). Domains are never scaffolded; agents
+     add them as changes need them.
+   - **Briefing** (`wayfinding-docs.ts` `wayfindingBriefing(role)`): the route,
+     segments, read-first/update-last, ownership changes in their own step, and
+     QA's code-plus-docs review, per role (requirements too). Delivered by
+     `architecture-context.ts` like the theme briefing: first-turn system prompt,
+     or the turn prompt when `session.architectureContextSeen[role]` differs from
+     the app's setting; team members and the compaction handoff get it in their
+     fresh system prompt. Apps without an architecture get nothing (no tokens).
+   - **`audit_architecture`** (`wayfinding-audit.ts`, tools in
+     `tool-defs[-claude]/architecture-audit-tool.ts`; only registered for opted-in
+     apps, with a stub for replayed AI-SDK histories): a port of the reference
+     repo's `example/tools/check.ts`, generalized to any folder and interface file
+     name, JS/TS imports incl. tsconfig/jsconfig `paths`/`baseUrl`, table checks only
+     when TypeORM `@Entity` exists, and folders without a domain reported as
+     "not on the map yet" instead of failing (legacy adoption). On the reference
+     example it reports the same 10 domains / 0 problems, and the same 9 problems
+     after breaking it. Coding and team members may pass `regenerate: true` to
+     rewrite stale Consumers blocks (members only inside their owned paths).
+     Coding and QA also get the branch scope (`git.ts` `branchChanges`): domains
+     touched, files outside any domain, ownership-field edits and added/removed
+     `DOMAIN.md`; problems are split into touched domains vs. elsewhere.
+     `GET /api/apps/:id/architecture/audit` serves the same report to the Apps page.
+   - `read_doc` now also reads `MAP.md` and any `DOMAIN.md` straight from the
+     checkout (by heading too), since requirements and plan have no `read_file`.
+   Tests: `frontend/tests/harness-server/wayfinding-audit.test.ts` (15, run through a
+   node:test shim since bun isn't installed). Live-checked on a scratch server copy:
+   create-with-architecture, setup commit, change → guide refresh, no-op save, off,
+   bad path 400, setup refused on a feature branch. Not run with real agents yet.
+   **New-app onboarding**: adding an app, from the Apps page or from "Add new
+   app…" in any `AppPicker` (New session card, the Requirements dialog), runs one
+   wizard, `components/DevSessions/NewAppOnboarding.tsx`: Repository (validated) →
+   Theme (`ThemeStudio`) → Architecture (`ArchitectureFields`) → Review, then a
+   single `createApp`, with the setup report from `appSetupReport` in
+   `SetupNotices.tsx`. The old inline add forms in `AppPicker` and the Apps page
+   are gone. Typechecked only.
+39. User asked for requirements to be split as far as possible by default,
+   with no artificial cap. `propose_split` lost its `.max(8)`, and its
+   description and the base prompt's step 3 now say to split by default
+   into the smallest independently shippable deliverables (one user-visible
+   outcome per part), writing a single doc only for one indivisible
+   deliverable. The no-layer-cuts and no-useless-slices rules stay. An app
+   whose requirements prompt is overridden still gets this from the tool
+   description.
+
+40. User asked why QA got a branch whose lint and tests had never run
+   (comic-drafter, session `a70d919a`). The repo has separate `server/` and
+   `client/` packages, so no agent could install their dependencies: worktrees
+   only symlink the root `node_modules`, `run_npm_install` only adds new
+   packages, and only the owner of the root `package.json` has it. Every
+   engineer then passed "please run the tests" on to QA as a note.
+   - `run_checked_command` first calls `ensureDependencies`
+     (`repo/dependencies.ts`), which runs `npm install` in every package
+     folder up to two levels deep that has no `node_modules` or whose
+     `package.json` changed since npm last installed (npm workspaces: the
+     root only; a symlinked `node_modules` is left alone; one install per
+     folder at a time). Any install it ran is listed above the check result.
+     The lockfiles it creates are committed by the agent's next `git_commit`.
+     Verified on a fresh clone of that branch: it installed root, `client/` and
+     `server/`, and lint and test:ci passed.
+   - Prompts: a check that can't run is the coder's to fix, not a
+     pre-existing failure, and `note_for_qa` must never ask QA to run the
+     checks (coding prompt, team-member prompt, tool description). Jack's
+     wrap-up turn has to get lint and tests passing and drop stale notes.
+     `note_for_qa` takes `withdraw` (note ids; the lead may drop any
+     author's), and `team_status` lists pending notes with their ids.
+   - `audit_architecture`: when the configured `srcDir` doesn't exist but
+     `DOMAIN.md` files exist elsewhere, it names their folders and says
+     the app's source folder setting is probably wrong.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

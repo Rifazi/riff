@@ -10,12 +10,13 @@ import type { QaTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../../settings/settings-store.js';
 import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
+import { architectureBriefingFor } from '../../architecture/architecture-context.js';
 import { listSessionReferenceDocs, referenceDocsManifest } from '../../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { compressMessages } from '../helpers/compress.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
-import { createReviewTools, REVIEW_TOOL_NAMES } from '../qa-agent.js';
+import { createReviewTools } from '../qa-agent.js';
 import { createSubmitReviewTool } from '../tool-defs/qa-team-tools.js';
 import { qaHandoffSection } from '../tool-defs/qa-notes-tool.js';
 import { createSubmitReviewToolClaude } from '../tool-defs-claude/qa-team-tools.js';
@@ -67,6 +68,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
   const systemPrompt =
     base +
     themeBriefingFor(app.repoRoot, 'qa') +
+    architectureBriefingFor(app, 'qa') +
     repoInstructionsNote(app.repoRoot) +
     `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirements}` +
     brief +
@@ -85,6 +87,8 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
   };
 
   const reviewTools = createReviewTools({
+    app,
+    branch: session.branch,
     appId: app.id,
     sessionId: session.id,
     repoRoot: app.repoRoot,
@@ -99,7 +103,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer: () => createSdkMcpServer({ name: 'harness-tools', version: '1.0.0', tools }),
-      toolNames: [...REVIEW_TOOL_NAMES, 'submit_review'],
+      toolNames: [...reviewTools.names, 'submit_review'],
       model,
       resumeSessionId: null,
       prompt,

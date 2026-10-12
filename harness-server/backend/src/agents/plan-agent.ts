@@ -18,6 +18,9 @@ import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
+import { architectureContextForTurn } from '../architecture/architecture-context.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
@@ -80,6 +83,10 @@ export async function runPlanAgentTurn(
   const themeContext = await themeContextForTurn(session, 'plan', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
+  const architectureContext = await architectureContextForTurn(session, 'plan', app, isFirstTurn);
+  systemPrompt += architectureContext.system;
+  prompt = architectureContext.turnPrefix + prompt;
+  const architectureDeps = { app, repoRoot: app.repoRoot, scope: false, allowRegenerate: false };
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     if (!session.requirementsPath) {
@@ -162,6 +169,7 @@ export async function runPlanAgentTurn(
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'plan')),
           readFileToolClaude,
+          ...architectureToolsClaude(architectureDeps),
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
           createWritePlanToolClaude({
             sessionKey: session.sessionKey,
@@ -177,7 +185,7 @@ export async function runPlanAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: researchDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
+      toolNames: [...TOOL_NAMES, ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
       model,
       resumeSessionId: session.claudeSessionIds.plan,
       prompt,
@@ -205,6 +213,7 @@ export async function runPlanAgentTurn(
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'plan')),
       read_file: readFileTool,
+      ...architectureToolEntry(architectureDeps, session.histories.plan),
       ...delegateToolEntry(researchDeps, session.histories.plan),
       write_plan_doc: createWritePlanTool({
         sessionKey: session.sessionKey,

@@ -11,6 +11,9 @@ import { getPromptOverride } from '../../settings/prompts-store.js';
 import { themeBriefingFor } from '../../themes/theme-context.js';
 import { createAuditThemeTool } from '../tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from '../tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from '../tool-defs-claude/architecture-audit-tool.js';
+import { architectureBriefingFor } from '../../architecture/architecture-context.js';
 import { createClassifyTextTool } from '../helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
@@ -146,6 +149,7 @@ export async function runWorkstreamAgent({
     base +
     (delegateDeps ? DELEGATE_NOTE : '') +
     themeBriefingFor(worktreePath, 'coding') +
+    architectureBriefingFor(app, 'coding') +
     repoInstructionsNote(worktreePath) +
     approvedDocs +
     brief +
@@ -260,6 +264,7 @@ export async function runWorkstreamAgent({
   const scoped = { repoRoot: worktreePath, writablePaths: member.ownedPaths };
   const steps = { sessionId: session.id, stepIds: member.stepIds };
   const qaNoteDeps = { sessionId: session.id, from: member.title };
+  const architectureDeps = { app, repoRoot: worktreePath, scope: true, allowRegenerate: true, writablePaths: member.ownedPaths };
 
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({
@@ -296,6 +301,7 @@ export async function runWorkstreamAgent({
       createUpdateMyStepsToolClaude(steps),
       createNoteForQaToolClaude(qaNoteDeps),
       ...(ownsPackageJson(member) ? [createRunNpmInstallToolClaude({ repoRoot: worktreePath })] : []),
+      ...architectureToolsClaude(architectureDeps),
       ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
     ];
     const toolNames = [
@@ -315,6 +321,7 @@ export async function runWorkstreamAgent({
       'update_my_steps',
       'note_for_qa',
       ...(ownsPackageJson(member) ? ['run_npm_install'] : []),
+      ...architectureToolNames(architectureDeps),
       ...(delegateDeps ? ['delegate'] : []),
     ];
 
@@ -372,6 +379,7 @@ export async function runWorkstreamAgent({
     update_my_steps: createUpdateMyStepsTool(steps),
     note_for_qa: createNoteForQaTool(qaNoteDeps),
     ...(ownsPackageJson(member) ? { run_npm_install: createRunNpmInstallTool({ repoRoot: worktreePath }) } : {}),
+    ...architectureToolEntry(architectureDeps, member.history),
     ...delegateToolEntry(delegateDeps, member.history),
   };
 

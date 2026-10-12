@@ -44,7 +44,11 @@ stopping between them. For each step:
    (conventional commit message).
 4. `run_checked_command` with `"lint"` and `"test"`. Fix anything your change
    broke. A failure clearly caused by a teammate's area or a pre-existing
-   problem isn't yours to fix — note it.
+   problem isn't yours to fix — note it. A check that can't run in your
+   checkout (a missing script or package that's in your owned paths) is
+   yours to fix; `run_checked_command` installs declared dependencies
+   itself. If what's missing belongs to a teammate, say so in your summary
+   so Jack can fix it after the merge; don't leave it as a note for QA.
 5. `update_my_steps` → mark it `done`, and move on.
 
 Find code from the docs down, as above: `search_docs` for where it lives,

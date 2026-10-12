@@ -9,6 +9,9 @@ import { readBasePrompt } from '../agents/prompts.js';
 import { listIntegrations } from '../repo/integrations.js';
 import { assertPathAllowed, PathNotAllowedError } from '../repo/guardrails.js';
 import { applyThemePreset, saveAppTheme, summarizeAppTheme, ThemeApplyError, type ThemeApplyResult } from '../themes/apply-theme.js';
+import { InvalidArchitectureError, parseArchitectureConfig } from '../architecture/architecture.js';
+import { setupArchitecture, type ArchitectureSetupResult } from '../architecture/setup.js';
+import { auditWayfinding, formatWayfindingAudit } from '../architecture/wayfinding-audit.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
@@ -22,7 +25,18 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     docsDir: docsDirFor(app),
     repoUrl: readRepoUrl(app),
     theme: summarizeAppTheme(app.repoRoot),
+    architecture: app.architecture ?? null,
   };
+}
+
+// Like a theme, the app exists by now, so setup that fails is a warning.
+async function runArchitectureSetup(target: Awaited<ReturnType<typeof getApp>>): Promise<ArchitectureSetupResult | undefined> {
+  if (!target.architecture) return undefined;
+  try {
+    return await setupArchitecture(target);
+  } catch (err) {
+    return { actions: [], warnings: [`Couldn't create the Wayfinding files: ${err instanceof Error ? err.message : String(err)}`] };
+  }
 }
 
 export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
@@ -46,14 +60,23 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post<{
-    Body: { name: string; repoRoot: string; checkCommands?: CheckCommands; themeId?: string; theme?: unknown; basedOn?: string | null };
+    Body: {
+      name: string;
+      repoRoot: string;
+      checkCommands?: CheckCommands;
+      themeId?: string;
+      theme?: unknown;
+      basedOn?: string | null;
+      architecture?: unknown;
+    };
   }>('/api/apps', async (request, reply) => {
     const { name, repoRoot, checkCommands, themeId, theme, basedOn } = request.body ?? {};
     if (!name?.trim() || !repoRoot?.trim()) {
       return reply.code(400).send({ error: 'name and repoRoot are required' });
     }
     try {
-      const { app: created, docsInitialized, git } = await createApp({ name, repoRoot, checkCommands });
+      const architecture = parseArchitectureConfig(request.body?.architecture);
+      const { app: created, docsInitialized, git } = await createApp({ name, repoRoot, checkCommands, architecture });
       // The app exists by now, so a theme that can't be applied is reported
       // as a warning rather than failing the whole create.
       let themeResult: Omit<ThemeApplyResult, 'theme'> | undefined;
@@ -65,25 +88,43 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
           themeResult = { actions: [], warnings: [err.message] };
         }
       }
+      const architectureResult = await runArchitectureSetup(created);
       await buildDocsIndex(created);
       watchDocsForChanges(created);
-      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized, git, themeResult });
+      return reply.code(201).send({ ...(await serializeApp(created)), docsInitialized, git, themeResult, architectureResult });
     } catch (err) {
-      if (err instanceof InvalidRepoRootError) return reply.code(400).send({ error: err.message });
+      if (err instanceof InvalidRepoRootError || err instanceof InvalidArchitectureError) {
+        return reply.code(400).send({ error: err.message });
+      }
       throw err;
     }
   });
 
-  app.patch<{ Params: { id: string }; Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands } }>(
+  app.patch<{
+    Params: { id: string };
+    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown };
+  }>(
     '/api/apps/:id',
     async (request, reply) => {
       try {
-        const { app: updated, docsInitialized, git } = await updateApp(request.params.id, request.body ?? {});
+        const { architecture: rawArchitecture, ...rest } = request.body ?? {};
+        // Absent leaves it as it is; null turns it off.
+        const architecture = rawArchitecture === undefined ? undefined : parseArchitectureConfig(rawArchitecture);
+        const before = await getApp(request.params.id);
+        const { app: updated, docsInitialized, git } = await updateApp(request.params.id, { ...rest, architecture });
+        // Setup when it was just turned on or changed (the guide names the
+        // folder and interface file), or the app moved to another repo.
+        const changed =
+          JSON.stringify(before.architecture ?? null) !== JSON.stringify(updated.architecture ?? null) ||
+          before.repoRoot !== updated.repoRoot;
+        const architectureResult = changed ? await runArchitectureSetup(updated) : undefined;
         await buildDocsIndex(updated);
         watchDocsForChanges(updated);
-        return { ...(await serializeApp(updated)), docsInitialized, git };
+        return { ...(await serializeApp(updated)), docsInitialized, git, architectureResult };
       } catch (err) {
-        if (err instanceof InvalidRepoRootError) return reply.code(400).send({ error: err.message });
+        if (err instanceof InvalidRepoRootError || err instanceof InvalidArchitectureError) {
+          return reply.code(400).send({ error: err.message });
+        }
         if (err instanceof Error && err.message.includes('not found')) return reply.code(404).send({ error: err.message });
         throw err;
       }
@@ -100,6 +141,34 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
       if (err instanceof AppInUseError) return reply.code(409).send({ error: err.message });
       throw err;
     }
+  });
+
+  // The same checks and domain list the agents' audit_architecture tool reports.
+  app.get<{ Params: { id: string } }>('/api/apps/:id/architecture/audit', async (request, reply) => {
+    let target;
+    try {
+      target = await getApp(request.params.id);
+    } catch {
+      return reply.code(404).send({ error: 'app not found' });
+    }
+    if (!target.architecture) return reply.code(409).send({ error: `${target.name} doesn't follow an architecture.` });
+    const audit = auditWayfinding(target.repoRoot, target.architecture);
+    return { audit, report: formatWayfindingAudit(audit) };
+  });
+
+  // Creates MAP.md / docs/wayfinding.md if they're missing (e.g. setup was
+  // skipped because a session branch was checked out).
+  app.post<{ Params: { id: string } }>('/api/apps/:id/architecture/setup', async (request, reply) => {
+    let target;
+    try {
+      target = await getApp(request.params.id);
+    } catch {
+      return reply.code(404).send({ error: 'app not found' });
+    }
+    if (!target.architecture) return reply.code(409).send({ error: `${target.name} doesn't follow an architecture.` });
+    const result = await setupArchitecture(target);
+    await buildDocsIndex(target);
+    return result;
   });
 
   // Returns each role's base (checked-in) prompt alongside this app's

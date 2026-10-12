@@ -19,6 +19,9 @@ import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
+import { architectureBriefingFor, architectureContextForTurn } from '../architecture/architecture-context.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
@@ -244,6 +247,10 @@ export async function runCodingAgentTurn(
   const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
+  const architectureContext = await architectureContextForTurn(session, 'coding', app, isFirstTurn);
+  systemPrompt += architectureContext.system;
+  prompt = architectureContext.turnPrefix + prompt;
+  const architectureDeps = { app, repoRoot: app.repoRoot, scope: true, allowRegenerate: true };
   if (isFirstTurn) systemPrompt += await firstTurnSections(session, app.repoRoot, targetStepId);
   if (handoffNote) prompt = `${handoffNote}\n\n---\n\n${prompt}`;
   if (options.qaFix) prompt = `${QA_FIX_TEAM_NOTE}\n\n---\n\n${prompt}`;
@@ -345,6 +352,7 @@ export async function runCodingAgentTurn(
           basePrompt +
           (delegateDeps ? DELEGATE_NOTE : '') +
           themeBriefingFor(app.repoRoot, 'coding') +
+          architectureBriefingFor(app, 'coding') +
           (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
       };
@@ -462,6 +470,7 @@ export async function runCodingAgentTurn(
             createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
+            ...architectureToolsClaude(architectureDeps),
             ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
           ],
         });
@@ -477,6 +486,7 @@ export async function runCodingAgentTurn(
           ...TOOL_NAMES,
           ...(withLeadTools ? TEAM_LEAD_TOOL_NAMES : []),
           ...(withBuildSolo ? ['build_solo'] : []),
+          ...architectureToolNames(architectureDeps),
           ...(delegateDeps ? ['delegate'] : []),
         ],
         model: turnModel,
@@ -547,6 +557,7 @@ export async function runCodingAgentTurn(
         run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
+        ...architectureToolEntry(architectureDeps, session.histories.coding),
         ...delegateToolEntry(delegateDeps, session.histories.coding),
       };
 

@@ -399,6 +399,8 @@ export interface SessionRecord {
   // Which theme (a theme.json fingerprint, or "none") each stage's agent was
   // last briefed on, so a mid-session theme change re-briefs it next turn.
   themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa', string>>;
+  // Likewise for the app's architecture setting (architecture/architecture-context.ts).
+  architectureContextSeen: Partial<Record<'requirements' | 'plan' | 'coding' | 'qa', string>>;
 
   // Human-readable, for the UI's chat panes.
   transcripts: {

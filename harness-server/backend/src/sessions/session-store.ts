@@ -80,6 +80,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.usage ??= { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
   session.themeProposal ??= null;
   session.themeContextSeen ??= {};
+  session.architectureContextSeen ??= {};
   return session;
 }
 
@@ -195,6 +196,7 @@ export async function createSession(input: {
     splitKickoffPending: Boolean(input.splitBrief),
     themeProposal: null,
     themeContextSeen: {},
+    architectureContextSeen: {},
     transcripts: { requirements: [], plan: [], coding: [], qa: [] },
     histories: { requirements: [], plan: [], coding: [], qa: [] },
     claudeSessionIds: { requirements: null, plan: null, coding: null, qa: null },

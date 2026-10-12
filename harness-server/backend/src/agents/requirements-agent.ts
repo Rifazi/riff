@@ -34,6 +34,9 @@ import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-
 import { createProposeSplitToolClaude } from './tool-defs-claude/propose-split-tool.js';
 import { createProposeThemeToolClaude } from './tool-defs-claude/propose-theme-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
+import { architectureContextForTurn } from '../architecture/architecture-context.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
@@ -132,6 +135,11 @@ export async function runRequirementsAgentTurn(
 
   if (researchDeps) systemPrompt += DELEGATE_NOTE;
 
+  const architectureContext = await architectureContextForTurn(session, 'requirements', app, isFirstTurn);
+  systemPrompt += architectureContext.system;
+  prompt = architectureContext.turnPrefix + prompt;
+  const architectureDeps = { app, repoRoot: app.repoRoot, scope: false, allowRegenerate: false };
+
   // Per-turn, so it rides in the prompt rather than systemPrompt (same
   // resume reason as above) — and an app's prompt override can't drop it.
   if (webAccess) prompt = `${WEB_ACCESS_TURN_NOTE}\n\n---\n\n${prompt}`;
@@ -169,6 +177,7 @@ export async function runRequirementsAgentTurn(
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           createClassifyTextToolClaude(stageHelperContext(session.id, 'requirements')),
           createFetchUrlToolClaude({ enabled: webAccess }),
+          ...architectureToolsClaude(architectureDeps),
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
         ],
       });
@@ -176,7 +185,7 @@ export async function runRequirementsAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: researchDeps ? [...TOOL_NAMES, 'delegate'] : TOOL_NAMES,
+      toolNames: [...TOOL_NAMES, ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
       model,
       resumeSessionId: session.claudeSessionIds.requirements,
       prompt,
@@ -206,6 +215,7 @@ export async function runRequirementsAgentTurn(
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       classify_text: createClassifyTextTool(stageHelperContext(session.id, 'requirements')),
       fetch_url: createFetchUrlTool({ enabled: webAccess }),
+      ...architectureToolEntry(architectureDeps, session.histories.requirements),
       ...delegateToolEntry(researchDeps, session.histories.requirements),
     };
 
