@@ -97,7 +97,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
     queryFn: () => api.getQaReport(sessionId),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream({ sessionId, enabled: session.coordinatorEnabled });
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });

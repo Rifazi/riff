@@ -132,9 +132,38 @@ describe('auditWayfinding', () => {
   });
 
   test('a missing source folder is reported, not thrown', () => {
+    rmSync(path.join(repo, 'src'), { recursive: true });
     const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
     expect(audit.srcDirExists).toBe(false);
     expect(formatWayfindingAudit(audit)).toContain("app/ doesn't exist yet");
+  });
+
+  test('a wrong source folder is audited from the one folder that holds every DOMAIN.md', () => {
+    const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
+    expect(audit.inferredSrcDir).toBe('src');
+    expect(audit.domains.map((d) => d.id).sort()).toEqual(['invoice', 'pricing', 'pricing/promotions']);
+    expect(audit.problems).toEqual([]);
+    expect(formatWayfindingAudit(audit)).toContain('set the source folder to src on the Apps page');
+  });
+
+  test('a wrong source folder with domains in several folders is reported, not guessed', () => {
+    write('server/src/projects/DOMAIN.md', domainDoc('projects'));
+    const audit = auditWayfinding(repo, { ...CONFIG, srcDir: 'app' });
+    expect(audit.inferredSrcDir).toBeUndefined();
+    expect(audit.srcDirCandidates).toEqual(['server/src', 'src']);
+    expect(formatWayfindingAudit(audit)).toContain('probably wrong');
+  });
+
+  test('Owns data matches tables written as code', () => {
+    write('src/invoice/DOMAIN.md', domainDoc('invoice').replace('Owns data: none', 'Owns data: `invoice_headers`, `invoice_lines`'));
+    write('src/invoice/entities.ts', "@Entity('invoice_headers')\nclass A {}\n@Entity({ name: 'invoice_lines' })\nclass B {}\n");
+    expect(messages()).toEqual([]);
+  });
+
+  test('a Consumers block reformatted with blank lines is not stale', () => {
+    const doc = readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8');
+    write('src/pricing/DOMAIN.md', doc.replace('<!-- generated: do not edit -->\n- invoice\n', '<!-- generated: do not edit -->\n\n- invoice\n\n'));
+    expect(messages()).toEqual([]);
   });
 });
 
@@ -148,6 +177,13 @@ describe('parsing', () => {
   test('map rows skip the header, separator and placeholders', () => {
     expect(parseMapRows('| Domain | Owns |\n| --- | --- |\n| `pricing` | prices |\n<!-- | <domain> | x | -->\n')).toEqual([
       { name: 'pricing', owns: 'prices' },
+    ]);
+  });
+
+  test('map rows accept a domain name linked to its DOMAIN.md', () => {
+    expect(parseMapRows('| Domain | Owns |\n| --- | --- |\n| [pricing](src/pricing/DOMAIN.md) | prices |\n| [`invoice`](x) | layout |\n')).toEqual([
+      { name: 'pricing', owns: 'prices' },
+      { name: 'invoice', owns: 'layout' },
     ]);
   });
 

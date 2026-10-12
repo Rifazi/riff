@@ -11,9 +11,9 @@ the full lifecycle on one of this harness's configured **apps** (a repo
 checkout registered via the Apps page — [Customer-EDI](../Customer-EDI) was
 the original and remains the default/legacy one, but the harness is no
 longer hardcoded to it; see step 7 below), grounded in that repo's
-`docs/*.md`. Every stage has an explicit human approval gate
-(Approve/Reject); no agent can push, merge, open an MR, or approve its own
-work.
+`docs/*.md`. Every stage has an explicit approval gate (Approve/Reject),
+which the coordinator can pass for the human under auto-drive (step 41); no
+agent can push, merge, open an MR, or approve its own work.
 
 It lives here, next to Customer-EDI, not inside it — originally it was
 built as a `harness/` subfolder of Customer-EDI itself, then moved out to
@@ -99,7 +99,7 @@ below) — never inside the target repo.
    `agents/coordinator-agent.ts`) — a tool-less decision-maker that
    auto-drives a stage's conversation forward and hands off to the next
    stage after a human approval, but never approves/rejects anything
-   itself. `config.ts`'s `requirementsDir`/`plansDir`/`qaReportsDir` now
+   itself (until step 41). `config.ts`'s `requirementsDir`/`plansDir`/`qaReportsDir` now
    point at `<harnessRoot>/artifacts/*` instead of
    `<repoRoot>/harness/*`; `session.requirementsPath`/`planPath`/
    `qaReportPath` are now **harnessRoot-relative**, not repoRoot-relative —
@@ -1115,6 +1115,49 @@ below) — never inside the target repo.
    - `audit_architecture`: when the configured `srcDir` doesn't exist but
      `DOMAIN.md` files exist elsewhere, it names their folders and says
      the app's source folder setting is probably wrong.
+
+41. User asked for auto-drive to stop asking them to approve every stage.
+   The coordinator (step 6) now approves a stage itself when it's finished,
+   and the next stage's tab starts its own run.
+   - Decisions are `continue` / `ready` / `blocked`
+     (`agents/coordinator-agent.ts`). `ready` approves the stage, so
+     anything waiting on a human (a question, a confirmation, credentials)
+     is `blocked`, and so is a reply that can't be parsed. A pending
+     question, theme or split proposal still stops the run before the model
+     is asked.
+   - `approveStage` in `routes/coordinator.ts` calls the stage's own approve
+     route through `app.inject`, so every check it makes still applies: a
+     doc on disk, a split part's unshipped dependencies (409 → stop), a
+     branch. A system entry in the stage's transcript records it.
+   - Coding: `ready` with plan steps left sends "Continue with the next
+     step." unless the last such nudge didn't finish a step. A finished team
+     round is approved when every step is done (the Coding tab re-runs the
+     coordinator when the team finishes); a round that needs attention stops.
+   - QA: a `pass` or `pass-with-notes` report is approved (stage `done`); a
+     `fail` is sent back to coding through `/qa/send-back`, at most 3 times
+     (`session.coordinatorQaSendBacks`, reset when auto-drive is turned
+     on), then it stops.
+   - Frontend: `useAgentTurnStream` re-runs the coordinator after any turn
+     that ends cleanly under auto-drive (relayed QA fixes, the QA team's
+     wrap-up, a human answering a question), and the session page follows
+     the session to its next stage unless the human is viewing another one.
+   - Still human-only: rejecting, accepting a split or theme, and delivery.
+
+42. User asked whether Wayfinding saves tokens. comic-drafter (the only
+   opted-in app) was onboarded empty with the default `srcDir: src`, then
+   scaffolded into `server/` + `client/`, so every `audit_architecture`
+   call returned "src/ doesn't exist" and agents wrote "known gap" notes
+   into MAP.md/DOMAIN.md instead. Only agents saw the warning.
+   - When `srcDir` is missing and every `DOMAIN.md` sits under one folder,
+     the audit now audits that folder (`inferredSrcDir`) and tells the
+     agent to ask the human to change the setting. With several candidate
+     folders it still only reports them. The Apps page's "Run checks" shows a
+     "Use <folder>/" button per candidate.
+   - Parsing fixes: `Owns data` entries in backticks, MAP.md domain names
+     written as `[name](path/DOMAIN.md)` links, and Consumers blocks that
+     prettier padded with blank lines no longer fail.
+   Tests: 5 new cases in `wayfinding-audit.test.ts` (20 total, run through a
+   node:test shim). comic-drafter set to `server/src`, now 0 problems.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

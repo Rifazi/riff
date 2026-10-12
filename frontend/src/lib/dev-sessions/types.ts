@@ -109,6 +109,10 @@ export interface ArchitectureAudit {
     mapExists: boolean;
     domains: { id: string }[];
     problems: { kind: string; file: string; message: string }[];
+    // Folders holding DOMAIN.md files when srcDir doesn't exist; with exactly
+    // one, it was audited in srcDir's place (inferredSrcDir).
+    srcDirCandidates?: string[];
+    inferredSrcDir?: string;
   };
   report: string;
 }
@@ -493,7 +497,7 @@ export type AgentEvent =
   | { type: 'tool_result'; toolCallId: string; content: unknown; isError: boolean }
   | { type: 'done'; text: string; isError: boolean }
   | { type: 'error'; message: string }
-  | { type: 'coordinator_decision'; action: 'continue' | 'ready'; reason: string }
+  | { type: 'coordinator_decision'; action: 'continue' | 'ready' | 'blocked' | 'approved'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
   | { type: 'usage'; usage: TokenUsage };

@@ -354,10 +354,13 @@ export interface SessionRecord {
 
   // Opt-in, per-session: when true, an SSE run against
   // /coordinator/run drives a stage's conversation forward automatically
-  // (composing follow-up messages, deciding when a stage looks ready) and
-  // auto-starts the next stage after a human approval. It never approves
-  // or rejects anything itself. Off by default.
+  // (composing follow-up messages, deciding when a stage is finished),
+  // approves each finished stage itself and starts the next one. It stops
+  // for a human whenever an agent waits on one. Off by default.
   coordinatorEnabled: boolean;
+  // How many failed QA reports the coordinator has sent back to coding since
+  // it was last turned on. It stops for a human at MAX_QA_SEND_BACKS.
+  coordinatorQaSendBacks: number;
 
   // Set once, permanently, by coding/send-back-to-requirements — this
   // session's requirements/plan were revised after coding had already

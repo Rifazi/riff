@@ -9,7 +9,9 @@ import { COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
 /**
  * Per-session opt-in toggle for the coordinator — off by default. Turning it
  * on doesn't do anything by itself; each stage auto-starts a
- * /coordinator/run when it mounts with an empty transcript and this flag on.
+ * /coordinator/run when it mounts with an empty transcript and this flag on,
+ * and again after any turn that ends. The coordinator approves each stage
+ * once it's finished; shipping the branch stays a human click.
  */
 export function CoordinatorControl({ session, streaming }: { session: SessionRecord; streaming: boolean }) {
   const queryClient = useQueryClient();
@@ -39,7 +41,7 @@ export function CoordinatorControl({ session, streaming }: { session: SessionRec
         {streaming && enabled
           ? `— ${COORDINATOR_PERSONA.name} is driving this stage…`
           : enabled
-            ? '— you still approve every stage'
+            ? '— approves each stage when it\'s done'
             : '— you drive every message'}
       </span>
     </label>

@@ -7,24 +7,27 @@ import { resolveLanguageModel, runClaudeSingleShot } from './sdk-client.js';
 import { generateLocal } from './local-llm.js';
 
 export interface CoordinatorDecision {
-  action: 'continue' | 'ready';
+  // ready: the stage's work is finished, so the coordinator approves it.
+  // blocked: the agent is waiting on something only a human can give.
+  action: 'continue' | 'ready' | 'blocked';
   message?: string;
   reason: string;
 }
 
-// Deliberately tool-less: the coordinator only ever decides "keep going" or
-// "stop for a human" — it never writes a file, runs a command, or (most
-// importantly) approves/rejects anything itself. Every actual approval
-// stays a human click, same rule as everywhere else in this app.
-export const DECISION_INSTRUCTIONS = `You are a lightweight coordinator supervising one stage of a multi-stage AI development pipeline (requirements -> plan -> coding -> QA) for a target repo. You do not write files, run commands, or approve anything yourself — you only decide, given the conversation so far, whether the stage's own agent should be sent another message to keep working, or whether the work looks ready for a human to review and approve.
+// Deliberately tool-less: the coordinator only ever decides "keep going",
+// "this stage is finished" or "stop for a human". It never writes a file or
+// runs a command. A "ready" is what lets routes/coordinator.ts approve the
+// stage, so anything waiting on a human has to come back as "blocked".
+export const DECISION_INSTRUCTIONS = `You are a lightweight coordinator supervising one stage of a multi-stage AI development pipeline (requirements -> plan -> coding -> QA) for a target repo. You do not write files or run commands yourself — you only decide, given the conversation so far, whether the stage's own agent should be sent another message to keep working, whether the stage's work is finished (it will then be approved automatically and the next stage starts), or whether it needs a human.
 
 Respond with ONLY a single JSON object, no other text, matching exactly one of these shapes:
 {"action": "continue", "message": "<the next message to send the agent>", "reason": "<one sentence, why continue>"}
-{"action": "ready", "reason": "<one sentence, why this looks ready for human review>"}
+{"action": "ready", "reason": "<one sentence, why this stage's work is finished>"}
+{"action": "blocked", "reason": "<one sentence, what the human needs to do>"}
 
-Always "ready" when the agent's last message is waiting on the human: it asks them a question, asks them to confirm, choose or review something, or says it is blocked on something only a human can do (credentials, a dirty repo, a decision). Never answer on the human's behalf.
+Always "blocked" when the agent's last message is waiting on the human: it asks them a question, asks them to confirm, choose or review something, or says it is blocked on something only a human can do (credentials, a dirty repo, a decision). Never answer on the human's behalf.
 
-Prefer "ready" once the agent has produced a document/diff and stopped to summarize rather than looping it indefinitely — the point is to save the human typing "continue" a few times, not to run unattended forever.
+"ready" only when the agent has produced the stage's document, diff or report, says it is complete, and has nothing left it means to do. Since "ready" approves the stage, say "blocked" if you have any doubt.
 
 "continue" only when the agent has said what it will do next and nothing it needs is missing.`;
 
@@ -99,11 +102,11 @@ export function flattenTranscript(entries: TranscriptEntry[]): string {
   return kept.join('\n');
 }
 
-function parseDecision(raw: string): CoordinatorDecision {
+export function parseDecision(raw: string): CoordinatorDecision {
   return (
     tryParseDecision(raw) ?? {
-      // Never loop on something we can't parse — stop and let a human look.
-      action: 'ready',
+      // Never loop on, or approve, something we can't parse — stop and let a human look.
+      action: 'blocked',
       reason: "Could not parse a decision from the coordinator's response — stopping for a human to review.",
     }
   );
@@ -116,8 +119,8 @@ function tryParseDecision(raw: string): CoordinatorDecision | null {
     if (parsed.action === 'continue' && typeof parsed.message === 'string' && parsed.message.trim()) {
       return { action: 'continue', message: parsed.message, reason: String(parsed.reason ?? '') };
     }
-    if (parsed.action === 'ready') {
-      return { action: 'ready', reason: String(parsed.reason ?? '') };
+    if (parsed.action === 'ready' || parsed.action === 'blocked') {
+      return { action: parsed.action, reason: String(parsed.reason ?? '') };
     }
   } catch {
     // unparseable
@@ -135,7 +138,7 @@ export async function decideNextAction(params: {
   const { provider, model } = coordinatorConfig;
   const override = await getPromptOverride(appId, 'coordinator');
   const systemPrompt = override ?? DECISION_INSTRUCTIONS;
-  const prompt = `Stage: ${stageLabel}\n\nConversation so far:\n${transcriptText || '(nothing yet)'}\n\nDecide: continue or ready?`;
+  const prompt = `Stage: ${stageLabel}\n\nConversation so far:\n${transcriptText || '(nothing yet)'}\n\nDecide: continue, ready or blocked?`;
 
   // Riff's built-in local model first — free, and on the decision set in
   // CLAUDE.md step 12 it matched Haiku, with its misses all on the safe side
@@ -157,7 +160,7 @@ export async function decideNextAction(params: {
   } else {
     const apiKey = await getApiKey(provider);
     if (apiKey === null) {
-      return { action: 'ready', reason: `No API key configured for ${provider} — stopping for a human to review.` };
+      return { action: 'blocked', reason: `No API key configured for ${provider} — stopping for a human to review.` };
     }
     const languageModel = await resolveLanguageModel(provider as ApiKeyProvider, model, apiKey);
     const { text } = await generateText({ model: languageModel, system: systemPrompt, prompt });

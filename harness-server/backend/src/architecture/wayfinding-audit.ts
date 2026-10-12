@@ -47,6 +47,9 @@ export interface WayfindingAudit {
   // Only when srcDir doesn't exist: folders elsewhere that hold domains, i.e.
   // the app's source folder setting probably points at the wrong place.
   srcDirCandidates?: string[];
+  // Set when there is exactly one candidate: it is audited in srcDir's place,
+  // so a wrong setting doesn't switch the checks off.
+  inferredSrcDir?: string;
 }
 
 interface Domain {
@@ -120,7 +123,7 @@ function listOf(value: string | undefined): string[] {
   if (!value || /^none\b/i.test(value)) return [];
   return value
     .split(',')
-    .map((s) => s.trim().split(/\s/)[0])
+    .map((s) => s.trim().replace(/`/g, '').split(/\s/)[0])
     .filter(Boolean);
 }
 
@@ -320,6 +323,9 @@ function discoverDomains(srcRoot: string, repoRoot: string): { domains: Domain[]
   return { domains, offMap };
 }
 
+// Markdown formatters (run_prettier) put blank lines around the list.
+const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
+
 function consumersBlock(consumers: string[]): string {
   return `<!-- generated: do not edit -->\n${consumers.length ? `- ${consumers.join(', ')}\n` : '- none\n'}<!-- end generated -->`;
 }
@@ -334,7 +340,7 @@ export function auditWayfinding(
   config: WayfindingConfig,
   opts: { regenerate?: boolean | ((docPath: string) => boolean) } = {}
 ): WayfindingAudit {
-  const srcRoot = path.resolve(repoRoot, config.srcDir);
+  let srcRoot = path.resolve(repoRoot, config.srcDir);
   const mapFile = path.join(repoRoot, MAP_PATH);
   const audit: WayfindingAudit = {
     srcDir: config.srcDir,
@@ -351,9 +357,12 @@ export function auditWayfinding(
     const candidates = walkFiles(repoRoot)
       .filter((f) => path.basename(f) === DOMAIN_DOC)
       .map((f) => path.relative(repoRoot, path.dirname(path.dirname(f))).split(path.sep).join('/'))
-      .filter((dir) => dir && dir !== '.');
+      // A child domain's grandparent is its parent domain, not a source folder.
+      .filter((dir) => dir && dir !== '.' && !existsSync(path.join(repoRoot, dir, DOMAIN_DOC)));
     if (candidates.length) audit.srcDirCandidates = [...new Set(candidates)].sort();
-    return audit;
+    if (audit.srcDirCandidates?.length !== 1) return audit;
+    audit.inferredSrcDir = audit.srcDirCandidates[0];
+    srcRoot = path.resolve(repoRoot, audit.inferredSrcDir);
   }
 
   const { domains, offMap } = discoverDomains(srcRoot, repoRoot);
@@ -522,7 +531,7 @@ export function auditWayfinding(
       } else {
         fail('docs', here, d, 'missing the generated Consumers block');
       }
-    } else if (block[0] !== expected) {
+    } else if (withoutBlankLines(block[0]) !== withoutBlankLines(expected)) {
       if (regenerate) {
         doc = doc.replace(GENERATED_BLOCK, expected);
         writeFileSync(path.join(d.dir, DOMAIN_DOC), doc);
@@ -572,8 +581,9 @@ export function auditWayfinding(
 export function parseMapRows(map: string): { name: string; owns: string }[] {
   // Only the first table: the domain index. Later sections hold other lists.
   const body = map.replace(/<!--[\s\S]*?-->/g, '');
-  return [...body.matchAll(/^\|\s*`?([\w./-]+)`?\s*\|\s*([^|]*)\|/gm)]
-    .map((m) => ({ name: m[1], owns: m[2].trim() }))
+  // The name may be plain, `code`, or a link to its DOMAIN.md: [name](path).
+  return [...body.matchAll(/^\|\s*(?:\[\s*`?([\w./-]+)`?\s*\]\([^)]*\)|`?([\w./-]+)`?)\s*\|\s*([^|]*)\|/gm)]
+    .map((m) => ({ name: m[1] ?? m[2], owns: m[3].trim() }))
     .filter((r) => r.name.toLowerCase() !== 'domain' && /[a-z]/i.test(r.name) && !/^-+$/.test(r.name));
 }
 
@@ -646,8 +656,14 @@ function sectionDiff(chunk: string, title: string): string {
 const MAX_LISTED = 40;
 
 export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScope | null): string {
-  const lines: string[] = [`Wayfinding audit: domains under ${audit.srcDir}/, public interface ${audit.interfaceFile}`];
-  if (!audit.srcDirExists) {
+  const srcDir = audit.inferredSrcDir ?? audit.srcDir;
+  const lines: string[] = [`Wayfinding audit: domains under ${srcDir}/, public interface ${audit.interfaceFile}`];
+  if (audit.inferredSrcDir) {
+    lines.push(
+      `The app's source folder setting is ${audit.srcDir}/, which doesn't exist; every ${DOMAIN_DOC} is under ${srcDir}/, ` +
+        `so that folder was audited instead. Tell the human to set the source folder to ${srcDir} on the Apps page (Architecture).`
+    );
+  } else if (!audit.srcDirExists) {
     if (audit.srcDirCandidates?.length) {
       lines.push(
         `${audit.srcDir}/ doesn't exist, but there are ${DOMAIN_DOC} files under ${audit.srcDirCandidates.map((d) => `${d}/`).join(', ')}. ` +
@@ -666,7 +682,7 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
   lines.push(
     audit.domains.length
       ? `${audit.domains.length} domain(s)${children ? `, ${children} of them child domains` : ''}${junctions ? `, ${junctions} junction(s)` : ''}. ${MAP_PATH}: ${audit.mapExists ? 'present' : 'missing'}.`
-      : `No domains yet (no ${DOMAIN_DOC} under ${audit.srcDir}/). ${MAP_PATH}: ${audit.mapExists ? 'present' : 'missing'}. ` +
+      : `No domains yet (no ${DOMAIN_DOC} under ${srcDir}/). ${MAP_PATH}: ${audit.mapExists ? 'present' : 'missing'}. ` +
           `A decision gets a domain when a second place needs it; start with the ones this work changes.`
   );
   if (audit.domains.length) {

@@ -36,7 +36,7 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     queryFn: () => api.getRequirementsDoc(sessionId),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream({ sessionId, enabled: session.coordinatorEnabled });
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });

@@ -99,7 +99,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     enabled: Boolean(session.branch),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream({ sessionId, enabled: session.coordinatorEnabled });
   const [autoRun, setAutoRun] = useState(false);
   // Why auto-run last stopped on its own, shown until it's restarted.
   const [autoRunStopped, setAutoRunStopped] = useState<string | null>(null);
@@ -164,6 +164,17 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     void runCoordinator(sessionId, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.coordinatorEnabled, session.transcripts.coding.length, streaming]);
+
+  // A finished team round goes back to the coordinator, which approves the
+  // merged diff once every step is done.
+  useEffect(() => {
+    if (!session.coordinatorEnabled || !teamFinished || streaming || codingTeam?.status !== 'done') return;
+    const key = `${sessionId}:teamCoordinator:${codingTeam.round}:${codingTeam.finishedAt ?? ''}`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
+    void runCoordinator(sessionId, refresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.coordinatorEnabled, teamFinished, streaming, codingTeam?.status, codingTeam?.round, codingTeam?.finishedAt]);
 
   // stepTurn: an automatic "do the next checklist step" message (kickoff,
   // Continue, auto-run) — the only kind the server may route to the light

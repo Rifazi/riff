@@ -1,6 +1,10 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import matter from 'gray-matter';
 import { startEventStream } from './sse.js';
-import { getSession, updateSession } from '../sessions/session-store.js';
+import { config } from '../config.js';
+import { appendTranscriptEntry, getSession, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor, type StageGroup } from '../sessions/stage-group.js';
 import type { SessionRecord, TranscriptEntry } from '../sessions/session.js';
 import { decideNextAction, flattenTranscript, hasUnansweredQuestion } from '../agents/coordinator-agent.js';
@@ -16,6 +20,9 @@ import { isQaTeamRunning } from '../agents/team/qa-team.js';
 // always stops and hands back to a human rather than looping forever.
 const MAX_ITERATIONS = 15;
 
+// A branch QA keeps failing needs a human, not another fix pass.
+const MAX_QA_SEND_BACKS = 3;
+
 // The message that kicks off a stage's very first turn when the coordinator
 // finds it with an empty transcript. QA's already exists client-side today
 // in QaStage.tsx's own useEffect (unconditional, coordinator or not) —
@@ -26,6 +33,9 @@ const KICKOFF_MESSAGE: Partial<Record<StageGroup, string>> = {
   coding: 'Please implement the approved plan.',
   qa: 'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.',
 };
+
+// Keep in sync with CONTINUE_MESSAGE in CodingStage.tsx.
+const CODING_CONTINUE_MESSAGE = 'Continue with the next step.';
 
 // Keep in sync with QA_RERUN_MESSAGE in QaStage.tsx.
 const QA_RERUN_MESSAGE =
@@ -44,21 +54,85 @@ function transcriptFor(session: SessionRecord, group: StageGroup): TranscriptEnt
   return session.transcripts[group];
 }
 
+function stepsDone(session: SessionRecord): number {
+  return (session.codingPlan ?? []).filter((s) => s.status === 'done').length;
+}
+
+function allStepsDone(session: SessionRecord): boolean {
+  return (session.codingPlan ?? []).every((s) => s.status === 'done');
+}
+
+const STAGE_NAME: Record<StageGroup, string> = {
+  requirements: 'the requirements',
+  plan: 'the plan',
+  coding: 'the diff',
+  qa: 'the QA report',
+};
+
+type StageOutcome = { approved: true; reason: string } | { approved: false; reason: string };
+
+/**
+ * Approves a finished stage the way the human's button would: through the
+ * stage's own approve route, so every check it makes (a doc on disk, a
+ * split part's dependencies, a branch) still applies. A failing QA report is
+ * sent back to coding instead, as the human would.
+ */
+async function approveStage(app: FastifyInstance, session: SessionRecord, group: StageGroup, why: string): Promise<StageOutcome> {
+  let url = `/api/sessions/${session.id}/${group}/approve`;
+  let note = `Approved ${STAGE_NAME[group]}: ${why}`;
+
+  if (group === 'qa') {
+    if (!session.qaReportPath) return { approved: false, reason: 'QA has not written a report yet.' };
+    let result: unknown;
+    try {
+      result = matter(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8')).data.result;
+    } catch {
+      return { approved: false, reason: `Could not read ${session.qaReportPath}.` };
+    }
+    if (result === 'fail') {
+      if (session.coordinatorQaSendBacks >= MAX_QA_SEND_BACKS) {
+        return { approved: false, reason: `QA has failed this branch ${MAX_QA_SEND_BACKS} times — over to you.` };
+      }
+      url = `/api/sessions/${session.id}/qa/send-back`;
+      note = 'QA failed this branch — sent it back to coding for fixes.';
+    } else if (result !== 'pass' && result !== 'pass-with-notes') {
+      return { approved: false, reason: `The QA report has no result I recognise (${String(result)}).` };
+    }
+  }
+
+  const res = await app.inject({ method: 'POST', url, payload: {} });
+  if (res.statusCode !== 200) {
+    let error = res.body;
+    try {
+      error = (JSON.parse(res.body) as { error?: string }).error ?? res.body;
+    } catch {
+      // not JSON
+    }
+    return { approved: false, reason: `Could not approve ${STAGE_NAME[group]}: ${error}` };
+  }
+  if (url.endsWith('/qa/send-back')) {
+    await updateSession(session.id, { coordinatorQaSendBacks: session.coordinatorQaSendBacks + 1 });
+  }
+  await appendTranscriptEntry(session.id, group, { role: 'system', text: `Coordinator: ${note}` });
+  return { approved: true, reason: note };
+}
+
 export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/sessions/:id/coordinator/toggle', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     const { enabled } = request.body ?? {};
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) is required' });
-    return updateSession(session.id, { coordinatorEnabled: enabled });
+    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorQaSendBacks: 0 } : {}) });
   });
 
   // SSE, same framing as the per-stage /message endpoints — drives the
   // current stage's own agent forward automatically (composing the
-  // follow-up messages, deciding when it looks ready) without ever
-  // approving/rejecting anything itself. Stops at MAX_ITERATIONS, when
-  // coordinatorEnabled is turned off mid-run, or when the decision function
-  // says "ready".
+  // follow-up messages, deciding when it's finished) and approves the stage
+  // once it is. One run covers one stage: the run ends after an approval and
+  // the next stage's tab starts its own. Stops at MAX_ITERATIONS, when
+  // coordinatorEnabled is turned off mid-run, or whenever a human is needed.
+  // Never rejects, and never ships: delivery stays a human click.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coordinator/run', async (request, reply) => {
     const sessionId = request.params.id;
     const initial = await getSession(sessionId);
@@ -70,26 +144,30 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
+    // How many plan steps were done when the coordinator last told coding to
+    // move on to the next one.
+    let nudgedAtDone: number | null = null;
+
     try {
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         const session = await getSession(sessionId);
         if (!session) break;
         if (!session.coordinatorEnabled) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Coordinator was turned off.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'Coordinator was turned off.' });
           break;
         }
 
-        if (session.stage === 'split' || session.stage === 'abandoned') {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
+        if (session.stage === 'split' || session.stage === 'abandoned' || session.stage === 'done') {
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'This session is closed — nothing to drive.' });
           break;
         }
         if (session.themeProposal) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to apply or dismiss the proposed theme.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'Waiting for the human to apply or dismiss the proposed theme.' });
           break;
         }
         if (session.splitProposal) {
           // Only a human can accept or dismiss a split.
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to accept or dismiss the proposed split.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'Waiting for the human to accept or dismiss the proposed split.' });
           break;
         }
 
@@ -97,16 +175,21 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
         const transcript = transcriptFor(session, group);
 
         // The team drives itself from the Coding tab once the lead has
-        // split the work; the coordinator only takes over follow-ups with
-        // the lead after a human has looked at what the team merged.
+        // split the work; the Coding tab runs the coordinator again when it
+        // finishes, to approve what the team merged.
         const team = session.codingTeam;
         if (group === 'coding' && (isTeamRunning(session.id) || team?.status === 'assigned' || team?.status === 'running')) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team runs on its own — start or watch it on the Coding tab.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'The coding team runs on its own — start or watch it on the Coding tab.' });
           break;
         }
         const lastEntryAt = transcript[transcript.length - 1]?.timestamp;
         if (group === 'coding' && team?.finishedAt && (!lastEntryAt || lastEntryAt < team.finishedAt)) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The coding team has finished — review the merged diff.' });
+          if (team.status !== 'done' || !allStepsDone(session)) {
+            send({ type: 'coordinator_decision', action: 'blocked', reason: 'The coding team stopped with work left — over to you on the Coding tab.' });
+            break;
+          }
+          const outcome = await approveStage(app, session, group, 'the coding team finished every step.');
+          send({ type: 'coordinator_decision', action: outcome.approved ? 'approved' : 'blocked', reason: outcome.reason });
           break;
         }
 
@@ -118,7 +201,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           !session.qaRerunPending &&
           (isQaTeamRunning(session.id) || qaTeam?.status === 'assigned' || qaTeam?.status === 'running')
         ) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'The QA team runs on its own — start or watch it on the QA tab.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'The QA team runs on its own — start or watch it on the QA tab.' });
           break;
         }
 
@@ -130,7 +213,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           if (!kickoff) {
             // requirements: nothing to continue from — the coordinator
             // can't invent a feature request out of nothing.
-            send({ type: 'coordinator_decision', action: 'ready', reason: 'Describe the feature you want built first.' });
+            send({ type: 'coordinator_decision', action: 'blocked', reason: 'Describe the feature you want built first.' });
             break;
           }
           message = kickoff;
@@ -140,7 +223,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
           // "[called ask_multiple_choice]"), so it has no way to tell this
           // apart from "stalled, safe to nudge" and would just compose a
           // pointless check-in message instead of truly waiting.
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Waiting for the human to answer a pending question.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'Waiting for the human to answer a pending question.' });
           break;
         } else {
           const decision = await decideNextAction({
@@ -148,9 +231,26 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
             transcriptText: flattenTranscript(transcript),
             appId: session.appId,
           });
-          send({ type: 'coordinator_decision', action: decision.action, reason: decision.reason });
-          if (decision.action === 'ready' || !decision.message) break;
-          message = decision.message;
+          if (decision.action === 'ready' && group === 'coding' && !allStepsDone(session)) {
+            // A finished step isn't a finished stage: move on to the next
+            // one, unless the last nudge got nowhere.
+            if (nudgedAtDone === stepsDone(session)) {
+              send({ type: 'coordinator_decision', action: 'blocked', reason: 'The last step made no progress — over to you.' });
+              break;
+            }
+            nudgedAtDone = stepsDone(session);
+            send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
+            message = CODING_CONTINUE_MESSAGE;
+          } else if (decision.action === 'ready') {
+            send({ type: 'coordinator_decision', action: 'ready', reason: decision.reason });
+            const outcome = await approveStage(app, session, group, decision.reason);
+            send({ type: 'coordinator_decision', action: outcome.approved ? 'approved' : 'blocked', reason: outcome.reason });
+            break;
+          } else {
+            send({ type: 'coordinator_decision', action: decision.action, reason: decision.reason });
+            if (decision.action !== 'continue' || !decision.message) break;
+            message = decision.message;
+          }
         }
 
         try {
@@ -161,7 +261,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
         }
 
         if (i === MAX_ITERATIONS - 1) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Hit the auto-continue limit — stopping for a human to review.' });
+          send({ type: 'coordinator_decision', action: 'blocked', reason: 'Hit the auto-continue limit — stopping for a human to review.' });
         }
       }
     } finally {

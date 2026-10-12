@@ -129,7 +129,7 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
     return { markdown: fileContents };
   });
 
-  // Human-only approval gate. No agent tool can reach this.
+  // Approval gate: the human, or the coordinator under auto-drive. No agent tool can reach this.
   app.post<{ Params: { id: string }; Body: { ignoreDependencies?: boolean } }>('/api/sessions/:id/plan/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });

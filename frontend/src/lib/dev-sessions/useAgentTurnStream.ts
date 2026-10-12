@@ -14,6 +14,13 @@ export interface TurnOutcome {
   lastDone: { text: string; isError: boolean } | null;
 }
 
+const COORDINATOR_ACTION_TEXT = {
+  continue: 'continuing',
+  ready: 'stage finished',
+  approved: 'approved',
+  blocked: 'over to you',
+} as const;
+
 let overlaySeq = 0;
 function nextId() {
   overlaySeq += 1;
@@ -29,7 +36,10 @@ function nextId() {
  * it's a UI nicety assuming roughly sequential tool calls, not a precise
  * per-call correlation.
  */
-export function useAgentTurnStream() {
+export function useAgentTurnStream(autoDrive?: { sessionId: string; enabled: boolean }) {
+  // Read when a turn ends, so it's whatever the session says by then.
+  const autoDriveRef = useRef(autoDrive);
+  autoDriveRef.current = autoDrive;
   const [overlay, setOverlay] = useState<TranscriptEntry[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [runningTool, setRunningTool] = useState<string | null>(null);
@@ -80,7 +90,7 @@ export function useAgentTurnStream() {
         {
           id: nextId(),
           role: 'system',
-          text: `Coordinator: ${event.action === 'continue' ? 'continuing' : 'ready for review'} — ${event.reason}`,
+          text: `Coordinator: ${COORDINATOR_ACTION_TEXT[event.action]} — ${event.reason}`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -146,6 +156,13 @@ export function useAgentTurnStream() {
         if (attachments?.length) void queryClient.invalidateQueries({ queryKey: ['reference-docs'] });
         onDone();
       }
+    }
+    // Under auto-drive, any turn that finished cleanly (a relayed QA fix, the
+    // QA team's wrap-up, the human answering a question) hands the stage back
+    // to the coordinator, which carries on and approves it once it's done.
+    const drive = autoDriveRef.current;
+    if (drive?.enabled && !ctrl.signal.aborted && outcome.lastDone && !outcome.lastDone.isError && !outcome.error) {
+      void runCoordinator(drive.sessionId, onDone);
     }
     return outcome;
   };

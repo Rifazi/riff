@@ -88,8 +88,11 @@ export function ArchitectureFields({
   );
 }
 
-/** Run the checks the agents run, or create the starting files, for a saved app. */
-export function ArchitectureTools({ appId }: { appId: string }) {
+/**
+ * Run the checks the agents run, or create the starting files, for a saved app.
+ * `onUseSrcDir` switches the (unsaved) source folder to one the checks found.
+ */
+export function ArchitectureTools({ appId, onUseSrcDir }: { appId: string; onUseSrcDir: (srcDir: string) => void }) {
   const [audit, setAudit] = useState<ArchitectureAudit | null>(null);
   const [setupReport, setSetupReport] = useState<SetupReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +115,7 @@ export function ArchitectureTools({ appId }: { appId: string }) {
   });
 
   const problems = audit?.audit.problems.length ?? 0;
+  const candidates = audit && !audit.audit.srcDirExists ? (audit.audit.srcDirCandidates ?? []) : [];
   return (
     <div className="space-y-2 pl-[152px]">
       <div className="flex flex-wrap gap-2">
@@ -128,6 +132,16 @@ export function ArchitectureTools({ appId }: { appId: string }) {
       <SetupNotices report={setupReport} />
       {audit && (
         <>
+          {candidates.length > 0 && (
+            <Notice tone="amber">
+              <span>The source folder doesn&apos;t exist, but there are domains under </span>
+              {candidates.map((dir) => (
+                <Button key={dir} size="sm" variant="outline" className="ml-1" onClick={() => onUseSrcDir(dir)}>
+                  Use {dir}/
+                </Button>
+              ))}
+            </Notice>
+          )}
           <Notice tone={problems ? 'amber' : 'green'}>
             {audit.audit.domains.length} domain(s) · {problems ? `${problems} problem(s)` : 'no problems'}
           </Notice>

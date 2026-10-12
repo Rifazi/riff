@@ -116,7 +116,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // Human-only. Sends the QA findings back to Coding for fixes instead of
+  // The human, or the coordinator when the report fails. Sends the QA findings back to Coding for fixes instead of
   // abandoning the whole session: reopens the coding chat (reverting the
   // earlier diff approval) and flags qaFindingsPending so CodingStage
   // relays the report content as the agent's next message. The QA report
@@ -161,7 +161,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  // Human-only. Reaching "done" never pushes, merges, or opens an MR by
+  // The human, or the coordinator under auto-drive. Reaching "done" never pushes, merges, or opens an MR by
   // itself — that's the separate, explicitly-clicked /delivery below.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/approve', async (request, reply) => {
     const session = await getSession(request.params.id);

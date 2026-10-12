@@ -183,8 +183,9 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
     }
   );
 
-  // Human-only approval gate. No agent tool can reach this — it is the
-  // literal enforcement of "the model cannot approve its own work."
+  // Approval gate: the human's button, or the coordinator once auto-drive
+  // is on (routes/coordinator.ts). No agent tool can reach this — the
+  // model that wrote the doc never approves its own work.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/requirements/approve', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
