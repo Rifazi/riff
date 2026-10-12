@@ -31,9 +31,9 @@ export const proposeSplitSchema = z.object({
       })
     )
     .min(2)
-    .max(8)
     .describe(
-      'The slices, in the order to build them. Put first what other parts need (data model, shared integration), then the ' +
+      'The slices, in the order to build them — as many as the work has: there is no upper limit, and each slice should ' +
+        'be the smallest deliverable that still gives a user something that works. Put first what other parts need (data model, shared integration), then the ' +
         'part that gets something usable in front of users soonest; make the first part a thin end-to-end slice that ' +
         'works on its own. Riskiest unknowns early. Only list a dependsOn when the part truly needs that code, so ' +
         'independent parts can proceed side by side.'
@@ -41,12 +41,13 @@ export const proposeSplitSchema = z.object({
 });
 
 export const proposeSplitDescription =
-  'Propose splitting this feature into 2-8 separate requirements sessions, each of which then goes through its own ' +
-  'requirements -> plan -> coding -> QA pipeline on its own branch. Use this when the request is really several ' +
-  'features: parts that could ship and be reviewed independently, separate triggers/users/integrations, or a scope ' +
-  'that would need more than roughly 10-12 acceptance criteria spanning unrelated areas, or more than one reviewable ' +
-  'branch. Do NOT split a feature that is merely detailed, or cut by layer (e.g. "backend" / "frontend") when each ' +
-  'half is useless alone — slice by user-visible outcome. Ask enough questions first to know where the seams are, ' +
+  'Propose splitting this feature into separate requirements sessions (2 or more, no upper limit), each of which then ' +
+  'goes through its own requirements -> plan -> coding -> QA pipeline on its own branch. Split by default: whenever ' +
+  'the request holds more than one deliverable that could ship and be reviewed on its own, split it into the smallest ' +
+  'such deliverables rather than a few large ones — one user-visible outcome per part, so each branch is small and ' +
+  'easy to review. Write a single doc only when the request is already one indivisible deliverable. Never cut by ' +
+  'layer (e.g. "backend" / "frontend") when each half is useless alone, and never make a part so thin it delivers ' +
+  'nothing a user can try. Ask enough questions first to know where the seams are, ' +
   'then call this INSTEAD of write_requirements_doc. The order you give is the build order the human follows: a part ' +
   "can't start coding until the parts it depends on have shipped, and each part is told what the earlier ones delivered. " +
   'This only records a proposal: the human accepts it (which creates the sessions) or keeps the feature as one in the ' +

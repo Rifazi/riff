@@ -1,8 +1,8 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
-import { searchCodeSchema, searchCodeDescription, createSearchCodeExecute } from '../tool-defs/code-search-tool.js';
+import { searchCodeSchema, searchCodeDescription, createSearchCodeExecute, type SearchCodeDeps } from '../tool-defs/code-search-tool.js';
 import { wrapForClaudeSdk } from './wrap.js';
 
-export function createSearchCodeToolClaude(deps: { repoRoot: string }) {
+export function createSearchCodeToolClaude(deps: SearchCodeDeps) {
   return tool(
     'search_code',
     searchCodeDescription,

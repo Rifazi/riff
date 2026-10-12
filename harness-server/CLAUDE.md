@@ -15,7 +15,7 @@ longer hardcoded to it; see step 7 below), grounded in that repo's
 working agent can push, merge, open an MR, or approve its own work. With
 auto-drive on, Bridget (the coordinator) approves a stage for the human when
 nothing in it needs them, and opens the MR after a clean QA pass. She never
-merges into the base branch (step 41).
+merges into the base branch (steps 41 and 49).
 
 It lives here, next to Customer-EDI, not inside it — originally it was
 built as a `harness/` subfolder of Customer-EDI itself, then moved out to
@@ -101,7 +101,7 @@ below) — never inside the target repo.
    `agents/coordinator-agent.ts`) — a tool-less decision-maker that
    auto-drives a stage's conversation forward and hands off to the next
    stage after a human approval, but never approves/rejects anything
-   itself. `config.ts`'s `requirementsDir`/`plansDir`/`qaReportsDir` now
+   itself (until step 41). `config.ts`'s `requirementsDir`/`plansDir`/`qaReportsDir` now
    point at `<harnessRoot>/artifacts/*` instead of
    `<repoRoot>/harness/*`; `session.requirementsPath`/`planPath`/
    `qaReportPath` are now **harnessRoot-relative**, not repoRoot-relative —
@@ -196,7 +196,9 @@ below) — never inside the target repo.
 
 9. User asked for the app to break a too-big feature into separate
    requirements. The requirements agent got a `propose_split` tool
-   (`tool-defs/propose-split-tool.ts`): 2-8 parts in build order, each with
+   (`tool-defs/propose-split-tool.ts`): 2+ parts in build order (no upper
+   limit since step 39; the agent splits into the smallest deliverables by
+   default), each with
    a self-contained brief and `dependsOn` (earlier indexes only). It only
    records `session.splitProposal`; the human-only
    `/requirements/split/accept` creates one child session per part (key
@@ -1036,8 +1038,246 @@ below) — never inside the target repo.
    above the approve bar on the Coding tab (pending) and above the chat on
    the QA tab (handed over). Typechecked only; the test
    (`frontend/tests/harness-server/qa-notes.test.ts`) hasn't been run.
+38. User asked for apps to optionally follow Wayfinding Architecture
+   (https://github.com/Rifazi/wayfinding-architecture), per app. `AppConfig.architecture`
+   (`architecture/architecture.ts`: `{ kind: 'wayfinding', srcDir, interfaceFile }`,
+   default `src` / `service.ts`; missing = none) is set on the Apps page (card →
+   Architecture, or the Add-app form) and validated by `parseArchitectureConfig`
+   (paths stay inside the repo). PATCH with `architecture: null` turns it off.
+   - **Setup** (`architecture/setup.ts`): turning it on or changing it writes `MAP.md`
+     (only if missing; it's the team's file from then on) and `docs/wayfinding.md`
+     (Riff's guide, marked by `GUIDE_MARKER`, refreshed but never written over a
+     hand-written file), committed on the base branch like a theme. On any other
+     branch nothing is written and a warning says to use "Set up files"
+     (`POST /api/apps/:id/architecture/setup`). Domains are never scaffolded; agents
+     add them as changes need them.
+   - **Briefing** (`wayfinding-docs.ts` `wayfindingBriefing(role)`): the route,
+     segments, read-first/update-last, ownership changes in their own step, and
+     QA's code-plus-docs review, per role (requirements too). Delivered by
+     `architecture-context.ts` like the theme briefing: first-turn system prompt,
+     or the turn prompt when `session.architectureContextSeen[role]` differs from
+     the app's setting; team members and the compaction handoff get it in their
+     fresh system prompt. Apps without an architecture get nothing (no tokens).
+   - **`audit_architecture`** (`wayfinding-audit.ts`, tools in
+     `tool-defs[-claude]/architecture-audit-tool.ts`; only registered for opted-in
+     apps, with a stub for replayed AI-SDK histories): a port of the reference
+     repo's `example/tools/check.ts`, generalized to any folder and interface file
+     name, JS/TS imports incl. tsconfig/jsconfig `paths`/`baseUrl`, table checks only
+     when TypeORM `@Entity` exists, and folders without a domain reported as
+     "not on the map yet" instead of failing (legacy adoption). On the reference
+     example it reports the same 10 domains / 0 problems, and the same 9 problems
+     after breaking it. Coding and team members may pass `regenerate: true` to
+     rewrite stale Consumers blocks (members only inside their owned paths).
+     Coding and QA also get the branch scope (`git.ts` `branchChanges`): domains
+     touched, files outside any domain, ownership-field edits and added/removed
+     `DOMAIN.md`; problems are split into touched domains vs. elsewhere.
+     `GET /api/apps/:id/architecture/audit` serves the same report to the Apps page.
+   - `read_doc` now also reads `MAP.md` and any `DOMAIN.md` straight from the
+     checkout (by heading too), since requirements and plan have no `read_file`.
+   Tests: `frontend/tests/harness-server/wayfinding-audit.test.ts` (15, run through a
+   node:test shim since bun isn't installed). Live-checked on a scratch server copy:
+   create-with-architecture, setup commit, change → guide refresh, no-op save, off,
+   bad path 400, setup refused on a feature branch. Not run with real agents yet.
+   **New-app onboarding**: adding an app, from the Apps page or from "Add new
+   app…" in any `AppPicker` (New session card, the Requirements dialog), runs one
+   wizard, `components/DevSessions/NewAppOnboarding.tsx`: Repository (validated) →
+   Theme (`ThemeStudio`) → Architecture (`ArchitectureFields`) → Review, then a
+   single `createApp`, with the setup report from `appSetupReport` in
+   `SetupNotices.tsx`. The old inline add forms in `AppPicker` and the Apps page
+   are gone. Typechecked only.
+39. User asked for requirements to be split as far as possible by default,
+   with no artificial cap. `propose_split` lost its `.max(8)`, and its
+   description and the base prompt's step 3 now say to split by default
+   into the smallest independently shippable deliverables (one user-visible
+   outcome per part), writing a single doc only for one indivisible
+   deliverable. The no-layer-cuts and no-useless-slices rules stay. An app
+   whose requirements prompt is overridden still gets this from the tool
+   description.
 
-38. User asked for smaller coding chunks, and for only the relevant data to
+40. User asked why QA got a branch whose lint and tests had never run
+   (comic-drafter, session `a70d919a`). The repo has separate `server/` and
+   `client/` packages, so no agent could install their dependencies: worktrees
+   only symlink the root `node_modules`, `run_npm_install` only adds new
+   packages, and only the owner of the root `package.json` has it. Every
+   engineer then passed "please run the tests" on to QA as a note.
+   - `run_checked_command` first calls `ensureDependencies`
+     (`repo/dependencies.ts`), which runs `npm install` in every package
+     folder up to two levels deep that has no `node_modules` or whose
+     `package.json` changed since npm last installed (npm workspaces: the
+     root only; a symlinked `node_modules` is left alone; one install per
+     folder at a time). Any install it ran is listed above the check result.
+     The lockfiles it creates are committed by the agent's next `git_commit`.
+     Verified on a fresh clone of that branch: it installed root, `client/` and
+     `server/`, and lint and test:ci passed.
+   - Prompts: a check that can't run is the coder's to fix, not a
+     pre-existing failure, and `note_for_qa` must never ask QA to run the
+     checks (coding prompt, team-member prompt, tool description). Jack's
+     wrap-up turn has to get lint and tests passing and drop stale notes.
+     `note_for_qa` takes `withdraw` (note ids; the lead may drop any
+     author's), and `team_status` lists pending notes with their ids.
+   - `audit_architecture`: when the configured `srcDir` doesn't exist but
+     `DOMAIN.md` files exist elsewhere, it names their folders and says
+     the app's source folder setting is probably wrong.
+
+41. User asked for auto-drive to stop asking them to approve every stage.
+   The coordinator (step 6) now approves a stage itself when it's finished,
+   and the next stage's tab starts its own run.
+   - Decisions are `continue` / `ready` / `blocked`
+     (`agents/coordinator-agent.ts`). `ready` approves the stage, so
+     anything waiting on a human (a question, a confirmation, credentials)
+     is `blocked`, and so is a reply that can't be parsed. A pending
+     question, theme or split proposal still stops the run before the model
+     is asked.
+   - `approveStage` in `routes/coordinator.ts` calls the stage's own approve
+     route through `app.inject`, so every check it makes still applies: a
+     doc on disk, a split part's unshipped dependencies (409 → stop), a
+     branch. A system entry in the stage's transcript records it.
+   - Coding: `ready` with plan steps left sends "Continue with the next
+     step." unless the last such nudge didn't finish a step. A finished team
+     round is approved when every step is done (the Coding tab re-runs the
+     coordinator when the team finishes); a round that needs attention stops.
+   - QA: a `pass` or `pass-with-notes` report is approved (stage `done`); a
+     `fail` is sent back to coding through `/qa/send-back`, at most 3 times
+     (`session.coordinatorQaSendBacks`, reset when auto-drive is turned
+     on), then it stops.
+   - Frontend: `useAgentTurnStream` re-runs the coordinator after any turn
+     that ends cleanly under auto-drive (relayed QA fixes, the QA team's
+     wrap-up, a human answering a question), and the session page follows
+     the session to its next stage unless the human is viewing another one.
+   - Still human-only: rejecting, accepting a split or theme, and delivery.
+
+   **Replaced by step 49**, built on a parallel branch and kept at the merge:
+   Bridget approves through `sessions/stage-actions.ts` after a gate check,
+   stops on any QA result but a clean pass (no automatic send-backs),
+   opens the MR, and the tabs start
+   runs through `useCoordinatorAutoRun`. `decideNextAction` keeps the
+   `blocked` action from this step; both `ready` and `blocked` stop the run.
+
+42. User asked whether Wayfinding saves tokens. comic-drafter (the only
+   opted-in app) was onboarded empty with the default `srcDir: src`, then
+   scaffolded into `server/` + `client/`, so every `audit_architecture`
+   call returned "src/ doesn't exist" and agents wrote "known gap" notes
+   into MAP.md/DOMAIN.md instead. Only agents saw the warning.
+   - When `srcDir` is missing and every `DOMAIN.md` sits under one folder,
+     the audit now audits that folder (`inferredSrcDir`) and tells the
+     agent to ask the human to change the setting. With several candidate
+     folders it still only reports them. The Apps page's "Run checks" shows a
+     "Use <folder>/" button per candidate.
+   - Parsing fixes: `Owns data` entries in backticks, MAP.md domain names
+     written as `[name](path/DOMAIN.md)` links, and Consumers blocks that
+     prettier padded with blank lines no longer fail.
+   Tests: 5 new cases in `wayfinding-audit.test.ts` (20 total, run through a
+   node:test shim). comic-drafter set to `server/src`, now 0 problems.
+
+43. User asked why agents on a Wayfinding app still searched whole
+   directories. comic-drafter's sessions showed agents did read MAP.md and
+   DOMAIN.md, then read every file in the domain (DOMAIN.md said nothing
+   about which file did what), searched the whole repo without a glob, and
+   kept docs/architecture.md as a second map, because the base prompts'
+   "find code" guidance was still docs/ → broad search. Half the code
+   (`client/`) was outside the single source folder, so it had no route.
+   - **Several domain folders**: `WayfindingConfig.srcDirs: string[]`
+     (`srcDir` in older config is read by `parseArchitectureConfig` and
+     normalized on load in apps-store). Nested folders are refused. The audit
+     walks every folder, flags a domain id used under two of them, lists
+     configured folders that don't exist, and names folders outside them that
+     hold a DOMAIN.md (the Apps page shows "Add <folder>/").
+   - **Generated Files section** in every DOMAIN.md (`filesBlock`, marker
+     `<!-- generated: files, do not edit -->`): each file the domain holds
+     (child domains list their own) with its exports, interface first, tests
+     on one line. Stale or missing = a docs problem; `regenerate: true` writes
+     it (before Mirrors/Consumers when the heading is missing).
+   - **Prompts**: the base prompts' general find-code/code-map passages sit
+     in `<!-- nav -->…<!-- nav: wayfinding -->…<!-- /nav -->` blocks;
+     `promptForArchitecture` (architecture-context.ts) keeps the version that
+     fits the app, and the Apps page's base prompt shows the general one. The
+     plan/coding/QA briefing opens with "Finding code" (MAP.md → DOMAIN.md →
+     Files → outline → ranged read; search inside the domain; whole repo only
+     for code on no domain), which says it overrides other guidance, for
+     prompt overrides that have no blocks.
+   - **search_docs** also indexes MAP.md and every DOMAIN.md, read fresh from
+     the main checkout on each search's sync (`syncDocsSearch`).
+   - **search_code focus** (`SearchCodeDeps.focus`, `architecture/focus.ts`):
+     without a glob it searches the focus first and says so, then the whole
+     repo when nothing matches there; `glob: "."` skips it. Coding: domains
+     the current step names (its checklist title/brief + plan section,
+     `planStepSection`); team members: their owned paths; QA: domains the
+     branch touched; plan: domains the requirements name.
+   - **Touched code gets a DOMAIN.md**: `branchScope().offMap` groups the
+     branch's changed files that sit in a folder under a source folder with no
+     DOMAIN.md (files straight under a source folder, like `server/src/app.ts`,
+     are exempt). `formatWayfindingAudit` reports them as a problem, so
+     coding can't finish a step and QA flags it. The coding briefing says to
+     create that DOMAIN.md first in its own commit, add it to MAP.md and
+     regenerate; the plan briefing puts that in an earlier step; team members
+     do it in their owned paths and tell Jack for MAP.md.
+   - **Interface without a re-export file**: the paper requires one explicit
+     public file per domain (children too); `service.ts` is only the example's
+     name. `publicStemOf` makes a domain's public file its configured
+     interface file when it has one, else the code file named after its folder
+     (a React page's `ProjectListPage/ProjectListPage.tsx`). The import check
+     and the Files section's "(interface)" mark use it; CSS never qualifies.
+   Tests: `wayfinding-audit.test.ts` (Files section, several folders, config,
+   changed code with no DOMAIN.md, folder-named interface)
+   and `wayfinding-navigation.test.ts` (focus, nav blocks, scoped search,
+   step section), run through a node:test shim. Live-checked on a clone of
+   comic-drafter. Not yet run with real agents.
+
+44. User asked for every component to have its own DOMAIN.md, so top-level
+   DOMAIN.md files don't grow to describe everything under them (applied by
+   hand to comic-drafter first: 14 domains, 7 of them child domains).
+   - **Every folder of code inside a domain is a child domain**:
+     `undocumentedFolders` lists, per domain, each folder at any depth that
+     directly holds non-test code and has no DOMAIN.md (`TEST_DIRS` such as
+     `__tests__`/`fixtures` are skipped) as `audit.undocumented` (`{ folder,
+     parent }`). The full report lists them as child domains to be; the Apps
+     page shows the count.
+   - **Enforced on touch**: `branchScope().offMap` entries now carry `parent`
+     (null = a top-level folder for MAP.md). A changed file under an
+     undocumented folder flags the outermost one; its subfolders come next,
+     once it is a domain. Same problem as step 43's, with instructions for a
+     child: Parent = the domain above, add it to the parent's "Child domains",
+     move the parent's rules about it into the child.
+   - **Docs**: the guide says every folder of code inside a domain is a child
+     domain and that each rule goes in the narrowest domain whose code
+     implements it (a parent keeps only its own decisions). The coding, plan
+     and QA briefings and the team-member prompt say the same: create the
+     DOMAIN.md before changing an undocumented folder (own commit), give a new
+     folder one in the same step, and QA flags a parent describing a child.
+   - A child's public file is the code file named after its folder (step 43),
+     so no re-export file is needed.
+   Tests: `wayfinding-audit.test.ts` (undocumented folders, a branch touching
+   one, the outermost-first order).
+
+45. User asked whether Wayfinding saved tokens. Plan + coding + QA per plan
+   step cost the same on comic-drafter as on apps without it (~320-350k
+   weighted units/step; read_file per step unchanged, read_doc up 3-30×):
+   agents read MAP.md and DOMAIN.md, then the code anyway. The plan agent
+   swept folders with `search_code({ query: "." , glob })` (before
+   `client/` was mapped, which the prompt allowed), and after it was mapped
+   still globbed `client/**/DOMAIN.md`, delegated "list all files under
+   client/src" and opened DOMAIN.md with read_file. User: it should trust
+   DOMAIN.md.
+   - **Listing answered from the map**: `search_code` treats a pattern that
+     matches every line (`isListAllQuery`: "", ".", ".*", "^", "^.*$") as a
+     listing. In a Wayfinding app `SearchCodeDeps.listing`
+     (`architecture/focus.ts` `domainListing` → `listByDomain`) returns the
+     Files sections of the domains the tracked files under the glob fall in
+     (a domain without one lists its own files), plus files on no domain;
+     otherwise it lists tracked paths (80 max). Wired into plan, coding, QA,
+     team members and the research helper (`delegateDeps({ app })`). On the
+     plan agent's real calls: 46.9k → 5.7k chars.
+   - **Briefing** ("Finding code"): the map is complete (Files is generated
+     and audited); child domains are under "Child domains", not on MAP.md;
+     read MAP.md/DOMAIN.md with read_doc; never list folders or files to check
+     the map (match-all search, a glob over DOMAIN.md, a delegate listing
+     task); open a file only for code you'll change, call or reuse; a wrong
+     DOMAIN.md is fixed or reported, not a reason to distrust the rest.
+   Tests: `wayfinding-navigation.test.ts` (listing), run through a node:test
+   shim. Not yet run with real agents; compare read_file/read_doc per step in
+   `state/usage-log.jsonl` on the next comic-drafter session.
+
+46. User asked for smaller coding chunks, and for only the relevant data to
    pass between the engineers and Jack. The SDK transcripts for the dev-tools
    sessions showed two problems:
    - **Hops ran to their full size.** Every Claude-engine hop started near 29k,
@@ -1094,7 +1334,7 @@ below) — never inside the target repo.
    workstream before merging, and a coding turn's cacheRead in
    `usage-log.jsonl` should fall below ~4M.
 
-39. User asked whether the local helpers could keep what has been read in
+47. User asked whether the local helpers could keep what has been read in
    memory and answer the agents from it, within the local models' limits. A
    model keeps nothing between calls, and the built-in Qwen has a 16k-token
    window, while one coding turn reads 150-300k chars. So the memory is on
@@ -1143,7 +1383,7 @@ below) — never inside the target repo.
    check, look at `memory` lines in `usage-log.jsonl` (useful, redo) and
    whether repeat `read_file` paths drop in the SDK transcripts.
 
-40. User asked whether git commands should be a helper. They shouldn't:
+48. User asked whether git commands should be a helper. They shouldn't:
    git tools run no model. `git_commit` was 2.6% of coding tool calls and
    0.5% of their output, and the one large git output (`review_workstream`'s
    diff) is what Jack has to read. Their cost was requests. The end of every
@@ -1175,10 +1415,10 @@ below) — never inside the target repo.
    helper card turns red when its run went wrong (`helperFailed` in
    `HelperBubbles.tsx`), as does any tool card whose badge reports a failure.
 
-41. User asked for auto-driving with Bridget to stop needing an approval at
+49. User asked for auto-driving with Bridget to stop needing an approval at
    every stage: keep going unless there's a question or a possible issue,
    all the way to a merge request. **Supersedes step 6's "the coordinator
-   never approves anything".** The user chose:
+   never approves anything" and step 41's loop.** The user chose:
    - **Always on:** this is how auto-drive always works, not a separate mode.
    - **No remote:** stop before merging into main locally.
    - **QA fail:** stop, with no automatic fix rounds.
@@ -1380,7 +1620,7 @@ exist standalone).
 - No working agent can push, merge or open an MR. Delivery (`repo/delivery.ts`,
   `GET/POST /api/sessions/:id/delivery`) is a human click on the QA tab,
   only once QA is marked reviewed, or Bridget's after a clean pass when the
-  repo has a remote (step 41). It detects the repo shape itself: no
+  repo has a remote (step 49). It detects the repo shape itself: no
   remote → `--no-ff` merge into the trunk locally, leaving the trunk
   checked out for the next session. A remote → push, then open the MR: via
   `glab mr create` when glab is logged in, else GitLab push options

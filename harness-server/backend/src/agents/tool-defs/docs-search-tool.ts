@@ -10,6 +10,8 @@ import { searchIndex } from '../../search/search-engine.js';
 import { SESSION_PLAN_DOC, SESSION_REQUIREMENTS_DOC } from '../plan-excerpt.js';
 import { readRepoInstructions, REPO_INSTRUCTIONS_FILE } from '../repo-instructions.js';
 import { getApp } from '../../apps/apps-store.js';
+import { DOMAIN_DOC, MAP_PATH } from '../../architecture/architecture.js';
+import { assertPathAllowed } from '../../repo/guardrails.js';
 import { ReadMemo } from './read-memo.js';
 
 export const searchDocsSchema = z.object({
@@ -18,7 +20,8 @@ export const searchDocsSchema = z.object({
 export const searchDocsDescription =
   'Search this repo\'s docs/ markdown files (architecture, ingestion, transmission, ops, API) by keyword and by ' +
   'meaning, so a question finds the section that answers it even in other words. ' +
-  'Also searches the reference documents the human attached (paths under reference/). ' +
+  'Also searches the reference documents the human attached (paths under reference/), and in an app that follows ' +
+  `Wayfinding Architecture its ${MAP_PATH} and every ${DOMAIN_DOC}. ` +
   'Returns the top matching sections (truncated previews) with their file path and heading — use read_doc ' +
   'for a section\'s full text. Use this before proposing anything — this repo documents its own conventions ' +
   'in detail.';
@@ -27,7 +30,7 @@ export const readDocSchema = z.object({
   path: z
     .string()
     .describe(
-      `Repo-relative path under docs/ (e.g. docs/development.md), the repo's ${REPO_INSTRUCTIONS_FILE}, a reference document path (reference/…), or this session's approved ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}`
+      `Repo-relative path under docs/ (e.g. docs/development.md), the repo's ${REPO_INSTRUCTIONS_FILE}, ${MAP_PATH} or a ${DOMAIN_DOC} (e.g. src/pricing/${DOMAIN_DOC}), a reference document path (reference/…), or this session's approved ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}`
     ),
   heading: z
     .string()
@@ -37,7 +40,7 @@ export const readDocSchema = z.object({
 export const readDocDescription =
   'Read one docs/*.md file by its repo-relative path (e.g. "docs/ingestion/invoices.md") — the whole file, or ' +
   'with `heading` just the section a search_docs result pointed at, including its subsections. Also reads the ' +
-  `reference documents the human attached (reference/… paths), the repo's ${REPO_INSTRUCTIONS_FILE}, and this session's approved plan and requirements ` +
+  `reference documents the human attached (reference/… paths), the repo's ${REPO_INSTRUCTIONS_FILE}, ${MAP_PATH} and ${DOMAIN_DOC} files, and this session's approved plan and requirements ` +
   `(${SESSION_PLAN_DOC}, ${SESSION_REQUIREMENTS_DOC}). Only those paths are allowed.`;
 
 // sessionId adds that session's own reference documents to the app's.
@@ -82,9 +85,13 @@ export function createDocsSearchExecutors(deps: DocsSearchDeps) {
       content = await readRepoInstructions(deps.repoRoot ?? (await getApp(deps.appId)).repoRoot, heading);
     } else if (requestedPath === SESSION_PLAN_DOC || requestedPath === SESSION_REQUIREMENTS_DOC) {
       content = await readSessionDoc(deps.sessionId, requestedPath, heading);
+    } else if (requestedPath === MAP_PATH || path.posix.basename(requestedPath) === DOMAIN_DOC) {
+      content = await readArchitectureDoc(deps.repoRoot ?? (await getApp(deps.appId)).repoRoot, requestedPath, heading);
     } else {
       if (!requestedPath.startsWith('docs/')) {
-        throw new Error(`Refused: ${requestedPath} is not under docs/ or reference/, nor ${REPO_INSTRUCTIONS_FILE}, ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}.`);
+        throw new Error(
+          `Refused: ${requestedPath} is not under docs/ or reference/, nor ${REPO_INSTRUCTIONS_FILE}, ${MAP_PATH}, a ${DOMAIN_DOC}, ${SESSION_PLAN_DOC} / ${SESSION_REQUIREMENTS_DOC}.`
+        );
       }
       const raw = readDocSection(deps.appId, requestedPath, heading);
       if (raw === null) throw new Error(`No indexed content found for ${requestedPath}.`);
@@ -98,6 +105,35 @@ export function createDocsSearchExecutors(deps: DocsSearchDeps) {
   };
 
   return { searchDocsExecute, readDocExecute };
+}
+
+// Wayfinding's map and domain docs (architecture/), read from the checkout
+// itself rather than the docs/ index: they live beside the code, and the
+// requirements and plan agents have no read_file.
+async function readArchitectureDoc(repoRoot: string, requestedPath: string, heading?: string): Promise<string> {
+  const absolute = assertPathAllowed(requestedPath, ['.'], repoRoot);
+  let markdown: string;
+  try {
+    markdown = await fs.readFile(absolute, 'utf8');
+  } catch {
+    throw new Error(`${requestedPath} doesn't exist.`);
+  }
+  if (!heading) return markdown;
+  const sections = splitIntoSections(requestedPath, markdown);
+  // Headings are paths ("pricing > Hidden behavior"); also accept one without its parents.
+  const wanted = heading.trim().toLowerCase();
+  let prefix = heading;
+  for (const s of sections) {
+    const parts = s.heading.split(' > ');
+    const i = parts.findIndex((p) => p.toLowerCase() === wanted);
+    if (i >= 0) {
+      prefix = parts.slice(0, i + 1).join(' > ');
+      break;
+    }
+  }
+  const matches = selectSections(sections, requestedPath, prefix) ?? [];
+  if (!matches.length) throw new Error(`${requestedPath} has no section "${heading}".`);
+  return matches.map((s) => `## ${s.heading}\n\n${s.content}`).join('\n\n---\n\n');
 }
 
 // The approved plan/requirements live in this project's artifacts/, not the

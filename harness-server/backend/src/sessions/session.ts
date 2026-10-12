@@ -382,9 +382,9 @@ export interface SessionRecord {
 
   // Opt-in, per-session: when true, an SSE run against
   // /coordinator/run drives a stage's conversation forward automatically
-  // (composing follow-up messages, deciding when a stage looks ready) and
-  // auto-starts the next stage after a human approval. It never approves
-  // or rejects anything itself. Off by default.
+  // (composing follow-up messages, deciding when a stage is finished),
+  // approves each finished stage itself and starts the next one. It stops
+  // for a human whenever an agent waits on one. Off by default.
   coordinatorEnabled: boolean;
 
   // Set once, permanently, by coding/send-back-to-requirements — this
@@ -427,6 +427,8 @@ export interface SessionRecord {
   // Which theme (a theme.json fingerprint, or "none") each stage's agent was
   // last briefed on, so a mid-session theme change re-briefs it next turn.
   themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa', string>>;
+  // Likewise for the app's architecture setting (architecture/architecture-context.ts).
+  architectureContextSeen: Partial<Record<'requirements' | 'plan' | 'coding' | 'qa', string>>;
 
   // Human-readable, for the UI's chat panes.
   transcripts: {

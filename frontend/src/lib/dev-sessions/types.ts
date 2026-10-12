@@ -88,6 +88,38 @@ export interface AppConfig {
   repoUrl: string | null;
   // Read from the repo's theme/theme.json; null when it has no theme.
   theme: AppThemeSummary | null;
+  // The architecture the agents follow; null when none.
+  architecture: ArchitectureConfig | null;
+}
+
+// Mirrors harness-server's architecture/architecture.ts.
+export interface ArchitectureConfig {
+  kind: 'wayfinding';
+  // Repo-relative folders the domains live under, e.g. ["server/src", "client/src"].
+  srcDirs: string[];
+  // A domain's one public file, e.g. service.ts.
+  interfaceFile: string;
+}
+
+// What GET /api/apps/:id/architecture/audit returns: the report the agents'
+// audit_architecture tool shows, plus its counts.
+export interface ArchitectureAudit {
+  audit: {
+    srcDirExists: boolean;
+    // Configured source folders that don't exist.
+    missingSrcDirs: string[];
+    mapExists: boolean;
+    domains: { id: string; dir: string }[];
+    // Folders of code inside a domain with no DOMAIN.md: child domains to be.
+    undocumented: { folder: string; parent: string }[];
+    problems: { kind: string; file: string; message: string }[];
+    // Folders outside the source folders that hold DOMAIN.md files. When no
+    // configured folder exists and there's exactly one, it was audited in
+    // their place (inferredSrcDir).
+    srcDirCandidates?: string[];
+    inferredSrcDir?: string;
+  };
+  report: string;
 }
 
 export interface AppThemeSummary {
@@ -112,6 +144,8 @@ export interface AppWriteResult extends AppConfig {
   git?: SetupSteps & { baseBranch: string };
   // Only when a theme was picked while adding the app.
   themeResult?: SetupSteps;
+  // Only when the app follows an architecture and it was just set up or changed.
+  architectureResult?: SetupSteps;
 }
 
 export type ThemeMode = 'light' | 'dark';

@@ -24,11 +24,20 @@ full; read the sections you need.
 
 # What to do
 
+<!-- nav -->
 1. Before inspecting the implementation, call `search_docs` to check the
    documented expected behavior in `docs/*.md` — use that as your baseline
    for what "correct" means. The docs' architecture / code-map page also
    tells you where code lives: use it, `search_code` and `outline_file` to
    find what to look at, and read only the ranges you need.
+<!-- nav: wayfinding -->
+1. Before inspecting the implementation, call `search_docs` to check the
+   documented expected behavior in `docs/*.md` — use that as your baseline
+   for what "correct" means. `MAP.md` and the touched domains' `DOMAIN.md`
+   (their Files sections) tell you where code lives: use them, `search_code`
+   (it starts in the domains this branch touched) and `outline_file` to
+   find what to look at, and read only the ranges you need.
+<!-- /nav -->
 2. Call `get_diff` to see the actual change set on the branch — do not trust
    any self-report, verify against the real diff.
 3. Walk the requirements document's acceptance criteria one by one and check
@@ -37,9 +46,16 @@ full; read the sections you need.
 4. Check the requirements document's "Docs to update" section against the
    diff: every listed doc must actually appear as changed. A doc listed
    there but untouched by the diff is a blocking finding — the coding agent
-   skipped a required deliverable, not a nit. Also check the code map: a
+   skipped a required deliverable, not a nit.
+<!-- nav -->
+   Also check the code map: a
    new module, folder, route or other entry point in the diff that the
    docs' code-map page doesn't list is a non-blocking finding.
+<!-- nav: wayfinding -->
+   Also check the map: `audit_architecture` reports a touched domain whose
+   Files section is stale, and a new folder of code outside every domain
+   that `MAP.md` doesn't mention is a non-blocking finding.
+<!-- /nav -->
 5. Run `run_checked_command` with `"lint"` and `"test"`. Always run both.
 6. Decide whether `"test:integration"` is relevant: if the diff touches
    code that makes outbound calls (network, database writes, external

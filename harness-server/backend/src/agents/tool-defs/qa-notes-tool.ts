@@ -12,6 +12,10 @@ export const noteForQaSchema = z.object({
     .boolean()
     .optional()
     .describe('Drop the notes you left earlier (that QA has not received yet) and keep only these — for when one went stale'),
+  withdraw: z
+    .array(z.string())
+    .optional()
+    .describe('Ids of pending notes to drop because they no longer hold (the coding lead may drop any author\'s; team_status lists them)'),
 });
 
 export const noteForQaDescription =
@@ -20,7 +24,8 @@ export const noteForQaDescription =
   'from those: a requirement you deliberately didn\'t meet or met differently (and why), known gaps or flaky ' +
   'checks, setup a reviewer needs (env vars, seed data, a migration, a flag), areas that deserve extra scrutiny, ' +
   'or something that looks wrong but is intentional. Don\'t restate the plan or list the files you changed. Call ' +
-  'it whenever one comes up; pass replace: true to rewrite your notes when an earlier one no longer holds.';
+  'it whenever one comes up; pass replace: true to rewrite your notes when an earlier one no longer holds. ' +
+  'Never use a note to hand QA a check you could not run: get lint and tests running and passing first.';
 
 /**
  * Appends to session.qaNotes, which coding/approve hands over as
@@ -28,17 +33,23 @@ export const noteForQaDescription =
  * workstream's title for a team engineer, null for the coding agent itself.
  */
 export function createNoteForQaExecute(deps: { sessionId: string; from: string | null }) {
-  return async ({ notes, replace }: z.infer<typeof noteForQaSchema>): Promise<string> => {
+  return async ({ notes, replace, withdraw }: z.infer<typeof noteForQaSchema>): Promise<string> => {
     const texts = notes.map((n) => n.trim()).filter(Boolean);
-    if (!texts.length) throw new Error('No notes given.');
+    if (!texts.length && !withdraw?.length) throw new Error('No notes given.');
     const at = new Date().toISOString();
     let total = 0;
+    let dropped = 0;
     await mutateSession(deps.sessionId, (s) => {
-      const kept = replace ? s.qaNotes.filter((n) => n.from !== deps.from) : s.qaNotes;
+      // An engineer can only drop its own notes; the coding agent (the lead) any.
+      const drop = new Set(withdraw ?? []);
+      const withdrawable = (n: QaNote) => drop.has(n.id) && (deps.from === null || n.from === deps.from);
+      const kept = s.qaNotes.filter((n) => !(replace && n.from === deps.from) && !withdrawable(n));
+      dropped = s.qaNotes.length - kept.length;
       s.qaNotes = [...kept, ...texts.map((text) => ({ id: randomUUID(), from: deps.from, text, at }))];
       total = s.qaNotes.length;
     });
-    return `Noted for QA (${total} note${total === 1 ? '' : 's'} waiting for QA). They go over when the human starts QA.`;
+    const droppedText = withdraw?.length ? ` Dropped ${dropped}.` : '';
+    return `Noted for QA (${total} note${total === 1 ? '' : 's'} waiting for QA).${droppedText} They go over when the human starts QA.`;
   };
 }
 

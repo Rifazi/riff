@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import type { ArchitectureConfig } from '../architecture/architecture.js';
 
 // Overrides the npm script name run_checked_command uses for each of its
 // three fixed checks (see agents/tool-defs/qa-tools.ts's DEFAULT_SCRIPTS) — the
@@ -22,6 +23,9 @@ export interface AppConfig {
   // repo/git.ts's setupGitRepo() when the app is created or its repoRoot
   // changes. Missing on apps that predate it, which get "master".
   baseBranch?: string;
+  // Opt-in architecture the agents follow (architecture/architecture.ts);
+  // missing = none.
+  architecture?: ArchitectureConfig;
 }
 
 export function baseBranchFor(app: AppConfig): string {

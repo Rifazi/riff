@@ -19,6 +19,10 @@ import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeBriefingFor, themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
+import { architectureBriefingFor, architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
+import { domainListing, namedDomainsFocus } from '../architecture/focus.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
@@ -28,7 +32,7 @@ import { listSessionReferenceDocs, referenceDocsManifest, referenceDocsTurnNote 
 import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from './sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from './handoff.js';
-import { planExcerpt, SESSION_PLAN_DOC } from './plan-excerpt.js';
+import { planExcerpt, planStepSection, SESSION_PLAN_DOC } from './plan-excerpt.js';
 import { repoInstructionsNote } from './repo-instructions.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
@@ -183,6 +187,7 @@ export async function runCodingAgentTurn(
     appId: app.id,
     context: helperContext,
     checkCommands: app.checkCommands,
+    app,
   });
   // The read memory (helpers/memory/): every file read in this session, by
   // this agent, its helpers and Jack's engineers, for `recall`.
@@ -258,13 +263,23 @@ export async function runCodingAgentTurn(
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'coding');
-  const basePrompt = override ?? promptTemplate;
+  const basePrompt = promptForArchitecture(override ?? promptTemplate, app);
   const isFirstTurn = !hasContext || freshReason !== null;
 
   let systemPrompt = basePrompt + helperNotes;
   const themeContext = await themeContextForTurn(session, 'coding', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
+  const architectureContext = await architectureContextForTurn(session, 'coding', app, isFirstTurn);
+  systemPrompt += architectureContext.system;
+  prompt = architectureContext.turnPrefix + prompt;
+  const architectureDeps = { app, repoRoot: app.repoRoot, scope: true, allowRegenerate: true };
+  // search_code without a glob starts in the domains the step being worked on names.
+  const searchFocus = namedDomainsFocus(app, app.repoRoot, 'the domains your current step names', async () => {
+    const latest = (await getSession(session.id)) ?? session;
+    const stepId = currentStepId(latest) ?? targetStepId;
+    return stepId ? stepText(latest, stepId) : null;
+  });
   if (isFirstTurn) systemPrompt += await firstTurnSections(session, app.repoRoot, targetStepId);
   if (handoffNote) prompt = `${handoffNote}\n\n---\n\n${prompt}`;
   if (options.qaFix) prompt = `${QA_FIX_TEAM_NOTE}\n\n---\n\n${prompt}`;
@@ -380,6 +395,7 @@ export async function runCodingAgentTurn(
           basePrompt +
           helperNotes +
           themeBriefingFor(app.repoRoot, 'coding') +
+          architectureBriefingFor(app, 'coding') +
           (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
       };
@@ -480,7 +496,7 @@ export async function runCodingAgentTurn(
           tools: [
             searchDocsToolClaude,
             readDocToolClaude,
-            createSearchCodeToolClaude({ repoRoot: app.repoRoot }),
+            createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
             createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             createClassifyTextToolClaude(helperContext),
@@ -501,6 +517,7 @@ export async function runCodingAgentTurn(
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
             createFinishStepToolClaude(finishDeps),
+            ...architectureToolsClaude(architectureDeps),
             ...(delegateDeps ? [createDelegateToolClaude(delegateDeps)] : []),
             ...(memoryDeps ? [createRecallToolClaude(memoryDeps)] : []),
           ],
@@ -517,6 +534,7 @@ export async function runCodingAgentTurn(
           ...TOOL_NAMES,
           ...(withLeadTools ? TEAM_LEAD_TOOL_NAMES : []),
           ...(withBuildSolo ? ['build_solo'] : []),
+          ...architectureToolNames(architectureDeps),
           ...(delegateDeps ? ['delegate'] : []),
           ...(memoryDeps ? ['recall'] : []),
         ],
@@ -568,7 +586,7 @@ export async function runCodingAgentTurn(
       const tools: ToolSet = {
         search_docs: searchDocsTool,
         read_doc: readDocTool,
-        search_code: createSearchCodeTool({ repoRoot: app.repoRoot }),
+        search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         classify_text: createClassifyTextTool(helperContext),
@@ -592,6 +610,7 @@ export async function runCodingAgentTurn(
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
         finish_step: createFinishStepTool(finishDeps),
+        ...architectureToolEntry(architectureDeps, session.histories.coding),
         ...delegateToolEntry(delegateDeps, session.histories.coding),
         ...recallToolEntry(memoryDeps, session.histories.coding),
       };
@@ -747,6 +766,14 @@ export async function loadApprovedDocsForCoding(
   const planText = focusStepIds ? planExcerpt(planRaw, planSteps, focusStepIds) : planRaw;
   text += `\n\n# Approved plan (${session.planPath}, also readable as ${SESSION_PLAN_DOC})\n\n${planText}`;
   return { text, planSteps };
+}
+
+// A checklist step's title, brief and plan section: what it says it changes.
+async function stepText(session: SessionRecord, stepId: string): Promise<string | null> {
+  const step = session.codingPlan?.find((s) => s.id === stepId);
+  const planRaw = session.planPath ? await fs.readFile(path.join(config.harnessRoot, session.planPath), 'utf8').catch(() => null) : null;
+  const section = planRaw ? planStepSection(planRaw, stepId) : null;
+  return [step?.title, step?.brief, section].filter(Boolean).join('\n') || null;
 }
 
 // The step the checklist says is being worked on, if any.

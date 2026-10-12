@@ -31,6 +31,45 @@ const normalize = (s: string) =>
  * Falls back to the whole plan body when its steps section can't be
  * matched to the frontmatter's steps.
  */
+/**
+ * The steps section of a plan body and each step's `### ` subsection,
+ * matched by title, else by position. null when they can't all be matched.
+ */
+function matchStepSections(lines: string[], planSteps: PlanStepRef[]) {
+  const stepsStart = lines.findIndex((l) => /^##\s+(\S+\s+)?steps\b/i.test(l));
+  if (stepsStart < 0) return null;
+  let stepsEnd = lines.findIndex((l, i) => i > stepsStart && /^##\s+/.test(l));
+  if (stepsEnd < 0) stepsEnd = lines.length;
+
+  const sections: { heading: string; start: number; end: number }[] = [];
+  for (let i = stepsStart + 1; i < stepsEnd; i++) {
+    if (/^###\s+/.test(lines[i])) {
+      if (sections.length > 0) sections[sections.length - 1].end = i;
+      sections.push({ heading: lines[i].replace(/^###\s+/, '').trim(), start: i, end: stepsEnd });
+    }
+  }
+  if (sections.length === 0) return null;
+
+  const byTitle = new Map(sections.map((s) => [normalize(s.heading), s]));
+  const sameCount = sections.length === planSteps.length;
+  const matched = planSteps.map((step, i) => ({
+    step,
+    section: byTitle.get(normalize(step.title)) ?? (sameCount ? sections[i] : undefined),
+  }));
+  if (matched.some((m) => !m.section)) return null;
+  return { stepsStart, stepsEnd, matched };
+}
+
+/** One plan step's own section (heading and body), or null when it can't be found. */
+export function planStepSection(planRaw: string, stepId: string): string | null {
+  const parsed = matter(planRaw);
+  const steps: unknown = parsed.data.steps;
+  const planSteps = Array.isArray(steps) ? (steps as PlanStepRef[]) : [];
+  const lines = parsed.content.trim().split('\n');
+  const section = matchStepSections(lines, planSteps)?.matched.find((m) => m.step.id === stepId)?.section;
+  return section ? lines.slice(section.start, section.end).join('\n').trim() : null;
+}
+
 export function planExcerpt(planRaw: string, planSteps: PlanStepRef[], focusStepIds: string[]): string {
   const parsed = matter(planRaw);
   const body = parsed.content.trim();
@@ -40,28 +79,9 @@ export function planExcerpt(planRaw: string, planSteps: PlanStepRef[], focusStep
   const lines = body.split('\n');
 
   const h1 = lines.find((l) => /^#\s+/.test(l))?.replace(/^#\s+/, '').trim();
-  const stepsStart = lines.findIndex((l) => /^##\s+(\S+\s+)?steps\b/i.test(l));
-  if (stepsStart < 0) return body;
-  let stepsEnd = lines.findIndex((l, i) => i > stepsStart && /^##\s+/.test(l));
-  if (stepsEnd < 0) stepsEnd = lines.length;
-
-  // The `### ` subsections of the steps section, each matched to a step.
-  const sections: { heading: string; start: number; end: number }[] = [];
-  for (let i = stepsStart + 1; i < stepsEnd; i++) {
-    if (/^###\s+/.test(lines[i])) {
-      if (sections.length > 0) sections[sections.length - 1].end = i;
-      sections.push({ heading: lines[i].replace(/^###\s+/, '').trim(), start: i, end: stepsEnd });
-    }
-  }
-  if (sections.length === 0) return body;
-
-  const byTitle = new Map(sections.map((s) => [normalize(s.heading), s]));
-  const sameCount = sections.length === planSteps.length;
-  const matched = planSteps.map((step, i) => ({
-    step,
-    section: byTitle.get(normalize(step.title)) ?? (sameCount ? sections[i] : undefined),
-  }));
-  if (matched.some((m) => !m.section)) return body;
+  const steps = matchStepSections(lines, planSteps);
+  if (!steps) return body;
+  const { stepsStart, stepsEnd, matched } = steps;
 
   const stepsHeading = lines[stepsStart].replace(/^##\s+/, '').trim();
   const headingPrefix = [h1, stepsHeading].filter(Boolean).join(' > ');

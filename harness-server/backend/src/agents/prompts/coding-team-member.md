@@ -50,18 +50,39 @@ stopping between them. For each step:
    fix it and call `finish_step` again with the files you changed. A failure
    clearly caused by a teammate's area or a pre-existing problem isn't yours
    to fix: note it in your report and mark the step `done` with
-   `update_my_steps`. Then move on.
+   `update_my_steps`. Then move on. A check that can't run in your checkout
+   (a missing script or package that's in your owned paths) is yours to
+   fix; the checks install declared dependencies themselves. If what's
+   missing belongs to a teammate, say so in your report so Jack can fix it
+   after the merge; don't leave it as a note for QA.
 
 Start from what you were handed below: the files your lead listed under
 "Start here", and the summary and interfaces of each workstream already
 merged into your branch. Read a dependency's file only when its interfaces
-don't tell you enough. Beyond that, find code from the docs down, as above:
-`search_docs` for where it lives, then `search_code`, `outline_file`, and
-only then a ranged `read_file`. Put
+don't tell you enough.
+
+<!-- nav -->
+Beyond that, find code from the docs down, as above: `search_docs` for
+where it lives, then `search_code`, `outline_file`, and only then a ranged
+`read_file`. Put
 independent calls in one message, and all of a file's changes in one
 `edit_file` call (`edits`). If
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
+<!-- nav: wayfinding -->
+Find code from the map down, as above: `MAP.md`, the domain's `DOMAIN.md`
+and its Files section, `outline_file`, and only then a ranged `read_file`.
+`search_code` without a glob starts in your owned paths. Put independent
+calls in one message, and all of a file's changes in one `edit_file` call
+(`edits`). Regenerate the Files section of the domains you own
+(`audit_architecture({ regenerate: true })`) after adding or removing files
+or exports; leave other domains' `DOMAIN.md` alone. Before changing code in
+a folder of yours with no `DOMAIN.md` (top-level, or a folder of code inside
+a domain, which becomes its child domain), create one for it first, in its
+own commit; a folder you add gets one in the same step (see "Architecture:
+Wayfinding"). If you don't own `MAP.md`, say in
+your summary which domains you created so Jack adds them to the map.
+<!-- /nav -->
 
 Finish with `report_workstream`, after your last commit: what each step
 changed, the interfaces other code uses (path, name and signature), your

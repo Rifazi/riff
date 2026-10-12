@@ -117,9 +117,14 @@ export const teamStatusDescription =
 
 export function createTeamStatusExecute(deps: TeamLeadDeps) {
   return async (): Promise<string> => {
-    const { team, branch } = await load(deps.sessionId);
+    const { session, team, branch } = await load(deps.sessionId);
     const ahead = await commitsAheadOf(deps.repoRoot, branch, team.members);
-    return `Round ${team.round} (${team.kind}), ${team.status}, merging into ${branch}:\n${teamStatusLines(team.members, ahead)}`;
+    const notes = session.qaNotes.length
+      ? `\n\nNotes for QA so far (drop stale ones with note_for_qa withdraw):\n${session.qaNotes
+          .map((n) => `- [${n.id}] ${n.from ?? 'you'}: ${n.text}`)
+          .join('\n')}`
+      : '';
+    return `Round ${team.round} (${team.kind}), ${team.status}, merging into ${branch}:\n${teamStatusLines(team.members, ahead)}${notes}`;
   };
 }
 

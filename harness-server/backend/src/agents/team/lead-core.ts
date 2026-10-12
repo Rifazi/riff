@@ -203,8 +203,10 @@ export function leadWrapUpMessage(members: Member[], sessionBranch: string): str
     `[Team update] Every workstream is merged into ${sessionBranch} or dropped:`,
     teamStatusLines(members),
     '',
-    'As the lead, check the merged whole: run lint and the unit tests on the branch, fix anything the merges ' +
-      'broke between workstreams, and keep the checklist accurate with write_coding_plan.' +
+    'As the lead, check the merged whole: run lint and the unit tests on the branch and get both passing, ' +
+      'including any check an engineer could not run in their own checkout, fix anything the merges broke between ' +
+      'workstreams, and keep the checklist accurate with write_coding_plan. Then read the notes for QA ' +
+      '(team_status lists them) and drop any that no longer hold with note_for_qa withdraw.' +
       (dropped.length
         ? ` You took back ${dropped.flatMap((m) => m.stepIds).join(', ')}: they're still on the checklist for you to build next, one step at a time.`
         : ''),

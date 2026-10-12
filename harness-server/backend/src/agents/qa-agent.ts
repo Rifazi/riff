@@ -17,6 +17,11 @@ import { getPromptOverride } from '../settings/prompts-store.js';
 import { themeContextForTurn } from '../themes/theme-context.js';
 import { createAuditThemeTool } from './tool-defs/theme-audit-tool.js';
 import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.js';
+import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
+import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
+import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
+import { changedDomainsFocus, domainListing } from '../architecture/focus.js';
+import type { AppConfig } from '../apps/apps.js';
 import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { delegateToolEntry } from './helpers/research/tool.js';
@@ -24,6 +29,7 @@ import { stageHelperContext, type HelperContext } from './helpers/helper.js';
 import { tryCompressCode, compressMessages } from './helpers/compress.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
+import { branchChanges } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
@@ -72,6 +78,9 @@ const TOOL_NAMES = [
 ];
 
 export interface ReviewToolDeps {
+  app: AppConfig;
+  // The branch under review, for audit_architecture's branch scope.
+  branch: string;
   appId: string;
   sessionId: string;
   repoRoot: string;
@@ -80,10 +89,18 @@ export interface ReviewToolDeps {
   helperContext: HelperContext;
 }
 
-/** The read-only review tools (REVIEW_TOOL_NAMES) for either engine. */
+/** The read-only review tools (REVIEW_TOOL_NAMES, plus audit_architecture when the app has one) for either engine. */
 export function createReviewTools(deps: ReviewToolDeps) {
   const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext };
+  const architectureDeps = { app: deps.app, repoRoot: deps.repoRoot, scope: true, branch: deps.branch, allowRegenerate: false };
+  // search_code without a glob starts in the domains the branch touched (read once: QA doesn't change the branch).
+  let changed: Promise<string[]> | null = null;
+  const searchFocus = changedDomainsFocus(deps.app, deps.repoRoot, 'the domains this branch touched', () => {
+    changed ??= branchChanges(deps.repoRoot, deps.baseBranch, ':(glob)**/DOMAIN.md', deps.branch).then((c) => c?.files ?? []);
+    return changed;
+  });
   return {
+    names: [...REVIEW_TOOL_NAMES, ...architectureToolNames(architectureDeps)],
     claude: () => {
       const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: deps.appId, sessionId: deps.sessionId });
       const { readFileToolClaude } = createFileToolsClaude({ repoRoot: deps.repoRoot, compress: tryCompressCode });
@@ -91,27 +108,29 @@ export function createReviewTools(deps: ReviewToolDeps) {
       return [
         searchDocsToolClaude,
         readDocToolClaude,
-        createSearchCodeToolClaude({ repoRoot: deps.repoRoot }),
+        createSearchCodeToolClaude({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         createOutlineFileToolClaude({ repoRoot: deps.repoRoot }),
         createAuditThemeToolClaude({ repoRoot: deps.repoRoot }),
         createClassifyTextToolClaude(deps.helperContext),
         readFileToolClaude,
         getDiffToolClaude,
+        ...architectureToolsClaude(architectureDeps),
       ];
     },
-    aiSdk: (): ToolSet => {
+    aiSdk: (history: unknown[] = []): ToolSet => {
       const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: deps.appId, sessionId: deps.sessionId });
       const { readFileTool } = createFileTools({ repoRoot: deps.repoRoot, compress: tryCompressCode });
       const { getDiffTool } = createQaTools(qaDeps);
       return {
         search_docs: searchDocsTool,
         read_doc: readDocTool,
-        search_code: createSearchCodeTool({ repoRoot: deps.repoRoot }),
+        search_code: createSearchCodeTool({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: deps.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: deps.repoRoot }),
         classify_text: createClassifyTextTool(deps.helperContext),
         read_file: readFileTool,
         get_diff: getDiffTool,
+        ...architectureToolEntry(architectureDeps, history),
       };
     },
   };
@@ -201,10 +220,13 @@ export async function runQaAgentTurn(
   const override = await getPromptOverride(app.id, 'qa');
   const isFirstTurn = provider === 'claude' ? !session.claudeSessionIds.qa : session.histories.qa.length === 0;
 
-  let systemPrompt = override ?? promptTemplate;
+  let systemPrompt = promptForArchitecture(override ?? promptTemplate, app);
   const themeContext = await themeContextForTurn(session, 'qa', app.repoRoot, isFirstTurn);
   systemPrompt += themeContext.system;
   prompt = themeContext.turnPrefix + prompt;
+  const architectureContext = await architectureContextForTurn(session, 'qa', app, isFirstTurn);
+  systemPrompt += architectureContext.system;
+  prompt = architectureContext.turnPrefix + prompt;
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
@@ -235,6 +257,8 @@ export async function runQaAgentTurn(
   };
 
   const reviewTools = createReviewTools({
+    app,
+    branch,
     appId: app.id,
     sessionId: session.id,
     repoRoot: app.repoRoot,
@@ -259,7 +283,7 @@ export async function runQaAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: TOOL_NAMES,
+      toolNames: [...TOOL_NAMES, ...reviewTools.names.filter((n) => !REVIEW_TOOL_NAMES.includes(n))],
       model,
       resumeSessionId: session.claudeSessionIds.qa,
       prompt,
@@ -278,7 +302,7 @@ export async function runQaAgentTurn(
     }
 
     const tools: ToolSet = {
-      ...reviewTools.aiSdk(),
+      ...reviewTools.aiSdk(session.histories.qa),
       // QA has no delegate: it re-checked every helper answer itself, so the
       // calls only added time. The stub keeps older histories that called it valid.
       ...delegateToolEntry(null, session.histories.qa),

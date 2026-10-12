@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import type { Role } from '../settings/settings.js';
+import { promptForArchitecture } from '../architecture/architecture-context.js';
 import { DECISION_INSTRUCTIONS } from './coordinator-agent.js';
 
 // Maps a role to its checked-in base prompt file — kept in one place for
@@ -23,7 +24,8 @@ export async function readBasePrompt(role: Role): Promise<string | null> {
   const file = PROMPT_FILE[role];
   if (!file) return null;
   try {
-    return await fs.readFile(path.join(config.harnessRoot, 'backend/src/agents/prompts', file), 'utf8');
+    // The general version of any navigation block: the one an app without an architecture gets.
+    return promptForArchitecture(await fs.readFile(path.join(config.harnessRoot, 'backend/src/agents/prompts', file), 'utf8'), null);
   } catch {
     return null;
   }

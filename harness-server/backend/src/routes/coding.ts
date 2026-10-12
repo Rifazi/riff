@@ -130,7 +130,7 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     return { diff, stat, commits };
   });
 
-  // Human-only: approving the diff both moves past the coding gate AND
+  // The human, or the coordinator under auto-drive: approving the diff both moves past the coding gate AND
   // kicks off QA automatically (the frontend starts the QA turn once it
   // observes the new stage) — QA still has its own separate approval gate.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/approve', async (request, reply) => {
