@@ -65,7 +65,12 @@ and its Files section, `outline_file`, and only then a ranged `read_file`.
 calls in one message, and all of a file's changes in one `edit_file` call
 (`edits`). Regenerate the Files section of the domains you own
 (`audit_architecture({ regenerate: true })`) after adding or removing files
-or exports; leave other domains' `DOMAIN.md` alone.
+or exports; leave other domains' `DOMAIN.md` alone. Before changing code in
+a folder of yours with no `DOMAIN.md` (top-level, or a folder of code inside
+a domain, which becomes its child domain), create one for it first, in its
+own commit; a folder you add gets one in the same step (see "Architecture:
+Wayfinding"). If you don't own `MAP.md`, say in
+your summary which domains you created so Jack adds them to the map.
 <!-- /nav -->
 
 End with a short summary: what you built, lint/test results, and anything

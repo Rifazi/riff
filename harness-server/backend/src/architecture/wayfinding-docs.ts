@@ -46,7 +46,7 @@ Owns: <the decisions this domain makes>
 Owns data: <tables this domain writes, or "none">
 Child domains: <names, or "none">
 Does not own: <nearby decisions that live elsewhere (see <domain>)>
-Interface: <public functions in ${config.interfaceFile}>
+Interface: <public functions in ${config.interfaceFile}, or in the file named after this folder when there is no ${config.interfaceFile}>
 Checkpoint: <command that runs this domain's tests>
 
 ## Rules
@@ -98,8 +98,8 @@ Every change answers three questions:
 | Concept | Here |
 | --- | --- |
 | Domain | A folder under ${src} with a \`${DOMAIN_DOC}\`. Owns a set of decisions and the data they need; only it writes its own data. |
-| Public interface | The domain's \`${config.interfaceFile}\`: the only file other domains import. |
-| Child domain | A domain folder inside a domain. Visible only to its parent (and its siblings). Never depends on its parent. |
+| Public interface | The domain's \`${config.interfaceFile}\`, or, when it has none, the file named after its folder (a page's \`ProjectListPage/ProjectListPage.tsx\`): the only file other domains import. No re-export file is needed when that file already is the public surface. |
+| Child domain | A domain folder inside a domain. **Every folder of code inside a domain is one** (a component, a page's part, a module), with its own \`${DOMAIN_DOC}\`; folders of tests and fixtures aren't. Visible only to its parent (and its siblings). Never depends on its parent. Its public file is the code file named after its folder, unless it has a \`${config.interfaceFile}\`. |
 | Junction | A domain whose rules combine other domains' decisions (\`Kind: junction\` and \`Inputs:\` in its ${DOMAIN_DOC}). |
 | Map | \`${MAP_PATH}\` at the repo root: one line per top-level domain and junction. |
 | Segment | A bounded step of a change: one decision through one domain's boundary, validated and revertible on its own. |
@@ -126,7 +126,7 @@ Every change answers three questions:
 ## While changing code
 
 - Change a decision only in its owning domain.
-- Reach other domains only through their \`${config.interfaceFile}\`. Never import another domain's other files.
+- Reach other domains only through their public file (\`${config.interfaceFile}\`, or the file named after the folder). Never import another domain's other files.
 - From outside a parent domain, never import its child domains.
 - Never re-implement another domain's decision; call it.
 - Write a table only from the domain that owns it.
@@ -150,6 +150,10 @@ Every change answers three questions:
 
 Write down what the code cannot tell you. Do not restate what it can, unless the restatement is anchored to a test.
 
+Keep each \`${DOMAIN_DOC}\` about its own folder. A rule, a hidden behavior or a recipe goes in the narrowest domain whose code
+implements it; a parent keeps only the decisions it makes itself (how its children fit together) and lists its children under
+"Child domains". That is what keeps a top-level \`${DOMAIN_DOC}\` short as the code under it grows.
+
 - **Freely:** workflows that leave the repository, why a rule exists, traps ("never call X before Y"), business vocabulary, recipes.
 - **Anchored:** business rules in plain English, each with an *Enforced by* test. A rule without one is a second authority in prose.
 
@@ -162,7 +166,7 @@ Write down what the code cannot tell you. Do not restate what it can, unless the
 ## Mechanical checks
 
 In Riff Dev Sessions the agents run \`audit_architecture\`, which checks: other domains reached only through
-\`${config.interfaceFile}\`; child domains visible only inside their parent; no child depending on its parent; no dependency
+their public file; child domains visible only inside their parent; no child depending on its parent; no dependency
 cycles; every rule anchored to a test that exists; no rule in two domains; files named in Recipes exist; the generated Files and
 Consumers sections match the code; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
 entities, one writer per table with the domain's prefix, listed under "Owns data". The reference repo's
@@ -176,9 +180,10 @@ ${renderDomainTemplate(config)}
 
 ## Adopting it in an existing codebase
 
-Wayfinding doesn't need a rewrite. Legacy code starts off the map, and the map grows with each change: find the decision the
-next change touches, draw a domain around it (an adapter in front of legacy code if needed), list its consumers, add it to
-\`${MAP_PATH}\`, and plan the change as segments. Tables with several writers are declared under "Legacy tables" in
+Wayfinding doesn't need a rewrite. Legacy code starts off the map, and the map grows with each change: a change that touches
+code in a folder with no \`${DOMAIN_DOC}\` first draws a domain around it (an adapter in front of legacy code if needed), in its
+own segment: write its \`${DOMAIN_DOC}\` from the code you read, list its consumers, add it to \`${MAP_PATH}\`, then plan the change
+as segments. The mechanical checks report a branch that changed code on no domain. Tables with several writers are declared under "Legacy tables" in
 \`${MAP_PATH}\`; existing writers are declared exceptions, and the list only shrinks.
 `;
 }
@@ -187,8 +192,10 @@ const SHARED = (c: WayfindingConfig) =>
   `This app follows Wayfinding Architecture: every important decision is owned by exactly one domain. Domains are folders ` +
   `under ${describeSrcDirs(c, (s) => s)} with a ${DOMAIN_DOC} (Owns, Does not own, Interface, Checkpoint, Rules anchored to tests, ` +
   `Hidden behavior, Recipes, Mirrors, and generated Files and Consumers lists). ${MAP_PATH} at the repo root indexes the ` +
-  `top-level domains and junctions. Other domains are reached only through a domain's ${c.interfaceFile}; a child domain is ` +
-  `visible only inside its parent. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading), and ` +
+  `top-level domains and junctions. Other domains are reached only through a domain's public file: its ${c.interfaceFile}, or the file named after ` +
+  `its folder when it has none (Files marks it "(interface)"); a child domain is ` +
+  `visible only inside its parent, and every folder of code inside a domain is a child domain with its own ${DOMAIN_DOC}, so ` +
+  `each ${DOMAIN_DOC} describes only its own folder. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading), and ` +
   `search_docs searches them along with docs/. The full procedure, with the ${DOMAIN_DOC} template, is ${WAYFINDING_GUIDE_PATH}. ` +
   `audit_architecture runs the mechanical checks and lists the domains with their folders.`;
 
@@ -202,11 +209,11 @@ const FINDING_CODE = (c: WayfindingConfig) =>
   `1. read_doc ${MAP_PATH}: find the domain that owns the decision.\n` +
   `2. read_doc that domain's ${DOMAIN_DOC}, one heading at a time when you need only part of it ("Files", "Rules", ` +
   `"Hidden behavior", "Recipes"). Its generated Files section lists every file the domain holds and what each exports, ` +
-  `the ${c.interfaceFile} first.\n` +
+  `the public file first, marked "(interface)".\n` +
   `3. Go straight to the file Files names: outline_file it, then read_file only the range you need. To find a call site ` +
   `or a symbol, search_code inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob already ` +
   `starts in the domains you're working on and says so.\n` +
-  `4. Another domain: read its ${c.interfaceFile}, never its private files.\n` +
+  `4. Another domain: read its public file, never its private files.\n` +
   `5. Search the whole repo (search_code with glob ".") only for code that's on no domain yet: config, entry points, and ` +
   `the folders audit_architecture lists as not on the map yet. Never read a whole folder's files to find something.`;
 
@@ -237,7 +244,11 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `Make each plan step one segment: one decision through one domain's boundary, describable in advance, validated and ` +
       `revertible on its own. Name the domain and its Checkpoint command in the step, and the ${DOMAIN_DOC} sections the step ` +
       `updates. Changes to Owns, Does not own, Mirrors or junction inputs get their own step, as do creating, merging or splitting ` +
-      `a domain (logged under Structural changes in ${MAP_PATH}). When an interface with separately deployed, external or ` +
+      `a domain (logged under Structural changes in ${MAP_PATH}). When a step changes code in a folder with no ${DOMAIN_DOC} ` +
+      `(audit_architecture lists them as not on the map yet, or as folders of code inside a domain), an earlier step of its own ` +
+      `creates that ${DOMAIN_DOC}: a top-level one goes on ${MAP_PATH}, a folder inside a domain becomes its child domain. A ` +
+      `step that adds a folder of code (a component, a module) gives it a ${DOMAIN_DOC} in the same step. Put each rule in the ` +
+      `plan under the narrowest domain that implements it. When an interface with separately deployed, external or ` +
       `persisted consumers changes, plan expand then contract: add the new shape, move consumers one step at a time, remove the ` +
       `old shape last; schema changes are forward-only. Behavior-neutral work (refactors, upgrades) takes the short route: ` +
       `domain, interface unchanged, consumers, segments. A decision gets a new domain only when a second place needs it.`,
@@ -245,7 +256,7 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `${FINDING_CODE(config)}\n\n` +
       `Read first, update last. Before changing code, read ${MAP_PATH} and the ${DOMAIN_DOC} of the domain the step names ` +
       `(its parent's first), and follow the plan's Route. Change a decision only in its owning domain; reach other domains only ` +
-      `through their ${config.interfaceFile}; never import a child domain from outside its parent; never re-implement another ` +
+      `through their public file (${config.interfaceFile}, or the file named after the folder); never import a child domain from outside its parent; never re-implement another ` +
       `domain's decision, call it; write a table only from its owning domain. In the same step as the code, update that ` +
       `${DOMAIN_DOC}'s Rules (each anchored: Enforced by: <test file> › "<test name>", with that test written), Hidden behavior ` +
       `and Recipes. Ownership changes (Owns, Does not own, Mirrors) and new domains go in their own step and commit; log a new, ` +
@@ -255,14 +266,27 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `that page covers only code on no domain. If ${DOMAIN_DOC} and the code disagree, a test this step didn't modify decides; fix the wrong side ` +
       `and say so. Finish each step with the domain's Checkpoint passing and audit_architecture showing no problems in the ` +
       `domains you touched. Use note_for_qa for the route you actually took if it differs from the plan, any ownership change, ` +
-      `and hidden behavior you discovered. When splitting work across a team, give each workstream whole domains as its owned paths.`,
+      `and hidden behavior you discovered. When splitting work across a team, give each workstream whole domains as its owned paths.\n\n` +
+      `Every folder of code has a ${DOMAIN_DOC}: each top-level folder under the domain folders, and inside a domain every ` +
+      `folder that holds code (a component, a page's part, a module) as a child domain; folders of tests and fixtures don't. ` +
+      `Before changing files in a folder without one (audit_architecture lists them, and with your branch's changes reports ` +
+      `them as a problem), create it first, as its own commit: copy the template from ${WAYFINDING_GUIDE_PATH} and fill it in ` +
+      `from the code you read (Owns, Does not own, Interface, Checkpoint, the Rules its code implements anchored to tests ` +
+      `that exist, Hidden behavior). A top-level one goes on ${MAP_PATH}. A child's Parent is the domain above it: add it to ` +
+      `that parent's "Child domains" and move the parent's rules, hidden behavior and recipes about it into the child, so the ` +
+      `parent keeps only its own decisions. A folder you add gets its ${DOMAIN_DOC} in the same step. A child's public file is ` +
+      `the code file named after its folder (no re-export file), unless it has a ${config.interfaceFile}. Log each new domain ` +
+      `under Structural changes in ${MAP_PATH} and run audit_architecture({ regenerate: true }) for Files and Consumers. ` +
+      `Files directly under a domain folder setting (entry points such as src/app.ts) are exempt. A step isn't finished while ` +
+      `the audit reports changed code with no ${DOMAIN_DOC}.`,
     qa:
       `${FINDING_CODE(config)}\n\n` +
       `You are the independent QA the procedure calls for: validate the code and the docs together. Run audit_architecture: ` +
       `it reports the structural and doc checks, which domains the branch touched and any ownership or structural edits. Flag ` +
       `as findings: an audit problem in MAP.md or a domain the branch touched; a changed business rule without a matching ` +
       `change in that domain's Rules, anchored to a test that exists; Owns, Does not own or Mirrors changed without being its ` +
-      `own commit/step, or inconsistent with the guardrails; a new domain not logged in ${MAP_PATH}; duplicate authority (logic ` +
+      `own commit/step, or inconsistent with the guardrails; a new domain not logged in ${MAP_PATH}; code changed in a folder with no ${DOMAIN_DOC}, top-level or inside a domain (the audit reports it); a parent ` +
+      `${DOMAIN_DOC} that describes a child domain's behavior instead of leaving it to the child's; duplicate authority (logic ` +
       `outside the owning domain that re-implements its decision), undeclared mirrors, and misplaced decisions (a rule ` +
       `implemented in a consumer); hidden behavior the work relied on or discovered but didn't record; and a diff touching ` +
       `domains the plan's Route didn't name. When the docs and the code disagree and no test the branch didn't modify settles ` +

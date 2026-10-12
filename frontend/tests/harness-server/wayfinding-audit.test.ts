@@ -209,6 +209,62 @@ describe('generated Files section', () => {
   });
 });
 
+describe('a domain without service.ts', () => {
+  // A React page as a child domain: its component file is its interface.
+  function seedPage() {
+    write('src/invoice/DOMAIN.md', domainDoc('invoice', { children: 'InvoicePage' }));
+    write('src/invoice/InvoicePage/DOMAIN.md', domainDoc('InvoicePage', { parent: 'invoice' }));
+    write('src/invoice/InvoicePage/InvoicePage.tsx', "import { Row } from './Row'\nexport function InvoicePage() { return Row }\n");
+    write('src/invoice/InvoicePage/Row.tsx', 'export const Row = 1\n');
+    // Styles share the page's name but are never its interface.
+    write('src/invoice/InvoicePage/InvoicePage.css', '.page {}\n');
+  }
+
+  test('is reached through the file named after its folder', () => {
+    seedPage();
+    write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nimport { InvoicePage } from './InvoicePage/InvoicePage'\nexport const render = () => [priceFor(), InvoicePage]\n");
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(messages()).toEqual([]);
+    expect(readFileSync(path.join(repo, 'src/invoice/InvoicePage/DOMAIN.md'), 'utf8')).toContain(
+      '- `InvoicePage.tsx` (interface): InvoicePage\n- `InvoicePage.css`\n- `Row.tsx`: Row\n'
+    );
+  });
+
+  test('any other file of it is private', () => {
+    seedPage();
+    write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nimport { Row } from './InvoicePage/Row'\nexport const render = () => [priceFor(), Row]\n");
+    expect(messages()).toContain(
+      'src/invoice/service.ts imports src/invoice/InvoicePage/Row.tsx: reaches a private file of invoice/InvoicePage; import its InvoicePage file'
+    );
+  });
+
+  test('a domain that has a service.ts keeps it as its only public file', () => {
+    write('src/pricing/pricing.ts', 'export const other = 1\n');
+    write('src/invoice/service.ts', "import { other } from '../pricing/pricing'\nexport const render = () => other\n");
+    expect(messages().some((m) => m.includes('reaches a private file of pricing; import its service.ts'))).toBe(true);
+  });
+});
+
+describe('folders of code inside a domain', () => {
+  test('each one without a DOMAIN.md is listed as a child domain to be; tests and styles-only folders are not', () => {
+    write('src/invoice/Header/Header.tsx', 'export const Header = 1\n');
+    write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 1\n');
+    write('src/invoice/__tests__/a.test.ts', "test('x', () => {})\n");
+    write('src/invoice/assets/style.css', '.a {}\n');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    const audit = auditWayfinding(repo, CONFIG);
+    expect(audit.undocumented).toEqual([
+      { folder: 'src/invoice/Header', parent: 'invoice' },
+      { folder: 'src/invoice/Header/parts', parent: 'invoice' },
+    ]);
+    expect(audit.problems).toEqual([]);
+    expect(formatWayfindingAudit(audit)).toContain('Folders of code inside a domain with no DOMAIN.md of their own');
+
+    write('src/invoice/Header/DOMAIN.md', domainDoc('Header', { parent: 'invoice' }));
+    expect(auditWayfinding(repo, CONFIG).undocumented).toEqual([{ folder: 'src/invoice/Header/parts', parent: 'invoice/Header' }]);
+  });
+});
+
 describe('several source folders', () => {
   const TWO = { ...CONFIG, srcDirs: ['src', 'client/src'] };
 
@@ -308,6 +364,24 @@ describe('parseArchitectureConfig', () => {
 describe('branch scope', () => {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 
+  test('changed code in a folder inside a domain with no DOMAIN.md is flagged as a child domain to create', async () => {
+    write('src/invoice/Header/Header.tsx', 'export const Header = 1\n');
+    write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 1\n');
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+    git('checkout', '-qb', 'feature');
+    write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 2\n');
+
+    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const audit = auditWayfinding(repo, CONFIG);
+    const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
+    // The outermost folder first: its subfolders become its children once it's a domain.
+    expect(scope.offMap).toEqual([{ folder: 'src/invoice/Header', parent: 'invoice', files: ['src/invoice/Header/parts/Logo.tsx'] }]);
+    expect(scope.byDomain).toEqual([{ domain: 'invoice', files: ['src/invoice/Header/parts/Logo.tsx'] }]);
+    expect(formatWayfindingAudit(audit, scope)).toContain('- src/invoice/Header/: child domain of invoice (src/invoice/Header/parts/Logo.tsx)');
+  });
+
   test('lists touched domains, ownership edits and new domains against the base branch', async () => {
     git('init', '-q', '-b', 'main');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
@@ -335,5 +409,34 @@ describe('branch scope', () => {
     const report = formatWayfindingAudit(audit, scope);
     expect(report).toContain('top-level domain tax is not on the map');
     expect(report).toContain('ownership change: src/pricing/DOMAIN.md (Owns); must be its own segment');
+  });
+
+  test('changed code in a folder with no DOMAIN.md is a problem; files straight under the source folder are not', async () => {
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+    git('checkout', '-qb', 'feature');
+    write('src/lib/util.ts', 'export const x = 2\n');
+    write('src/lib/more/helper.ts', 'export const y = 1\n');
+    write('src/main.ts', 'export {}\n');
+
+    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const audit = auditWayfinding(repo, CONFIG);
+    const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
+    expect(scope.offMap).toEqual([{ folder: 'src/lib', parent: null, files: ['src/lib/more/helper.ts', 'src/lib/util.ts'] }]);
+    const report = formatWayfindingAudit(audit, scope);
+    expect(report).toContain('✗ This branch changed code in 1 folder(s) with no DOMAIN.md:\n- src/lib/: top-level domain, add it to MAP.md (');
+    expect(report).not.toContain('✓ No problems');
+
+    // Once the folder has a DOMAIN.md it's a domain, and its own folder of code is next: a child domain.
+    write('src/lib/DOMAIN.md', domainDoc('lib'));
+    const after = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    expect(branchScope(auditWayfinding(repo, CONFIG), 'main', after!.files, after!.docDiff).offMap).toEqual([
+      { folder: 'src/lib/more', parent: 'lib', files: ['src/lib/more/helper.ts'] },
+    ]);
+
+    write('src/lib/more/DOMAIN.md', domainDoc('more', { parent: 'lib' }));
+    const done = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    expect(branchScope(auditWayfinding(repo, CONFIG), 'main', done!.files, done!.docDiff).offMap).toEqual([]);
   });
 });

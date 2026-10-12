@@ -44,6 +44,10 @@ export interface WayfindingAudit {
   domains: WayfindingDomainSummary[];
   // Top-level folders under the source folders with no domain in them: legacy code not on the map yet.
   offMap: string[];
+  // Folders inside a domain that hold code but have no DOMAIN.md of their
+  // own. Every such folder (a component, a page's part, a module) is meant to
+  // be a child domain, so a parent's DOMAIN.md never has to describe it.
+  undocumented: { folder: string; parent: string }[];
   problems: WayfindingProblem[];
   // DOMAIN.md files whose generated sections were rewritten (regenerate: true).
   regenerated: string[];
@@ -69,6 +73,8 @@ interface Domain {
 const CODE_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', '.next', '.turbo', 'cdk.out', 'target', 'vendor']);
 const MAX_DEPTH = 10;
+// Folders of tests and fixtures are part of the domain they sit in, never a child domain.
+const TEST_DIRS = new Set(['__tests__', '__mocks__', '__snapshots__', '__fixtures__', 'fixtures', 'test', 'tests']);
 const GENERATED_BLOCK = /<!-- generated: do not edit -->[\s\S]*?<!-- end generated -->/;
 const FILES_BLOCK = /<!-- generated: files, do not edit -->[\s\S]*?<!-- end generated -->/;
 const MAX_FILES_LISTED = 60;
@@ -339,6 +345,29 @@ export function listDomains(repoRoot: string, config: WayfindingConfig): { id: s
     .map((d) => ({ id: d.id, dir: d.rel }));
 }
 
+/**
+ * Folders inside a domain that directly hold (non-test) code and have no
+ * DOMAIN.md, at any depth: each should be a child domain of the nearest
+ * domain above it. Child domains are left to their own pass.
+ */
+function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; parent: string }[] {
+  const found: { folder: string; parent: string }[] = [];
+  const childDirs = new Set(d.children.map((c) => c.dir));
+  const visit = (dir: string, depth: number) => {
+    if (depth > MAX_DEPTH) return;
+    for (const entry of listDir(dir).sort()) {
+      if (entry.startsWith('.') || SKIP_DIRS.has(entry) || TEST_DIRS.has(entry)) continue;
+      const p = path.join(dir, entry);
+      if (!isDir(p) || childDirs.has(p) || existsSync(path.join(p, DOMAIN_DOC))) continue;
+      const holdsCode = listDir(p).some((f) => isCode(f) && !isTest(path.join(p, f)) && !isDir(path.join(p, f)));
+      if (holdsCode) found.push({ folder: toPosix(path.relative(repoRoot, p)), parent: d.id });
+      visit(p, depth + 1);
+    }
+  };
+  visit(d.dir, 0);
+  return found;
+}
+
 // Markdown formatters (run_prettier) put blank lines around the list.
 const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
 
@@ -369,9 +398,8 @@ export function exportedNames(source: string): string[] {
  * (child domains list their own), with what each code file exports, so an
  * agent goes from DOMAIN.md straight to the file it needs.
  */
-export function filesBlock(files: { path: string; source: string | null }[], interfaceFile: string): string {
-  const stem = interfaceFile.replace(/\.[^.]+$/, '');
-  const isInterface = (file: string) => !file.includes('/') && stemOf(file) === stem;
+export function filesBlock(files: { path: string; source: string | null }[], publicStem: string): string {
+  const isInterface = (file: string) => !file.includes('/') && isCode(file) && stemOf(file) === publicStem;
   const tests = files.filter((f) => isTest(f.path)).map((f) => `\`${f.path}\``);
   // The interface first: it's what other domains call.
   const lines = files
@@ -386,6 +414,18 @@ export function filesBlock(files: { path: string; source: string | null }[], int
   if (lines.length > MAX_FILES_LISTED) listed.push(`- … ${lines.length - MAX_FILES_LISTED} more`);
   if (tests.length) listed.push(`- tests: ${tests.join(', ')}`);
   return `<!-- generated: files, do not edit -->\n${listed.length ? `${listed.join('\n')}\n` : '- none\n'}<!-- end generated -->`;
+}
+
+/**
+ * The stem of a domain's one public file: the configured interface file
+ * (service.ts) when the domain has one, else the file named after its folder
+ * (a React page's ProjectListPage/ProjectListPage.tsx), which needs no extra
+ * re-export file to be the interface.
+ */
+export function publicStemOf(dir: string, config: WayfindingConfig): string {
+  const stem = interfaceStem(config);
+  const hasInterfaceFile = CODE_EXTS.some((ext) => existsSync(path.join(dir, stem + ext)));
+  return hasInterfaceFile ? stem : path.basename(dir);
 }
 
 /** Files a domain holds itself, relative to its folder: its child domains' files are theirs. */
@@ -417,6 +457,7 @@ export function auditWayfinding(
     mapExists: existsSync(mapFile),
     domains: [],
     offMap: [],
+    undocumented: [],
     problems: [],
     regenerated: [],
     usesTypeOrm: false,
@@ -448,7 +489,7 @@ export function auditWayfinding(
     problems.push({ kind, file, domain: domain?.id ?? null, message });
   const rel = (p: string) => toPosix(path.relative(repoRoot, p));
   const docPath = (d: Domain) => `${d.rel}/${DOMAIN_DOC}`;
-  const stem = interfaceStem(config);
+  const publicStems = new Map(domains.map((d) => [d, publicStemOf(d.dir, config)]));
 
   const ownerOf = (file: string): Domain | undefined =>
     domains.filter((d) => file.startsWith(d.dir + path.sep)).sort((a, b) => b.dir.length - a.dir.length)[0];
@@ -456,6 +497,8 @@ export function auditWayfinding(
     for (let p = b.parent; p; p = p.parent) if (p === a) return true;
     return false;
   };
+
+  for (const d of domains) audit.undocumented.push(...undocumentedFolders(d, repoRoot));
 
   // Several source folders can each have a domain with the same id.
   const seenIds = new Map<string, Domain>();
@@ -492,8 +535,10 @@ export function auditWayfinding(
         fail('structure', rel(file), from, `${where}: a child domain may not depend on its parent (${to.id})`);
         continue;
       }
-      if (!(path.dirname(target) === to.dir && stemOf(target) === stem)) {
-        fail('structure', rel(file), from, `${where}: reaches a private file of ${to.id}; import its ${config.interfaceFile}`);
+      const publicStem = publicStems.get(to)!;
+      if (!(path.dirname(target) === to.dir && isCode(target) && stemOf(target) === publicStem)) {
+        const publicFile = publicStem === interfaceStem(config) ? config.interfaceFile : `${publicStem} file`;
+        fail('structure', rel(file), from, `${where}: reaches a private file of ${to.id}; import its ${publicFile}`);
       }
       if (to.parent && from !== to.parent && from.parent !== to.parent) {
         fail('structure', rel(file), from, `${where}: ${to.id} is a child domain, visible only inside ${to.parent.id}`);
@@ -608,7 +653,7 @@ export function auditWayfinding(
       .sort();
     const files = ownFiles(d).map((f) => ({ path: f, source: isCode(f) ? readText(path.join(d.dir, f)) : null }));
     const sections = [
-      { title: 'Files', pattern: FILES_BLOCK, expected: filesBlock(files, config.interfaceFile), stale: 'Files section is stale (a file was added, removed or changed its exports)' },
+      { title: 'Files', pattern: FILES_BLOCK, expected: filesBlock(files, publicStems.get(d)!), stale: 'Files section is stale (a file was added, removed or changed its exports)' },
       { title: 'Consumers', pattern: GENERATED_BLOCK, expected: consumersBlock(consumers), stale: `Consumers section is stale (should be: ${consumers.join(', ') || 'none'})` },
     ];
     let rewritten = false;
@@ -700,6 +745,11 @@ export interface BranchScope {
   base: string;
   byDomain: { domain: string; files: string[] }[];
   outside: string[];
+  // Changed files in a folder that should have a DOMAIN.md and doesn't: a
+  // top-level folder under a source folder with no domain (no parent), or a
+  // folder of code inside a domain (parent = that domain's id, the child
+  // domain it should become).
+  offMap: { folder: string; parent: string | null; files: string[] }[];
   // DOMAIN.md files whose ownership lines (Owns, Does not own, Owns data, Kind, Inputs, Parent, Child domains) changed.
   ownershipEdits: { file: string; fields: string[] }[];
   // DOMAIN.md files added or deleted: structural changes, logged in MAP.md.
@@ -719,6 +769,27 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     else outside.push(file);
   }
 
+  // Files straight under a source folder have no folder to draw a domain
+  // around; they stay in `outside`.
+  const roots = auditedSrcDirs(audit).filter((d) => d !== '.');
+  const offMap = new Map<string, { parent: string | null; files: string[] }>();
+  const flag = (folder: string, parent: string | null, file: string) =>
+    offMap.set(folder, { parent, files: [...(offMap.get(folder)?.files ?? []), file] });
+  for (const file of outside) {
+    const root = roots.find((r) => file.startsWith(`${r}/`));
+    const rest = root ? file.slice(root.length + 1) : null;
+    if (!rest || !rest.includes('/') || path.posix.basename(file) === DOMAIN_DOC) continue;
+    flag(`${root}/${rest.split('/')[0]}`, null, file);
+  }
+  // Inside a domain, the outermost folder without a DOMAIN.md comes first: its
+  // own subfolders become its children once it is a domain.
+  const undocumented = [...(audit.undocumented ?? [])].sort((a, b) => a.folder.length - b.folder.length);
+  for (const file of changedFiles) {
+    if (path.posix.basename(file) === DOMAIN_DOC) continue;
+    const missing = undocumented.find((u) => file.startsWith(`${u.folder}/`));
+    if (missing) flag(missing.folder, missing.parent, file);
+  }
+
   const ownershipEdits: BranchScope['ownershipEdits'] = [];
   const structural: BranchScope['structural'] = [];
   for (const chunk of domainDocDiff.split(/^diff --git /m).slice(1)) {
@@ -736,9 +807,17 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     base,
     byDomain: [...byDomain].map(([domain, files]) => ({ domain, files })).sort((a, b) => a.domain.localeCompare(b.domain)),
     outside,
+    offMap: [...offMap]
+      .map(([folder, { parent, files }]) => ({ folder, parent, files: files.sort() }))
+      .sort((a, b) => a.folder.localeCompare(b.folder)),
     ownershipEdits,
     structural,
   };
+}
+
+/** The source folders the audit actually walked. */
+function auditedSrcDirs(audit: WayfindingAudit): string[] {
+  return audit.inferredSrcDir ? [audit.inferredSrcDir] : audit.srcDirs.filter((d) => !audit.missingSrcDirs.includes(d));
 }
 
 // The +/- lines of a diff chunk that fall under a "## <title>" heading (as far
@@ -763,9 +842,9 @@ function sectionDiff(chunk: string, title: string): string {
 const MAX_LISTED = 40;
 
 export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScope | null): string {
-  const audited = audit.inferredSrcDir ? [audit.inferredSrcDir] : audit.srcDirs.filter((d) => !audit.missingSrcDirs.includes(d));
+  const audited = auditedSrcDirs(audit);
   const folders = (dirs: string[]) => dirs.map((d) => `${d}/`).join(', ');
-  const lines: string[] = [`Wayfinding audit: domains under ${folders(audited.length ? audited : audit.srcDirs)}, public interface ${audit.interfaceFile}`];
+  const lines: string[] = [`Wayfinding audit: domains under ${folders(audited.length ? audited : audit.srcDirs)}, public interface ${audit.interfaceFile} (or the file named after the domain's folder)`];
   if (audit.inferredSrcDir) {
     lines.push(
       `The app's source folder setting is ${folders(audit.srcDirs)}, which doesn't exist; every ${DOMAIN_DOC} is under ${audit.inferredSrcDir}/, ` +
@@ -822,11 +901,28 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
     }
     if (problems.length > MAX_LISTED) lines.push(`- … ${problems.length - MAX_LISTED} more`);
   };
-  if (!audit.problems.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
+  const offMap = scope?.offMap ?? [];
+  if (!audit.problems.length && !offMap.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
   else if (!touched) listProblems(`✗ ${audit.problems.length} problem(s):`, audit.problems);
   else {
     if (inScope.length) listProblems(`✗ ${inScope.length} problem(s) in MAP.md or domains this branch touched:`, inScope);
-    else lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
+    else if (!offMap.length) lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
+    if (offMap.length) {
+      lines.push('', `✗ This branch changed code in ${offMap.length} folder(s) with no ${DOMAIN_DOC}:`);
+      for (const o of offMap) {
+        const shown = o.files.slice(0, 5).join(', ');
+        const what = o.parent ? `child domain of ${o.parent}` : `top-level domain, add it to ${MAP_PATH}`;
+        lines.push(`- ${o.folder}/: ${what} (${shown}${o.files.length > 5 ? ', …' : ''})`);
+      }
+      lines.push(
+        `  Give each one a ${DOMAIN_DOC}, created before you change its code (a folder you're adding gets one with it): fill ` +
+          `it in from the code (Owns, Does not own, Interface, Checkpoint, the Rules its code implements anchored to tests ` +
+          `that exist, Hidden behavior). A child domain's Parent is the domain above it; add it to that parent's "Child ` +
+          `domains" and move the parent's rules about it into the new ${DOMAIN_DOC}. Its public file is the code file named ` +
+          `after its folder unless it has a service.ts. Log it under Structural changes in ${MAP_PATH}, then run ` +
+          'audit_architecture({ regenerate: true }).'
+      );
+    }
     if (elsewhere.length) listProblems(`${elsewhere.length} problem(s) in domains this branch didn't touch (pre-existing, or knock-on from an interface change):`, elsewhere);
   }
 
@@ -842,6 +938,14 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
     for (const o of scope.ownershipEdits) lines.push(`- ownership change: ${o.file} (${o.fields.join(', ')}); must be its own segment`);
   }
 
+  if (audit.undocumented.length) {
+    const shown = audit.undocumented.slice(0, 12).map((u) => `${u.folder}/ (in ${u.parent})`).join(', ');
+    lines.push(
+      '',
+      `Folders of code inside a domain with no ${DOMAIN_DOC} of their own (each becomes a child domain when a change touches it): ` +
+        `${shown}${audit.undocumented.length > 12 ? ', …' : ''}`
+    );
+  }
   if (audit.offMap.length) {
     const shown = audit.offMap.slice(0, 12).join(', ');
     lines.push('', `Not on the map yet (legacy code, fine until a change needs a domain there): ${shown}${audit.offMap.length > 12 ? ', …' : ''}`);

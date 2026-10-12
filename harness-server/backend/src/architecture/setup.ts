@@ -65,7 +65,9 @@ export async function setupArchitecture(app: AppConfig): Promise<ArchitectureSet
     }
 
     if (!written.length) return { actions: ['Wayfinding files are already in place.'], warnings };
-    const commit = await commitPaths(app.repoRoot, written, 'docs: adopt Wayfinding Architecture');
+    // A first setup writes MAP.md; later ones only refresh the guide.
+    const message = written.includes(MAP_PATH) ? 'docs: adopt Wayfinding Architecture' : 'docs: update the Wayfinding guide';
+    const commit = await commitPaths(app.repoRoot, written, message);
     if (commit === 'committed') actions.push(`Committed them on ${baseBranch}.`);
     if (commit === 'no-identity') {
       warnings.push(`Git has no user.name/user.email configured, so they weren't committed. Commit them on ${baseBranch} before starting a coding stage.`);

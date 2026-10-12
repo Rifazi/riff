@@ -1159,6 +1159,86 @@ below) — never inside the target repo.
    Tests: 5 new cases in `wayfinding-audit.test.ts` (20 total, run through a
    node:test shim). comic-drafter set to `server/src`, now 0 problems.
 
+43. User asked why agents on a Wayfinding app still searched whole
+   directories. comic-drafter's sessions showed agents did read MAP.md and
+   DOMAIN.md, then read every file in the domain (DOMAIN.md said nothing
+   about which file did what), searched the whole repo without a glob, and
+   kept docs/architecture.md as a second map, because the base prompts'
+   "find code" guidance was still docs/ → broad search. Half the code
+   (`client/`) was outside the single source folder, so it had no route.
+   - **Several domain folders**: `WayfindingConfig.srcDirs: string[]`
+     (`srcDir` in older config is read by `parseArchitectureConfig` and
+     normalized on load in apps-store). Nested folders are refused. The audit
+     walks every folder, flags a domain id used under two of them, lists
+     configured folders that don't exist, and names folders outside them that
+     hold a DOMAIN.md (the Apps page shows "Add <folder>/").
+   - **Generated Files section** in every DOMAIN.md (`filesBlock`, marker
+     `<!-- generated: files, do not edit -->`): each file the domain holds
+     (child domains list their own) with its exports, interface first, tests
+     on one line. Stale or missing = a docs problem; `regenerate: true` writes
+     it (before Mirrors/Consumers when the heading is missing).
+   - **Prompts**: the base prompts' general find-code/code-map passages sit
+     in `<!-- nav -->…<!-- nav: wayfinding -->…<!-- /nav -->` blocks;
+     `promptForArchitecture` (architecture-context.ts) keeps the version that
+     fits the app, and the Apps page's base prompt shows the general one. The
+     plan/coding/QA briefing opens with "Finding code" (MAP.md → DOMAIN.md →
+     Files → outline → ranged read; search inside the domain; whole repo only
+     for code on no domain), which says it overrides other guidance, for
+     prompt overrides that have no blocks.
+   - **search_docs** also indexes MAP.md and every DOMAIN.md, read fresh from
+     the main checkout on each search's sync (`syncDocsSearch`).
+   - **search_code focus** (`SearchCodeDeps.focus`, `architecture/focus.ts`):
+     without a glob it searches the focus first and says so, then the whole
+     repo when nothing matches there; `glob: "."` skips it. Coding: domains
+     the current step names (its checklist title/brief + plan section,
+     `planStepSection`); team members: their owned paths; QA: domains the
+     branch touched; plan: domains the requirements name.
+   - **Touched code gets a DOMAIN.md**: `branchScope().offMap` groups the
+     branch's changed files that sit in a folder under a source folder with no
+     DOMAIN.md (files straight under a source folder, like `server/src/app.ts`,
+     are exempt). `formatWayfindingAudit` reports them as a problem, so
+     coding can't finish a step and QA flags it. The coding briefing says to
+     create that DOMAIN.md first in its own commit, add it to MAP.md and
+     regenerate; the plan briefing puts that in an earlier step; team members
+     do it in their owned paths and tell Jack for MAP.md.
+   - **Interface without a re-export file**: the paper requires one explicit
+     public file per domain (children too); `service.ts` is only the example's
+     name. `publicStemOf` makes a domain's public file its configured
+     interface file when it has one, else the code file named after its folder
+     (a React page's `ProjectListPage/ProjectListPage.tsx`). The import check
+     and the Files section's "(interface)" mark use it; CSS never qualifies.
+   Tests: `wayfinding-audit.test.ts` (Files section, several folders, config,
+   changed code with no DOMAIN.md, folder-named interface)
+   and `wayfinding-navigation.test.ts` (focus, nav blocks, scoped search,
+   step section), run through a node:test shim. Live-checked on a clone of
+   comic-drafter. Not yet run with real agents.
+
+44. User asked for every component to have its own DOMAIN.md, so top-level
+   DOMAIN.md files don't grow to describe everything under them (applied by
+   hand to comic-drafter first: 14 domains, 7 of them child domains).
+   - **Every folder of code inside a domain is a child domain**:
+     `undocumentedFolders` lists, per domain, each folder at any depth that
+     directly holds non-test code and has no DOMAIN.md (`TEST_DIRS` such as
+     `__tests__`/`fixtures` are skipped) as `audit.undocumented` (`{ folder,
+     parent }`). The full report lists them as child domains to be; the Apps
+     page shows the count.
+   - **Enforced on touch**: `branchScope().offMap` entries now carry `parent`
+     (null = a top-level folder for MAP.md). A changed file under an
+     undocumented folder flags the outermost one; its subfolders come next,
+     once it is a domain. Same problem as step 43's, with instructions for a
+     child: Parent = the domain above, add it to the parent's "Child domains",
+     move the parent's rules about it into the child.
+   - **Docs**: the guide says every folder of code inside a domain is a child
+     domain and that each rule goes in the narrowest domain whose code
+     implements it (a parent keeps only its own decisions). The coding, plan
+     and QA briefings and the team-member prompt say the same: create the
+     DOMAIN.md before changing an undocumented folder (own commit), give a new
+     folder one in the same step, and QA flags a parent describing a child.
+   - A child's public file is the code file named after its folder (step 43),
+     so no re-export file is needed.
+   Tests: `wayfinding-audit.test.ts` (undocumented folders, a branch touching
+   one, the outermost-first order).
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

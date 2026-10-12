@@ -189,6 +189,9 @@ export function ArchitectureTools({
           )}
           <Notice tone={problems ? 'amber' : 'green'}>
             {audit.audit.domains.length} domain(s) · {problems ? `${problems} problem(s)` : 'no problems'}
+            {audit.audit.undocumented?.length
+              ? ` · ${audit.audit.undocumented.length} folder(s) of code without a DOMAIN.md (agents add one when they change them)`
+              : ''}
           </Notice>
           <pre className="max-h-80 overflow-auto custom-scrollbar text-xs bg-muted border border-border rounded-md p-3 whitespace-pre-wrap">
             {audit.report}
