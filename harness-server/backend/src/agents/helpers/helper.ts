@@ -14,6 +14,8 @@ export type { HelperName, HelperRunStats } from '../../sessions/session.js';
 //   research/    `delegate`: read-only research loops on the system Ollama
 //   classifier/  `classify_text`: zero-shot labels from an on-device NLI model
 //   memory/      `recall`: exact lines from files already read in the session
+//   format/      prettier, run by git_commit and finish_step on what they commit
+//                (no model and no tool of its own; counted, not estimated)
 //
 // Every helper run is reported the same way, through reportHelperRun: one
 // usage-log line (kept out of the paid totals; Settings → Dev Agents →

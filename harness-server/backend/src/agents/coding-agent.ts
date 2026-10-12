@@ -52,7 +52,7 @@ import {
 import { createQaExecutors, createQaTools } from './tool-defs/qa-tools.js';
 import { createFinishStepTool, type FinishStepDeps } from './tool-defs/finish-step-tool.js';
 import { createFinishStepToolClaude } from './tool-defs-claude/finish-step-tool.js';
-import { createRunPrettierTool } from './tool-defs/format-tool.js';
+import { runPrettierToolEntry } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
 import { createNoteForQaTool } from './tool-defs/qa-notes-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
@@ -65,7 +65,6 @@ import { createWriteCodingPlanToolClaude } from './tool-defs-claude/coding-plan-
 import { createAssignTeamToolClaude } from './tool-defs-claude/assign-team-tool.js';
 import { createBuildSoloToolClaude, createTeamLeadToolsClaude } from './tool-defs-claude/team-lead-tools.js';
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
-import { createRunPrettierToolClaude } from './tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
 import { createNoteForQaToolClaude } from './tool-defs-claude/qa-notes-tool.js';
 import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from './helpers/research/tool.js';
@@ -97,7 +96,6 @@ const TOOL_NAMES = [
   'write_coding_plan',
   'assign_team',
   'run_checked_command',
-  'run_prettier',
   'run_npm_install',
   'note_for_qa',
   'finish_step',
@@ -116,8 +114,7 @@ const QA_FIX_TEAM_NOTE =
 const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
   `A lighter model (${lightModel}) worked on the step "${stepTitle}" just now but didn't finish it cleanly. ` +
   `Review what it did — its commits on the branch and any uncommitted changes — fix anything that's wrong or ` +
-  `missing, then finish the step exactly as the workflow above says (tests, prettier, commit, lint and test, ` +
-  `mark it done) and stop.`;
+  `missing, then finish the step exactly as the workflow above says (tests, then finish_step) and stop.`;
 
 // See SessionRecord.codingContext: a turn starts a fresh conversation when
 // the last one ended at or above FRESH_CONTEXT_AT_TOKENS, and inside a turn
@@ -342,6 +339,7 @@ export async function runCodingAgentTurn(
     repoRoot: app.repoRoot,
     branch: async () => (await getSession(session.id))?.branch ?? null,
     guard,
+    helperContext,
     runCheck: (command) => runCheckedCommandExecute({ command }),
   };
   const leadDeps = { sessionId: session.id, repoRoot: app.repoRoot };
@@ -479,6 +477,7 @@ export async function runCodingAgentTurn(
         baseBranch: baseBranchFor(app),
         onBranchCreated,
         guard,
+        helperContext,
       });
       const { runGeneratePathsToolClaude, runGenerateOpenApiToolClaude } = createGenerateToolsClaude({
         repoRoot: app.repoRoot,
@@ -513,7 +512,6 @@ export async function runCodingAgentTurn(
             ...(withLeadTools ? createTeamLeadToolsClaude(leadDeps) : []),
             ...(withBuildSolo ? [createBuildSoloToolClaude(leadDeps)] : []),
             runCheckedCommandToolClaude,
-            createRunPrettierToolClaude({ repoRoot: app.repoRoot }),
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
             createFinishStepToolClaude(finishDeps),
@@ -574,6 +572,7 @@ export async function runCodingAgentTurn(
         baseBranch: baseBranchFor(app),
         onBranchCreated,
         guard,
+        helperContext,
       });
       const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
       const { runCheckedCommandTool } = createQaTools({
@@ -606,7 +605,7 @@ export async function runCodingAgentTurn(
         ...createTeamLeadTools(leadDeps),
         build_solo: createBuildSoloTool(leadDeps),
         run_checked_command: runCheckedCommandTool,
-        run_prettier: createRunPrettierTool({ repoRoot: app.repoRoot }),
+        ...runPrettierToolEntry({ repoRoot: app.repoRoot }, session.histories.coding),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
         finish_step: createFinishStepTool(finishDeps),

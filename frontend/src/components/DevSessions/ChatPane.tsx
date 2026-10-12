@@ -79,7 +79,7 @@ function resultBadge(name: string, input: unknown, text: string, isError: boolea
     }
     case 'write_file': return '✓ written';
     case 'run_npm_install': return '✓ installed';
-    case 'run_prettier': return '✓ formatted';
+    case 'run_prettier': return '✓ formatted'; // retired; older transcripts
     case 'git_create_branch': return '✓ created';
     case 'git_commit': return '✓ committed';
     case 'finish_step': {

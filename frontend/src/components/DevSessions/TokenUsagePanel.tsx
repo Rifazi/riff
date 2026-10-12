@@ -644,6 +644,7 @@ function LocalSavings({
   const research = local.byHelper.research;
   const classifier = local.byHelper.classifier;
   const memory = local.byHelper.memory;
+  const format = local.byHelper.format;
   return (
     <div className="rounded-lg border border-success/40 bg-success/10 p-4">
       <div className="text-xs font-medium text-muted-foreground">
@@ -681,6 +682,15 @@ function LocalSavings({
             Classifier: {full(classifier.calls)}{" "}
             {classifier.calls === 1 ? "text" : "texts"} labelled on this
             machine (its saving isn&apos;t measured)
+          </div>
+        )}
+        {format && (
+          <div>
+            Formatter: {full(format.calls)}{" "}
+            {format.calls === 1 ? "commit" : "commits"} formatted on this
+            machine ({full(format.useful)}{" "}
+            {format.useful === 1 ? "file" : "files"}), each one a paid request
+            the agent no longer makes (not measured)
           </div>
         )}
         <div>

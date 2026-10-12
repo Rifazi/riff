@@ -1,6 +1,9 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { createBranch, stageAndCommit } from '../../repo/git.js';
+import { formatFiles } from '../helpers/format/format.js';
+import type { HelperContext } from '../helpers/helper.js';
+import { assertWritable } from './file-tools.js';
 
 const COMMIT_TYPES = ['build', 'chore', 'ci', 'docs', 'feat', 'fix', 'perf', 'refactor', 'revert', 'style', 'test'];
 const COMMIT_PREFIX_RE = new RegExp(`^(${COMMIT_TYPES.join('|')})(\\([\\w./-]+\\))?: `);
@@ -41,7 +44,8 @@ export const gitCommitSchema = z.object({
   files: z.array(z.string()).describe('Repo-relative paths to stage, e.g. ["src/global/schemas/acme.schema.json"]'),
 });
 export const gitCommitDescription =
-  'Stage and commit files on the session\'s branch. The message must be a conventional commit ' +
+  'Format (prettier) then stage and commit files on the session\'s branch; a prettier error commits nothing. ' +
+  'The message must be a conventional commit ' +
   `(e.g. "feat: add acme inventory schema"), subject at most ${MAX_SUBJECT_CHARS} chars; details go in a body after a ` +
   'blank line. Non-conforming messages are rejected before anything is committed.';
 
@@ -56,9 +60,24 @@ export interface GitToolDeps {
   onBranchCreated: (branchName: string) => Promise<void>;
   // A coding-team member's owned paths: commits can't include anything else.
   writablePaths?: string[];
+  // Where formatter runs are reported (helpers/format).
+  helperContext?: HelperContext;
   // Runs before branch creation and every commit, and throws to refuse it
   // (the lead's pending split decision).
   guard?: () => Promise<void>;
+}
+
+// The files git_commit formats: the ones an agent could have written. A
+// lockfile, a generated theme file or one outside the owned paths is left as
+// it is (stageAndCommit applies its own rules to what may be committed).
+function formattable(repoRoot: string, files: string[], writablePaths?: string[]): string[] {
+  return files.flatMap((f) => {
+    try {
+      return [assertWritable(f, repoRoot, writablePaths)];
+    } catch {
+      return [];
+    }
+  });
 }
 
 export function createGitExecutors(deps: GitToolDeps) {
@@ -75,6 +94,8 @@ export function createGitExecutors(deps: GitToolDeps) {
     if (problem) {
       throw new Error(`Not committed: ${problem}. Message was: "${message.split('\n')[0]}"`);
     }
+    const formatted = await formatFiles(deps.repoRoot, formattable(deps.repoRoot, files, deps.writablePaths), deps.helperContext);
+    if (!formatted.ok) return `Nothing committed: prettier failed (usually a syntax error).\n\n${formatted.output}`;
     const hash = await stageAndCommit(deps.repoRoot, branchName, message, files, deps.writablePaths);
     return `Committed ${hash.slice(0, 8)}: ${message}`;
   };

@@ -285,9 +285,10 @@ into steps they can follow along with. So:
       or deleted (never the whole repo). It formats them with prettier,
       commits them, runs lint and then the unit tests, and when both pass
       marks this step `done` and the next one `in_progress`. Don't make
-      separate `run_prettier`, `git_commit`, `run_checked_command` and
-      `write_coding_plan` calls for this; they're for partial commits and
-      checkpoints.
+      separate `git_commit`, `run_checked_command` and `write_coding_plan`
+      calls for this; they're for partial commits and checkpoints. There is
+      no separate formatting step: `git_commit` and `finish_step` run
+      prettier on the files they commit.
    c. If finish_step reports a prettier error or failing lint/tests caused
       by your step, fix it and call finish_step again with the files you
       changed (the earlier commit stays). Don't leave a step you know is

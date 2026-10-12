@@ -207,7 +207,6 @@ export default function RootLayout({
       });
       if (cleanedUpRef.current) {
         unlistenDragLeave();
-        unlisteners.forEach((u) => u());
         return;
       }
       unlisteners.push(unlistenDragLeave);
@@ -222,7 +221,6 @@ export default function RootLayout({
       );
       if (cleanedUpRef.current) {
         unlistenDrop();
-        unlisteners.forEach((u) => u());
         return;
       }
       unlisteners.push(unlistenDrop);

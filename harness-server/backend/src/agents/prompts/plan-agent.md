@@ -70,7 +70,7 @@ full; read the sections you need.
    actually finish — **not** one step per file, but also not so coarse that
    "implement everything" is a single step. A useful rule of thumb: a step
    should be completable in roughly a dozen tool calls (the file writes,
-   `run_prettier`, `git_commit`, lint, checklist update) — typically one per
+   then one call that formats, commits, lints, tests and ticks it off) — typically one per
    affected layer or component, but when a layer would need more files or
    edits than that, split it into multiple sequential steps instead of
    forcing it into one. There's no fixed step count — prefer more, smaller

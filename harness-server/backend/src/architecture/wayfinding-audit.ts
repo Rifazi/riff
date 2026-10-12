@@ -368,7 +368,7 @@ function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; par
   return found;
 }
 
-// Markdown formatters (run_prettier) put blank lines around the list.
+// Markdown formatters (prettier, run by git_commit and finish_step) put blank lines around the list.
 const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
 
 function consumersBlock(consumers: string[]): string {

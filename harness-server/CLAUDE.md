@@ -1401,8 +1401,8 @@ below) — never inside the target repo.
    - **Failures:** a prettier error commits nothing. Failing checks keep the
      commit and leave the step in progress. "Nothing staged" is fine, so a
      second call after a fix re-runs the checks.
-   - **What stays:** `run_prettier`/`git_commit`/`run_checked_command` remain
-     for partial commits and checkpoints.
+   - **What stays:** `git_commit`/`run_checked_command` remain for partial
+     commits and checkpoints (`run_prettier` was retired in step 50).
    - **Prompts:** `coding-agent.md` and `coding-team-member.md` now end each
      step with it. An app's prompt override (e.g. customer-edi's) still
      describes the old sequence; the tool description says to use it
@@ -1473,6 +1473,39 @@ below) — never inside the target repo.
    Typechecked, tests in `coordinator-gate.test.ts`, gate evaluated as
    above. A full unattended run from requirements to an MR has not been
    done yet.
+
+50. User asked for prettier to be run by a helper instead of the agents. The
+   usage log had 154 paid `run_prettier` calls and 150 `git_commit`s. Each
+   `run_prettier` returned one line but cost a request that re-read the whole
+   context, and it nearly always came right before a commit.
+   - **`helpers/format/format.ts`** (`formatFiles`): `npx prettier --write
+     --ignore-unknown` on the files that still exist. It runs no model and
+     has no tool of its own, but each run is reported as helper `format`
+     through `reportHelperRun` (`GitToolDeps`/`FinishStepDeps.helperContext`):
+     files given and formatted, `savedTokens: null`. Counted, not estimated,
+     like the classifier: it saves one paid request per commit, and that
+     request's size (the agent's whole context) isn't visible from the tool.
+     The chat shows `git_commit` as a Formatter card (`FormatDialog` in
+     `HelperBubbles.tsx`); `finish_step` keeps its own card. Token usage has
+     a Formatter line.
+   - **`git_commit`** checks the message first, then formats the files an
+     agent could have written (`assertWritable`; lockfiles, generated theme
+     files and paths outside an engineer's owned paths are left alone), then
+     commits. A prettier error returns "Nothing committed: prettier failed…"
+     with the output. `finish_step` uses the same function.
+   - **`run_prettier`** is no longer offered on either engine. On the AI-SDK
+     engine it's registered only when a replayed history already called it
+     (`runPrettierToolEntry`), and `tool-defs-claude/format-tool.ts` is gone.
+   - **Prompts:** the coding, team-member and plan prompts and the
+     customer-edi legacy overrides no longer have a formatting step. The
+     customer-edi coding override stored in `local-prompts.json` got the
+     same edit, since it had been seeded from the old text.
+
+   Tests: `format-files.test.ts` (temp repo, stub prettier; `formatRunReport`), run with
+   `finish-step`, `git-commit-message` and `coding-team-git` through a Node
+   `bun:test` shim. Not yet run with real agents. To check, look for the
+   `run_prettier` count in `usage-log.jsonl` dropping to 0 with no rise in
+   `git_commit` calls.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

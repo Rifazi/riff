@@ -1,16 +1,12 @@
-import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { mutateSession, getSession } from '../../sessions/session-store.js';
 import { GitPreconditionError, stageAndCommit } from '../../repo/git.js';
 import { assertWritable } from './file-tools.js';
 import { commitMessageProblem } from './git-tools.js';
-import { compactOutput } from './output-compress.js';
-
-const execFileAsync = promisify(execFile);
+import { formatFiles } from '../helpers/format/format.js';
+import type { HelperContext } from '../helpers/helper.js';
 
 // The end of every plan step used to take three to five requests — format,
 // commit, lint, test, mark done — each re-reading the whole context. This
@@ -32,8 +28,8 @@ export const finishStepDescription =
   'Finish a checklist step in one call: prettier on `files`, commit them, run lint and the unit tests, and if both ' +
   "pass, mark the step done and the next pending one in progress. It stops at the first thing that fails and says what: a bad commit message or " +
   'prettier error commits nothing; failing checks leave the commit in place and the step in progress, so fix ' +
-  'and call it again with the files you changed. Use this instead of run_prettier, git_commit, ' +
-  'run_checked_command and a status update at the end of each step.';
+  'and call it again with the files you changed. Use this instead of git_commit, run_checked_command and a ' +
+  'status update at the end of each step.';
 
 export interface FinishStepDeps {
   sessionId: string;
@@ -44,6 +40,8 @@ export interface FinishStepDeps {
   writablePaths?: string[];
   ownSteps?: string[];
   guard?: () => Promise<void>;
+  // Where formatter runs are reported (helpers/format).
+  helperContext?: HelperContext;
   // run_checked_command's execute, so failures get the runner helper's report.
   runCheck: (command: 'lint' | 'test') => Promise<string>;
 }
@@ -76,19 +74,8 @@ export function createFinishStepExecute(deps: FinishStepDeps) {
     const absolute = files.map((f) => assertWritable(f, deps.repoRoot, deps.writablePaths));
 
     // 1. Format what still exists (a deleted file is only committed).
-    const present = absolute.filter((f) => existsSync(f));
-    if (present.length) {
-      try {
-        await execFileAsync('npx', ['prettier', '--write', '--ignore-unknown', ...present], {
-          cwd: deps.repoRoot,
-          timeout: 60_000,
-          maxBuffer: 2_000_000,
-        });
-      } catch (err) {
-        const e = err as { stdout?: string; stderr?: string; message?: string };
-        return `Nothing committed: prettier failed (usually a syntax error).\n\n${compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
-      }
-    }
+    const formatted = await formatFiles(deps.repoRoot, absolute, deps.helperContext);
+    if (!formatted.ok) return `Nothing committed: prettier failed (usually a syntax error).\n\n${formatted.output}`;
 
     // 2. Commit. Nothing new to commit is fine: a second call after a fix
     // that only touched files already committed still runs the checks.
@@ -127,7 +114,7 @@ export function createFinishStepExecute(deps: FinishStepDeps) {
     const testSummary = test.split('\n').slice(1).join('\n').trim();
     const nextLine = next ? ` Next step "${(next as { id: string }).id}" is now in progress.` : ' No pending steps left.';
     return (
-      `${committed}. Formatted ${present.length} file(s); lint and tests passed. Step "${stepId}" is done.${nextLine}` +
+      `${committed}. Formatted ${formatted.formatted} file(s); lint and tests passed. Step "${stepId}" is done.${nextLine}` +
       (testSummary ? `\n\n${testSummary}` : '')
     );
   };

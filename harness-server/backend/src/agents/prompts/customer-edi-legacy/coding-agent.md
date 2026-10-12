@@ -96,28 +96,27 @@ into steps they can follow along with. So:
       repo's convention. Don't defer tests to a later step or leave them
       for QA to notice their absence — a step that adds testable logic
       without a test for it isn't done.
-   b. Run `run_prettier` on exactly those files (only what you just wrote —
-      never the whole repo) so formatting is clean *before* it's committed,
-      not as an afterthought.
-   c. `git_commit` the (now-formatted) files, including any tests you wrote.
-   d. **Verify before stopping** — call `run_checked_command` with `"lint"`,
+   b. `git_commit` exactly those files (only what you just wrote — never the
+      whole repo), including any tests you wrote. It runs prettier on them
+      before committing, so there's no separate formatting step.
+   c. **Verify before stopping** — call `run_checked_command` with `"lint"`,
       then with `"test"`. If either fails because of something your step
       introduced, fix it and re-run before moving on; don't leave a step
       you know is broken. (A pre-existing failure unrelated to your change
       isn't yours to fix — note it in your summary instead.)
-   e. Once lint and tests are clean, call `write_coding_plan` again marking
+   d. Once lint and tests are clean, call `write_coding_plan` again marking
       the step `done` and the next one `in_progress`, then **stop** —
       summarize what you did, note the lint/test results, and end your
       turn. Do not start the next step in the same turn. The human reviews
       the diff so far and sends the next message (e.g. "continue", "looks
       good, keep going", or feedback) before you proceed.
-   f. **Self-checkpoint if a step is running long.** Each turn has a limited
+   e. **Self-checkpoint if a step is running long.** Each turn has a limited
       tool-call budget. If you're already roughly 12-15 tool calls into the
       *current* step with real work still remaining, don't try to power
       through — stop at the next safe, lint-clean point, commit what's
       done, and call `write_coding_plan` to leave the current step
       `in_progress` but insert a new `pending` step for the remainder, then
-      end your turn as in (e). It's fine if that means a step turns into
+      end your turn as in (d). It's fine if that means a step turns into
       two; a clean checkpoint beats running out of budget mid-edit.
 3. Exception: if the human explicitly says to do it all in one go (e.g.
    "just implement everything", "don't stop between steps"), chain as many

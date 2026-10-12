@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronRight, History, Tags, Terminal, Users } from 'lucide-react';
+import { ChevronRight, History, Paintbrush, Tags, Terminal, Users } from 'lucide-react';
 import { useState } from 'react';
 import type { HelperName, HelperRunStats, TranscriptEntry } from '@/lib/dev-sessions/types';
 
@@ -13,6 +13,7 @@ export const HELPER_TOOLS: Record<string, HelperName> = {
   classify_text: 'classifier',
   run_checked_command: 'runner',
   recall: 'memory',
+  git_commit: 'format',
 };
 
 export function helperFor(toolName: string): HelperName | null {
@@ -65,6 +66,7 @@ function helperFailed(helper: HelperName, resultEntry: TranscriptEntry | undefin
   const text = toolResultText(resultEntry.toolResult);
   if (/<tool_use_error>/.test(text)) return true;
   if (helper === 'research') return /Helper failed|Failed, do yourself/.test(text);
+  if (helper === 'format') return text.startsWith('Nothing committed');
   if (helper === 'runner') {
     const lower = text.toLowerCase();
     return !!text && !(lower.includes('passed') || lower.includes('succeeded'));
@@ -267,6 +269,34 @@ function RunnerDialog({
   );
 }
 
+// --- formatter (prettier inside `git_commit`) ---------------------------------
+
+function FormatDialog({
+  callEntry,
+  resultEntry,
+  stats,
+}: {
+  callEntry: TranscriptEntry;
+  resultEntry?: TranscriptEntry;
+  stats: HelperRunStats | null;
+}) {
+  const input = callEntry.toolInput as { files?: unknown } | undefined;
+  const files = Array.isArray(input?.files) ? input.files.length : null;
+  const isError = helperFailed('format', resultEntry);
+  const result = resultEntry ? toolResultText(resultEntry.toolResult) : '';
+  return (
+    <HelperDialog
+      icon={Paintbrush}
+      label={`Formatter${files !== null ? ` — ${files} file${files === 1 ? '' : 's'}` : ''}`}
+      badge={!resultEntry ? 'formatting…' : isError ? 'prettier failed' : stats ? 'committed · prettier' : 'committed'}
+      isError={isError}
+      startOpen={opensOnLoad(callEntry, isError)}
+    >
+      <div className="whitespace-pre-wrap break-all text-xs text-muted-foreground font-mono">{result}</div>
+    </HelperDialog>
+  );
+}
+
 // --- read memory (`recall`) ---------------------------------------------------
 
 function MemoryDialog({
@@ -318,5 +348,6 @@ export function HelperBubble({
   if (helper === 'research') return <ResearchDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
   if (helper === 'runner') return <RunnerDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
   if (helper === 'memory') return <MemoryDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
+  if (helper === 'format') return <FormatDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
   return <ClassifierDialog callEntry={callEntry} resultEntry={resultEntry} stats={stats} />;
 }

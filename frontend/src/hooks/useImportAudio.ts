@@ -123,7 +123,6 @@ export function useImportAudio({
       );
       if (cleanedUpRef.current) {
         unlistenComplete();
-        unlisteners.forEach(u => u());
         return;
       }
       unlisteners.push(unlistenComplete);
@@ -143,7 +142,6 @@ export function useImportAudio({
       );
       if (cleanedUpRef.current) {
         unlistenError();
-        unlisteners.forEach(u => u());
         return;
       }
       unlisteners.push(unlistenError);

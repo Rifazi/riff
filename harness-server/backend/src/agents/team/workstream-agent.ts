@@ -34,7 +34,7 @@ import { createFileTools } from '../tool-defs/file-tools.js';
 import { ReadMemo } from '../tool-defs/read-memo.js';
 import { createGitTools } from '../tool-defs/git-tools.js';
 import { createQaTools } from '../tool-defs/qa-tools.js';
-import { createRunPrettierTool } from '../tool-defs/format-tool.js';
+import { runPrettierToolEntry } from '../tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from '../tool-defs/npm-install-tool.js';
 import { createNoteForQaTool } from '../tool-defs/qa-notes-tool.js';
 import { createReportWorkstreamTool } from '../tool-defs/workstream-report-tool.js';
@@ -49,7 +49,6 @@ import { createOutlineFileToolClaude } from '../tool-defs-claude/outline-tool.js
 import { createFileToolsClaude } from '../tool-defs-claude/file-tools.js';
 import { createGitToolsClaude } from '../tool-defs-claude/git-tools.js';
 import { createQaToolsClaude } from '../tool-defs-claude/qa-tools.js';
-import { createRunPrettierToolClaude } from '../tool-defs-claude/format-tool.js';
 import { createRunNpmInstallToolClaude } from '../tool-defs-claude/npm-install-tool.js';
 import { createNoteForQaToolClaude } from '../tool-defs-claude/qa-notes-tool.js';
 import { createReportWorkstreamToolClaude } from '../tool-defs-claude/workstream-report-tool.js';
@@ -309,6 +308,7 @@ export async function runWorkstreamAgent({
     branch: async () => member.branch,
     writablePaths: member.ownedPaths,
     ownSteps: member.stepIds,
+    helperContext,
     runCheck: (command) => runCheckedCommandExecute({ command }),
   };
   const architectureDeps = { app, repoRoot: worktreePath, scope: true, allowRegenerate: true, writablePaths: member.ownedPaths };
@@ -328,7 +328,7 @@ export async function runWorkstreamAgent({
       },
       readMemo,
     });
-    const { gitCommitTool } = createGitToolsClaude({ ...scoped, onBranchCreated: noBranchCreation });
+    const { gitCommitTool } = createGitToolsClaude({ ...scoped, onBranchCreated: noBranchCreation, helperContext });
     const { runCheckedCommandToolClaude } = createQaToolsClaude({
       repoRoot: worktreePath,
       checkCommands: app.checkCommands,
@@ -347,7 +347,6 @@ export async function runWorkstreamAgent({
       deleteFileToolClaude,
       gitCommitTool,
       runCheckedCommandToolClaude,
-      createRunPrettierToolClaude(scoped),
       createUpdateMyStepsToolClaude(steps),
       createNoteForQaToolClaude(qaNoteDeps),
       createReportWorkstreamToolClaude(reportDeps),
@@ -370,7 +369,6 @@ export async function runWorkstreamAgent({
       'delete_file',
       'git_commit',
       'run_checked_command',
-      'run_prettier',
       'update_my_steps',
       'note_for_qa',
       'report_workstream',
@@ -419,7 +417,7 @@ export async function runWorkstreamAgent({
     },
     readMemo,
   });
-  const { gitCommitTool } = createGitTools({ ...scoped, onBranchCreated: noBranchCreation });
+  const { gitCommitTool } = createGitTools({ ...scoped, onBranchCreated: noBranchCreation, helperContext });
   const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
   const tools: ToolSet = {
     search_docs: searchDocsTool,
@@ -434,7 +432,7 @@ export async function runWorkstreamAgent({
     delete_file: deleteFileTool,
     git_commit: gitCommitTool,
     run_checked_command: runCheckedCommandTool,
-    run_prettier: createRunPrettierTool(scoped),
+    ...runPrettierToolEntry(scoped, member.history),
     update_my_steps: createUpdateMyStepsTool(steps),
     note_for_qa: createNoteForQaTool(qaNoteDeps),
     report_workstream: createReportWorkstreamTool(reportDeps),

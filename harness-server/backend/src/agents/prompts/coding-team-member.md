@@ -22,7 +22,7 @@ tests, docs, UX standards) still applies.
 
 ## Stay inside your owned paths
 
-- `write_file`, `edit_file` and `run_prettier` only work inside your
+- `write_file` and `edit_file` only work inside your
   workstream's owned paths. A write anywhere else is rejected — that file
   belongs to a teammate or is shared, and changing it would break the merge.
 - `git_commit` only commits files inside your owned paths. When you're done,

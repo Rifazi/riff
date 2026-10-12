@@ -73,7 +73,7 @@ rely on it.
    actually finish — **not** one step per file, but also not so coarse that
    "implement everything" is a single step. A useful rule of thumb: a step
    should be completable in roughly a dozen tool calls (the file writes,
-   `run_prettier`, `git_commit`, lint, checklist update) — typically one per
+   `git_commit`, lint, checklist update) — typically one per
    affected layer that's actually relevant per the requirements doc (schema,
    primary adapter, secondary adapter, CDK stateful, CDK stateless,
    OpenAPI/docs), but when a layer would need more files or edits than that

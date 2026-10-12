@@ -29,7 +29,7 @@ export interface TranscriptEntry {
   helper?: HelperRunStats;
 }
 
-export type HelperName = 'research' | 'classifier' | 'runner' | 'memory';
+export type HelperName = 'research' | 'classifier' | 'runner' | 'memory' | 'format';
 
 export interface HelperRunStats {
   helper: HelperName;

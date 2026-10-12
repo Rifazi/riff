@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { tool } from 'ai';
+import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { assertWritable, type FileToolDeps } from './file-tools.js';
 import { compactOutput } from './output-compress.js';
@@ -43,6 +43,15 @@ export function createRunPrettierExecute(deps: FileToolDeps) {
       return `prettier failed on one or more files.\n\n${compactOutput(e.stdout ?? '', e.stderr ?? e.message ?? '')}`;
     }
   };
+}
+
+// Retired: git_commit and finish_step format what they commit
+// (helpers/format/format.ts), so agents aren't offered this any more. It's
+// registered only for an AI-SDK history that already called it, so the
+// replay stays valid.
+export function runPrettierToolEntry(deps: FileToolDeps, history: unknown[] = []): ToolSet {
+  if (!JSON.stringify(history).includes('"toolName":"run_prettier"')) return {};
+  return { run_prettier: createRunPrettierTool(deps) };
 }
 
 export function createRunPrettierTool(deps: FileToolDeps) {
