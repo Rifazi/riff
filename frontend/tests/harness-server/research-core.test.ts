@@ -5,6 +5,9 @@ import {
   delegateSchema,
   excerptFile,
   formatResults,
+  isFullContentsTask,
+  isListFilesTask,
+  listingPaths,
   NOTHING_FOUND,
   RedoLedger,
   runDelegation,
@@ -265,5 +268,75 @@ describe('RedoLedger', () => {
     let i = 0;
     const { report } = await runDelegation({ tasks: [{ task: 'one' }, { task: 'two' }] }, async () => runs[i++], 1);
     expect(report.paths).toEqual(['src/a.ts']);
+  });
+});
+
+// Tasks agents actually sent (comic-drafter): listing is answered from the
+// repo, a file's full contents is turned away.
+describe('tasks that are not a helper\'s job', () => {
+  const LIST = 'List all files under client/src/ (recursively, every file path).';
+  const FULL = 'Show me the full contents of client/src/api/pages.ts and client/src/types.ts (the merged client-api work).';
+  const MIXED =
+    'Show me the full contents of client/src/components/service.ts, client/src/components/DOMAIN.md, and list the component folders under client/src/components with the exported component name of each.';
+
+  test('classifies listing and full-contents tasks', () => {
+    expect(isListFilesTask(LIST)).toBe(true);
+    expect(isListFilesTask('List the component folders under client/src/components')).toBe(true);
+    expect(isListFilesTask('List every file under server/src/ and confirm whether service.ts exists.')).toBe(true);
+    expect(isListFilesTask('list every file that imports getPool')).toBe(false);
+    expect(isListFilesTask('List the CSS custom property names defined in client/src/styles/tokens.css')).toBe(false);
+    expect(isListFilesTask('Where is retryDelay set?')).toBe(false);
+    expect(isFullContentsTask(FULL)).toBe(true);
+    expect(isFullContentsTask(MIXED)).toBe(true);
+    expect(isListFilesTask(MIXED)).toBe(false);
+    expect(isFullContentsTask('Show the exact Page type definition in client/src/types.ts')).toBe(false);
+  });
+
+  test('listing paths: given, else named in the task', () => {
+    expect(listingPaths({ task: LIST, paths: ['client/src/'] })).toEqual(['client/src']);
+    expect(listingPaths({ task: 'List all files under ./client/src/pages/ and client/src/api/.' })).toEqual([
+      'client/src/pages',
+      'client/src/api',
+    ]);
+    expect(listingPaths({ task: 'List all files in the repo' })).toEqual([]);
+  });
+
+  test('a listing never reaches a helper; full contents is turned away', async () => {
+    const asked: string[] = [];
+    const listed: string[][] = [];
+    const { text, report } = await runDelegation(
+      { tasks: [{ task: LIST, paths: ['client/src'] }, { task: FULL }, { task: 'Who calls createPage?' }] },
+      async (prompt) => {
+        asked.push(prompt);
+        return { text: 'client/src/pages/x.tsx:12', error: null, usage: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0 }, readChars: 400 };
+      },
+      2,
+      async (paths) => {
+        listed.push(paths);
+        return 'client/src/DOMAIN.md\n- `main.tsx`';
+      },
+    );
+    expect(asked).toEqual(['Who calls createPage?']);
+    expect(listed).toEqual([['client/src']]);
+    expect(text).toContain('[1] client/src/DOMAIN.md');
+    expect(text).toContain('[3] client/src/pages/x.tsx:12');
+    expect(text).toContain('Not delegated: 2 (a file\'s full contents');
+    expect(report.useful).toBe(2);
+  });
+
+  test('a single full-contents task costs one line', async () => {
+    const { text } = await runDelegation({ tasks: [{ task: FULL }] }, async () => {
+      throw new Error('should not run');
+    });
+    expect(text).toStartWith('Not delegated (a file\'s full contents');
+  });
+
+  test('without a lister, a listing goes to a helper as before', async () => {
+    const asked: string[] = [];
+    await runDelegation({ tasks: [{ task: LIST }] }, async (p) => {
+      asked.push(p);
+      return { text: 'a', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 0 };
+    });
+    expect(asked).toHaveLength(1);
   });
 });

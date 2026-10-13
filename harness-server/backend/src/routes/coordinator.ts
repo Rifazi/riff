@@ -15,6 +15,8 @@ import { runQaAgentTurn } from '../agents/qa-agent.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning } from '../agents/team/coding-team.js';
 import { isQaTeamRunning } from '../agents/team/qa-team.js';
+import { runPreQaGate } from '../agents/pre-qa-gate.js';
+import { getApp } from '../apps/apps-store.js';
 
 // Hard cap so a stuck/looping coordinator can't run away unattended — it
 // always stops and hands back to a human rather than looping forever.
@@ -22,6 +24,9 @@ const MAX_ITERATIONS = 15;
 
 // A branch QA keeps failing needs a human, not another fix pass.
 const MAX_QA_SEND_BACKS = 3;
+
+// Fix passes the pre-QA gate asks for before it hands the branch to a human.
+const MAX_GATE_SEND_BACKS = 2;
 
 // The message that kicks off a stage's very first turn when the coordinator
 // finds it with an empty transcript. QA's already exists client-side today
@@ -56,6 +61,36 @@ function transcriptFor(session: SessionRecord, group: StageGroup): TranscriptEnt
 
 function stepsDone(session: SessionRecord): number {
   return (session.codingPlan ?? []).filter((s) => s.status === 'done').length;
+}
+
+/**
+ * Before coding is approved: lint, the unit tests and the branch's
+ * Wayfinding audit, with no model involved. Null = approve; `fix` = the lead's
+ * next message (failing output only, far cheaper than a QA round that fails
+ * on the same thing); `stop` = over to the human.
+ */
+async function preQaGate(session: SessionRecord, send: (event: AgentEvent) => void): Promise<{ fix: string } | { stop: string } | null> {
+  send({ type: 'coordinator_decision', action: 'ready', reason: 'Running lint, the unit tests and the architecture audit before QA.' });
+  let gate;
+  try {
+    gate = await runPreQaGate(session, await getApp(session.appId));
+  } catch (err) {
+    // A broken gate mustn't hold the branch back: QA runs the same checks.
+    await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Pre-QA checks couldn't run (${err instanceof Error ? err.message : String(err)}); QA will run them.` });
+    return null;
+  }
+  if (gate.status !== 'fail') {
+    if (gate.status === 'skipped') {
+      await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Pre-QA checks skipped: ${gate.summary}. QA will run them.` });
+    }
+    return null;
+  }
+  if (session.coordinatorGateSendBacks >= MAX_GATE_SEND_BACKS) {
+    return { stop: `Pre-QA checks still fail after ${MAX_GATE_SEND_BACKS} fix passes (${gate.summary}) — over to you.` };
+  }
+  await updateSession(session.id, { coordinatorGateSendBacks: session.coordinatorGateSendBacks + 1 });
+  send({ type: 'coordinator_decision', action: 'continue', reason: `Pre-QA checks: ${gate.summary} — sending it back to the coding lead.` });
+  return { fix: gate.message };
 }
 
 function allStepsDone(session: SessionRecord): boolean {
@@ -123,7 +158,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     if (!session) return reply.code(404).send({ error: 'session not found' });
     const { enabled } = request.body ?? {};
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) is required' });
-    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorQaSendBacks: 0 } : {}) });
+    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorQaSendBacks: 0, coordinatorGateSendBacks: 0 } : {}) });
   });
 
   // SSE, same framing as the per-stage /message endpoints — drives the
@@ -147,6 +182,18 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     // How many plan steps were done when the coordinator last told coding to
     // move on to the next one.
     let nudgedAtDone: number | null = null;
+
+    // The lead's fix pass for a failed pre-QA gate: a plain coding turn (not
+    // a step turn, so never light-routed). False = stop the run.
+    const runGateFix = async (session: SessionRecord, message: string): Promise<boolean> => {
+      try {
+        await runCodingAgentTurn(session, message, send);
+        return true;
+      } catch (err) {
+        send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+        return false;
+      }
+    };
 
     try {
       for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -188,9 +235,18 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
             send({ type: 'coordinator_decision', action: 'blocked', reason: 'The coding team stopped with work left — over to you on the Coding tab.' });
             break;
           }
-          const outcome = await approveStage(app, session, group, 'the coding team finished every step.');
-          send({ type: 'coordinator_decision', action: outcome.approved ? 'approved' : 'blocked', reason: outcome.reason });
-          break;
+          const gate = await preQaGate(session, send);
+          if (gate && 'stop' in gate) {
+            send({ type: 'coordinator_decision', action: 'blocked', reason: gate.stop });
+            break;
+          }
+          if (!gate) {
+            const outcome = await approveStage(app, session, group, 'the coding team finished every step.');
+            send({ type: 'coordinator_decision', action: outcome.approved ? 'approved' : 'blocked', reason: outcome.reason });
+            break;
+          }
+          if (!(await runGateFix(session, gate.fix))) break;
+          continue;
         }
 
         // Same for QA's team: the QA tab runs it and hands its findings to
@@ -243,6 +299,17 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
             message = CODING_CONTINUE_MESSAGE;
           } else if (decision.action === 'ready') {
             send({ type: 'coordinator_decision', action: 'ready', reason: decision.reason });
+            if (group === 'coding') {
+              const gate = await preQaGate(session, send);
+              if (gate && 'stop' in gate) {
+                send({ type: 'coordinator_decision', action: 'blocked', reason: gate.stop });
+                break;
+              }
+              if (gate) {
+                if (!(await runGateFix(session, gate.fix))) break;
+                continue;
+              }
+            }
             const outcome = await approveStage(app, session, group, decision.reason);
             send({ type: 'coordinator_decision', action: outcome.approved ? 'approved' : 'blocked', reason: outcome.reason });
             break;

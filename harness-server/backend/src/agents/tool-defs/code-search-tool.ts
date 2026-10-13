@@ -24,10 +24,10 @@ export const searchCodeSchema = z.object({
     .describe('Lines of surrounding code to show around each match (0-3, default 0) — enough to see a call site without reading the file'),
 });
 export const searchCodeDescription =
-  'Search the repo\'s tracked files for a keyword or pattern (git grep, case-insensitive, extended regex so `a|b` ' +
+  'Search the repo\'s files (committed or not, .gitignore aside) for a keyword or pattern (git grep, case-insensitive, extended regex so `a|b` ' +
   'works; a pattern that isn\'t valid regex is searched literally; lockfiles, snapshots and build output are skipped). ' +
   'Returns matching lines grouped by file (line number and text only — not full file contents): up to 3 matches per ' +
-  'file, or 10 when `glob` narrows the search. When no line matches, it lists tracked files whose path matches ' +
+  'file, or 10 when `glob` narrows the search. When no line matches, it lists files whose path matches ' +
   'instead, so it also finds files by name (e.g. "vitest.config"). Use this to check whether something similar ' +
   'already exists before proposing new code, and to find the line range to read_file. In an app that follows an ' +
   'architecture, a search without `glob` looks in the folders you are working in first (the result says which) and ' +
@@ -42,7 +42,7 @@ export type SearchFocus = () => Promise<{ label: string; paths: string[] } | nul
 
 /**
  * How a pattern that matches every line is answered: e.g. the Files sections
- * of the domains under `glob`. null = list the tracked files plainly.
+ * of the domains under `glob`. null = list the files plainly.
  */
 export type SearchListing = (glob: string | undefined) => Promise<string | null>;
 
@@ -90,7 +90,8 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
   // Exit code 1 is "no matches"; 128 with `-E` is a pattern that isn't
   // valid extended regex ("foo(", "a{"), retried as a literal string.
   const grep = async (mode: '-E' | '-F', query: string, paths: string[], narrowed: boolean, context: number | undefined): Promise<string> => {
-    const args = ['grep', '-n', '-z', '-I', '-i', mode, `--max-count=${narrowed ? 10 : 3}`];
+    // --untracked: an agent's new files aren't committed yet, and it searches them too.
+    const args = ['grep', '--untracked', '-n', '-z', '-I', '-i', mode, `--max-count=${narrowed ? 10 : 3}`];
     if (context) args.push(`-C${context}`);
     args.push('-e', query, ...pathspec(paths));
     try {
@@ -107,11 +108,11 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
   const listFiles = async (glob: string | undefined): Promise<string> => {
     const listed = await deps.listing?.(glob).catch(() => null);
     if (listed) return listed;
-    const { stdout } = await execFileAsync('git', ['ls-files', '-z', '--', glob ?? '.'], { cwd: deps.repoRoot, maxBuffer: 20_000_000 });
+    const { stdout } = await execFileAsync('git', ['ls-files', '-z', '-co', '--exclude-standard', '--', glob ?? '.'], { cwd: deps.repoRoot, maxBuffer: 20_000_000 });
     const files = stdout.split('\0').filter(Boolean);
-    if (!files.length) return `No tracked files under "${glob ?? '.'}".`;
+    if (!files.length) return `No files under "${glob ?? '.'}".`;
     const more = files.length > PLAIN_LIST_LIMIT ? `\n…and ${files.length - PLAIN_LIST_LIMIT} more: narrow the glob.` : '';
-    return `A pattern that matches every line only lists files. ${files.length} tracked under "${glob ?? '.'}":\n${files.slice(0, PLAIN_LIST_LIMIT).join('\n')}${more}`;
+    return `A pattern that matches every line only lists files. ${files.length} under "${glob ?? '.'}":\n${files.slice(0, PLAIN_LIST_LIMIT).join('\n')}${more}`;
   };
 
   return async ({ query, glob, context }: z.infer<typeof searchCodeSchema>): Promise<string> => {
@@ -131,13 +132,13 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
 
     // No noise excludes here: ls-files matches nothing at all when a
     // wildcard pathspec ("backend/*") is combined with an exclude one.
-    const { stdout: files } = await execFileAsync('git', ['ls-files', '-z', '--', glob ?? '.'], {
+    const { stdout: files } = await execFileAsync('git', ['ls-files', '-z', '-co', '--exclude-standard', '--', glob ?? '.'], {
       cwd: deps.repoRoot,
       maxBuffer: 20_000_000,
     });
     const paths = matchPaths(files.split('\0').filter(Boolean), query);
     if (!paths.length) return `No matches for "${query}".`;
-    return `${note}No line matches "${query}", but these tracked files' paths do:\n${paths.join('\n')}`;
+    return `${note}No line matches "${query}", but these files' paths do:\n${paths.join('\n')}`;
   };
 }
 

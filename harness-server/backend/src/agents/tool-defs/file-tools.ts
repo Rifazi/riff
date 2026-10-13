@@ -43,13 +43,18 @@ export const readFileDescription =
   'Every read stays in your context, so for a large file find the part you need with outline_file or search_code ' +
   "and read just that range. Don't re-read a file you just wrote or edited — those tools report what changed.";
 
+const CODE_STYLE_RULES =
+  'Code you write has no comments (only ones a tool needs, like a lint-disable directive) and stays in small, ' +
+  'single-purpose files: where a coherent part can stand on its own, give it its own file.';
+
 export const writeFileSchema = z.object({
   path: z.string().describe('Repo-relative path, e.g. src/global/schemas/acme-inventory.schema.json'),
   content: z.string(),
 });
 export const writeFileDescription =
   'Create a repo file, or replace most of an existing one. To change part of a file, use edit_file — rewriting ' +
-  'a whole file costs far more.';
+  'a whole file costs far more. ' +
+  CODE_STYLE_RULES;
 
 export const editFileSchema = z.object({
   path: z.string(),
@@ -64,7 +69,8 @@ export const editFileDescription =
   'Replace an exact, unique occurrence of oldText with newText in an existing file anywhere in the repo (same ' +
   'scope as write_file). To make several changes to one file, pass them all as `edits` in one call — applied in ' +
   'order, all or nothing. Fails if an oldText is not found or occurs more than once. On success it returns the ' +
-  "line ranges the new text occupies; the file then matches what you sent, so don't re-read it to check.";
+  "line ranges the new text occupies; the file then matches what you sent, so don't re-read it to check. " +
+  CODE_STYLE_RULES;
 
 export const deleteFileSchema = z.object({
   path: z.string().describe('Repo-relative path of the file to delete, e.g. src/utils/legacy-helper.ts'),

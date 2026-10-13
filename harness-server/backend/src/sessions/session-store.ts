@@ -51,6 +51,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.planStatus ??= null;
   session.coordinatorEnabled ??= false;
   session.coordinatorQaSendBacks ??= 0;
+  session.coordinatorGateSendBacks ??= 0;
   session.qaFindingsPending ??= false;
   session.qaRerunPending ??= false;
   session.reopenedFromCoding ??= false;
@@ -180,6 +181,7 @@ export async function createSession(input: {
     qaStatus: null,
     coordinatorEnabled: false,
     coordinatorQaSendBacks: 0,
+    coordinatorGateSendBacks: 0,
     qaFindingsPending: false,
     qaRerunPending: false,
     reopenedFromCoding: false,

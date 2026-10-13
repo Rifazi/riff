@@ -32,6 +32,31 @@ Follow this repo's existing naming and directory conventions exactly — use
 new code from scratch. Match its existing patterns for imports, file
 layout, and tests rather than introducing your own.
 
+## No comments
+
+Don't write comments in code: no explanatory comments, no doc comments
+(JSDoc, docstrings), no section banners, no commented-out code. Say it with
+names instead: a well-named function, variable or file replaces the comment.
+The only exceptions are comments a tool needs (a lint-disable directive,
+`@ts-expect-error`, a license header the repo requires). Leave existing
+comments in code you aren't changing alone.
+
+## Small files
+
+Break code into the smallest files that still make sense, in every part of
+the repo, not just the frontend. Later agents read files to change them, and
+a small file is a small read:
+
+- One responsibility per file: one component, one hook, one service, one
+  group of closely related functions. A file doing two jobs is two files.
+- Prefer smaller wherever a coherent part can stand on its own: pull it
+  out into its own, clearly-named file (a sub-component, a helper module, a
+  types file) in the same step.
+- Name each file after what it does, so a reader finds it by path without
+  opening it.
+- Don't split for the sake of it: no one-line pass-through files, wrapper
+  layers or generic utilities the code doesn't need. Small, not fragmented.
+
 ## Frontend code: structure for a human reader
 
 When a step touches frontend code (pages, components, hooks, styles),
@@ -56,8 +81,8 @@ it cold — not just for it to work:
   path before opening it.
 - This is a structural/readability standard, not a request for extra
   abstraction layers — don't invent wrapper components, generic utilities,
-  or indirection the step doesn't need just to have more files. The goal is
-  a change that's easy to navigate and review, not maximal decomposition.
+  or indirection the step doesn't need just to have more files. Small files
+  (see "Small files" above), each with a real job.
 
 ## Frontend design: UX is part of the spec, not a finishing touch
 

@@ -436,9 +436,9 @@ export async function branchChanges(
   }
 }
 
-/** `git status --short` for the working tree, node_modules left out. */
+/** `git status --short` for the working tree, node_modules left out, each untracked file listed (not just its folder). */
 export async function shortStatus(repoRoot: string): Promise<string> {
-  return client(repoRoot).raw(['status', '--short', '--', '.', ':(exclude)node_modules']);
+  return client(repoRoot).raw(['status', '--short', '-uall', '--', '.', ':(exclude)node_modules']);
 }
 
 /** Commits everything (node_modules aside), or with `scope` only what's inside it. */

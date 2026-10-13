@@ -78,7 +78,7 @@ function filesSection(doc: string): string[] | null {
 /**
  * What search_code answers, in a Wayfinding app, for a pattern that matches
  * every line (an agent listing a folder): the Files sections of the domains
- * the tracked files under `glob` fall in, plus the files on no domain. null
+ * the files under `glob` (tracked or new) fall in, plus the files on no domain. null
  * when none of those files is on a domain, so the caller lists them plainly.
  */
 export async function listByDomain(
@@ -86,7 +86,10 @@ export async function listByDomain(
   domains: { id: string; dir: string }[],
   glob: string | undefined
 ): Promise<string | null> {
-  const { stdout } = await execFileAsync('git', ['ls-files', '-z', '--', glob ?? '.'], { cwd: repoRoot, maxBuffer: 20_000_000 });
+  const { stdout } = await execFileAsync('git', ['ls-files', '-z', '-co', '--exclude-standard', '--', glob ?? '.'], {
+    cwd: repoRoot,
+    maxBuffer: 20_000_000,
+  });
   const files = stdout.split('\0').filter((f) => f && !LOCKFILE.test(f));
   const byDepth = [...domains].sort((a, b) => b.dir.length - a.dir.length);
   const hit = new Set<string>();
@@ -113,11 +116,17 @@ export async function listByDomain(
       // Listed as a domain a moment ago; treat as an empty doc.
     }
     const listed = filesSection(doc);
-    const own = files.filter((f) => byDepth.find((d) => f.startsWith(`${d.dir}/`))?.dir === dir).map((f) => `- \`${f.slice(dir.length + 1)}\``);
+    const ownPaths = files.filter((f) => byDepth.find((d) => f.startsWith(`${d.dir}/`))?.dir === dir).map((f) => f.slice(dir.length + 1));
+    const own = ownPaths.map((f) => `- \`${f}\``);
+    // Files added since Files was last regenerated (an agent's new, maybe
+    // uncommitted, files) would otherwise look like they don't exist.
+    const section = (listed ?? []).join('\n');
+    const unlisted = listed ? ownPaths.filter((f) => !section.includes(`\`${f}\``)) : [];
     out.push(
       `\n${dir}/${DOMAIN_DOC}` +
         (listed ? '' : ' (no Files section yet; audit_architecture({ regenerate: true }) writes it)') +
-        `\n${(listed ?? own).join('\n')}`
+        `\n${(listed ?? own).join('\n')}` +
+        (unlisted.length ? `\nNot in Files yet (new since its last regenerate):\n${unlisted.map((f) => `- \`${f}\``).join('\n')}` : '')
     );
   }
   if (dirs.length > MAX_LISTED_DOMAINS) out.push(`\n…and ${dirs.length - MAX_LISTED_DOMAINS} more domains: narrow the glob.`);

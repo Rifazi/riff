@@ -1263,9 +1263,105 @@ below) — never inside the target repo.
      the map (match-all search, a glob over DOMAIN.md, a delegate listing
      task); open a file only for code you'll change, call or reuse; a wrong
      DOMAIN.md is fixed or reported, not a reason to distrust the rest.
-   Tests: `wayfinding-navigation.test.ts` (listing), run through a node:test
+   - **`delegate` no longer lists or fetches files** (every comic-drafter
+     session sent it "list all files under X" and "show me the full
+     contents of Y", and its description recommended listing). In
+     `runDelegation` (`helpers/research/core.ts`) a listing task
+     (`isListFilesTask`) is answered straight from search_code's listing for
+     the task's paths (`listingPaths`), never by a helper; a full-contents
+     task (`isFullContentsTask`) is turned away in one line (answers are cut
+     at 2,400 chars, so the agent read the file again anyway) pointing at
+     outline_file + ranged read_file. The tool description and
+     `DELEGATE_NOTE` say so. The `client-views` engineer's call from session
+     `a58b69ad` (1 listing + 3 full-contents tasks) now runs no helper.
+   Tests: `wayfinding-navigation.test.ts` (listing) and `research-core.test.ts`
+   (task kinds, on the tasks agents actually sent), run through a node:test
    shim. Not yet run with real agents; compare read_file/read_doc per step in
    `state/usage-log.jsonl` on the next comic-drafter session.
+
+46. User restarted the server and coding agents still read whole files
+   instead of relying on DOMAIN.md. Step 45's code was live (the delegate
+   refusal fired), but the `client-views` engineer in session `a58b69ad`
+   still read 10 files in full after a restart: Files listed export names
+   only, so to call `addPage` or use `Button` it had to open the file (the
+   briefing allowed "code you'll call or reuse"), and its own uncommitted
+   `PagesSidebar/` files were invisible to `search_code` and the delegate's
+   listing, and the handoff named only the folder.
+   - **Signatures in Files** (`architecture/signatures.ts`
+     `publicSignatures`): the public file's line is now a sub-list, one
+     entry per export: `addPage(projectId: string): Promise<Page>`, a
+     type's shape, a class's constructor plus public fields and methods, a
+     `forwardRef<El, Props>(…)` component, and the non-exported props type
+     an exported function's parameters use. Re-exports (`export { a as b }
+     from`, `export *`) are followed through `resolveImport`. Comments are
+     dropped, 160 chars per line, 20 lines max. Every existing Files section
+     is stale once, until `regenerate: true`. Prettier keeps it in sync.
+   - **Briefing**: call or reuse another domain from its Files signatures,
+     opening its public file (a range) only when a signature isn't enough;
+     read code only where you'll change it; a file you wrote is in the
+     handoff.
+   - **Uncommitted files**: `search_code` greps with `--untracked` and its
+     listings and path matches use `ls-files -co --exclude-standard`
+     (`.gitignore` still applies). `listByDomain` adds "Not in Files yet"
+     for a domain's files its Files section doesn't list.
+   - **Handoff**: `shortStatus` uses `-uall`, and "Files you changed" is the
+     conversation's writes plus every uncommitted file (`statusPaths`), each
+     with its line count and exports, so a restarted run (empty
+     conversation) still knows what it wrote.
+   Tests: `wayfinding-signatures.test.ts` (signatures, `statusPaths`),
+   `wayfinding-navigation.test.ts` (uncommitted files in search and
+   listings), `wayfinding-audit.test.ts` (new Files format), run through a
+   node:test shim. Checked by regenerating a clone of comic-drafter. Not yet
+   run with real agents.
+47. User said QA kept failing the coders' first passes. Sessions `71b0dbe6`
+   and `a58b69ad` showed engineers reported "failed: Reached maximum number
+   of turns (20)" after they had finished and committed, and in `a58b69ad`
+   Jack's wrap-up turn (lint/tests on the merged branch, regenerating
+   Files sections) never ran, so QA found exactly what it would have fixed.
+   The Claude engine emitted `done { isError: true }` at the end of every
+   20-turn hop, before the wrapper continued the turn. `workstream-agent.ts`
+   latched it as the run's error and `coding-team.ts` set `leadBroken`,
+   which cancels the rest of Jack's lead turns, wrap-up included. Now a hop
+   that ends at the cap emits no `done`; `runClaudeAgentTurn` emits one
+   error `done` only when it can't continue (hops used up, or nothing to
+   resume). The AI-SDK engine now emits that error `done` too when hops run
+   out, and a thrown tool call (`tool-error`) no longer marks the turn
+   `isError`: it failed a member, cancelled the lead, or escalated a light
+   step over an ordinary `edit_file` miss. Typechecked only.
+   - **Pre-QA gate** (`agents/pre-qa-gate.ts`, pure half in
+     `pre-qa-gate-core.ts`): before auto-drive approves coding (after a
+     team round or a "ready" decision), `routes/coordinator.ts` runs lint,
+     the unit tests and, for a Wayfinding app, the audit problems the branch
+     is answerable for (MAP.md, touched domains, changed code with no
+     DOMAIN.md), in the main checkout. No model runs unless the runner
+     helper shortens a long log. A pass approves as before. A failure sends
+     Jack one plain coding turn with only the failing output (at most
+     `MAX_GATE_SEND_BACKS` = 2, `session.coordinatorGateSendBacks`, reset
+     with the QA count when auto-drive is turned on), then stops for the
+     human. It's skipped (QA runs the checks) with no branch, or when the
+     checkout is on another branch. The human's "Approve diff" button isn't
+     gated.
+   - `checkSucceeded` finds `run_checked_command`'s status line after any
+     install notes. The QA team read the first line, so a passing check
+     that installed dependencies was reported as failed.
+   - A rule anchored to a test name that doesn't exist now names the
+     closest test in that file (`closestTestName`, word overlap ≥ 0.5),
+     e.g. session `71b0dbe6`'s "… project id".
+   Tests: `frontend/tests/harness-server/pre-qa-gate.test.ts`. The whole
+   folder (215) passes through a node:test shim.
+48. User asked for agents not to comment code, and for code to be split into
+   files as small as possible so agents don't read huge files. The coding
+   prompt has "No comments" (only tool-required ones, e.g. lint-disable;
+   existing comments in untouched code stay) and "Small files" (one
+   responsibility per file, smaller wherever a part can stand on its own, no
+   line limit, no pass-through files), replacing "not maximal
+   decomposition". The plan prompt plans small files and names where a new
+   job goes; QA reports added comments and new or grown files doing more
+   than one job as non-blocking findings, which
+   reach the coder as actionable notes. `write_file`/`edit_file`
+   descriptions repeat both rules (`CODE_STYLE_RULES` in
+   `tool-defs/file-tools.ts`) so apps with a prompt override get them too.
+   Not run with real agents yet.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

@@ -7,6 +7,7 @@ import type { AgentEvent } from '../sdk-client.js';
 import type { TeamEvent } from './coding-team.js';
 import { runQaReviewerAgent } from './qa-reviewer-agent.js';
 import { onMemberRestart, ROUND_FINISHING, untilAborted } from './team-state.js';
+import { checkSucceeded } from '../pre-qa-gate-core.js';
 
 // Which sessions have a QA team run in flight in this process (see coding-team.ts).
 const running = new Set<string>();
@@ -195,7 +196,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       await setCheck(check.command, 'running');
       try {
         const output = await runCheckedCommandExecute({ command: check.command });
-        await setCheck(check.command, output.split('\n')[0].includes('succeeded') ? 'pass' : 'fail', output);
+        await setCheck(check.command, checkSucceeded(output) ? 'pass' : 'fail', output);
       } catch (err) {
         await setCheck(check.command, 'fail', err instanceof Error ? err.message : String(err));
       }

@@ -28,8 +28,8 @@ export const delegateSchema = z.object({
           .string()
           .describe(
             'One precise question. Ask exactly what you need: a path:line for locations, a complete list ' +
-              'for enumerations ("list all files under X", "does Y exist"), a name or short snippet for content. ' +
-              'E.g. "Where is retryDelay for failed uploads set?" or "List all files under backend/src/db/."',
+              'for enumerations ("who calls X", "does Y exist"), a name or short snippet for content. ' +
+              'E.g. "Where is retryDelay for failed uploads set?" or "Which files import getPool?"',
           ),
         paths: z
           .array(z.string())
@@ -48,9 +48,12 @@ export const delegateDescription =
   `Hand up to ${MAX_DELEGATE_TASKS} read-only questions to local helpers running in parallel on this machine. ` +
   'They search and read the repo themselves; only the answer enters your context, not the files they read. ' +
   'Use for exploration: where something is defined, who calls a function, does a pattern already exist, ' +
-  "which files a change touches, whether a file or directory exists, listing what's under a path. " +
-  "Don't use for text you're about to edit (edit_file needs it verbatim — read that range yourself), " +
-  'or for anything that needs judgment about the plan. ' +
+  'which files a change touches, whether a file or directory exists. ' +
+  'A task that only lists the files under a path is answered straight from the repo (in an app that follows an ' +
+  "architecture, from the domains' generated Files sections), without a helper. " +
+  "Don't use for a file's full contents (answers are cut at 2,400 characters, so such a task is turned away: " +
+  "outline_file it and read_file the range you need), for text you're about to edit (edit_file needs it verbatim — " +
+  'read that range yourself), or for anything that needs judgment about the plan. ' +
   'Ask each task as a precise question: ask for a path:line, a complete list, or a yes/no with the path — ' +
   'whatever the question actually needs. A task that finds nothing comes back as one line. ' +
   'Verify a surprising answer with ranged read_file before acting.';
@@ -213,10 +216,34 @@ export const DELEGATE_NOTE =
   'change touch.\n\n' +
   '**Batch independent questions into one call** — they run in parallel and the combined cost is one tool result ' +
   'instead of many. Group unrelated lookups that can happen at the same time.\n\n' +
-  "**Don't delegate** text you are about to edit (you need it verbatim for edit_file — read that range yourself), " +
+  "**Don't delegate** a file's full contents (turned away: outline_file it and read_file the range you need), " +
+  'text you are about to edit (you need it verbatim for edit_file — read that range yourself), ' +
   'facts you already have in the conversation, or questions that need judgment about the plan.\n\n' +
   'A task that finds nothing comes back as one short line. Check a surprising answer with a ranged read_file ' +
   'before acting on it — the helpers are smaller models.';
+
+// Tasks that aren't a helper's job. Listing files is answered from the repo
+// itself (exact, free); a whole file can't come back through a 2,400-char
+// answer, so the agent would read it again anyway.
+const LIST_FILES_RE =
+  /\b(list|show|give|enumerate)\s+(me\s+)?(all|every|the)?\s*(\w+\s+)?(files?|file\s+(tree|paths?)|folders?|subfolders?|directories)\b(?!\s+(that|which|where|whose|using|importing|referencing|calling|containing|with|mentioning))/i;
+const FULL_CONTENTS_RE = /\b(full|entire|whole|complete)\s+(contents?|source|text|file)\b/i;
+const TASK_PATH_RE = /(?:^|[\s(`'"])((?:\.\/)?[\w@.-]+(?:\/[\w@.*-]+)+\/?)/g;
+
+export function isListFilesTask(task: string): boolean {
+  return LIST_FILES_RE.test(task) && !FULL_CONTENTS_RE.test(task);
+}
+
+export function isFullContentsTask(task: string): boolean {
+  return FULL_CONTENTS_RE.test(task);
+}
+
+/** The folders a listing task is about: its `paths`, else the paths it names; none = the whole repo. */
+export function listingPaths(task: { task: string; paths?: string[] }): string[] {
+  const given = task.paths?.map((p) => p.trim()).filter(Boolean) ?? [];
+  const named = given.length ? given : [...task.task.matchAll(TASK_PATH_RE)].map((m) => m[1]);
+  return [...new Set(named.map((p) => p.replace(/^\.\//, '').replace(/[.,;:]+$/, '').replace(/\/+$/, '')))];
+}
 
 export function delegatePrompt(task: { task: string; paths?: string[] }): string {
   const paths = task.paths?.filter((p) => p.trim()) ?? [];
@@ -296,6 +323,8 @@ export interface DelegateTaskResult {
   readChars: number;
   // Local tokens the subagent spent (free).
   localTokens: number;
+  // Turned away without a helper (a full file's contents).
+  refused?: boolean;
 }
 
 /**
@@ -306,15 +335,21 @@ export interface DelegateTaskResult {
 export function formatResults(results: DelegateTaskResult[]): string {
   const numbered = results.map((r, i) => ({ ...r, n: i + 1 }));
   const useful = numbered.filter((r) => r.answer);
-  const empty = numbered.filter((r) => !r.answer && !r.error);
+  const empty = numbered.filter((r) => !r.answer && !r.error && !r.refused);
   const failed = numbered.filter((r) => !r.answer && r.error);
+  const refused = numbered.filter((r) => r.refused);
+  const refusedLine = (ns: number[]) =>
+    `Not delegated${results.length > 1 ? `: ${ns.join(', ')}` : ''} (a file's full contents: answers are cut at ` +
+    `${MAX_ANSWER_CHARS.toLocaleString('en-US')} characters. outline_file it and read_file only the range you need).`;
 
-  if (useful.length === 0 && failed.length === 0) return 'Nothing found. Look yourself, or ask a narrower question.';
+  if (results.length === 1 && refused.length) return refusedLine([1]);
+  if (useful.length === 0 && failed.length === 0 && !refused.length) return 'Nothing found. Look yourself, or ask a narrower question.';
   if (results.length === 1) {
     return useful.length ? useful[0].answer! : `Helper failed (${failed[0].error}). Do this one yourself.`;
   }
   const parts = useful.map((r) => `[${r.n}] ${r.answer}`);
   if (empty.length) parts.push(`Nothing found: ${empty.map((r) => r.n).join(', ')}.`);
+  if (refused.length) parts.push(refusedLine(refused.map((r) => r.n)));
   if (failed.length) {
     const reasons = [...new Set(failed.map((r) => r.error))].join('; ');
     parts.push(`Failed, do yourself: ${failed.map((r) => r.n).join(', ')} (${reasons}).`);
@@ -384,19 +419,36 @@ export async function runDelegation(
   input: DelegateInput,
   runHelper: (prompt: string) => Promise<HelperRun>,
   parallel = DELEGATE_PARALLEL,
+  // Answers a listing task from the repo (exact and free); without it, a helper does.
+  listFiles?: (paths: string[]) => Promise<string>,
 ): Promise<{ text: string; report: DelegateReport }> {
   const tasks = normalizeTasks(input);
-  const runs = await runLimited(tasks, parallel, (task) =>
-    runHelper(delegatePrompt(task)).catch(
-      (err): HelperRun => ({ text: '', error: err instanceof Error ? err.message : String(err), usage: NO_USAGE, readChars: 0 }),
-    ),
+  const kinds = tasks.map((t) => (isFullContentsTask(t.task) ? 'refused' : listFiles && isListFilesTask(t.task) ? 'listing' : 'helper'));
+  const direct = await Promise.all(
+    tasks.map((t, i) => (kinds[i] === 'listing' ? listFiles!(listingPaths(t)).catch(() => null) : Promise.resolve(null))),
   );
-  const results: DelegateTaskResult[] = runs.map((run) => ({
-    answer: run.error ? null : cleanAnswer(run.text),
-    error: run.error ? shortError(run.error) : null,
-    readChars: run.readChars,
-    localTokens: usageTotal(run.usage),
-  }));
+  // A listing that failed goes to a helper after all.
+  const toHelper = tasks.map((_, i) => kinds[i] === 'helper' || (kinds[i] === 'listing' && direct[i] === null));
+  const helperRuns = await runLimited(
+    tasks.filter((_, i) => toHelper[i]),
+    parallel,
+    (task) =>
+      runHelper(delegatePrompt(task)).catch(
+        (err): HelperRun => ({ text: '', error: err instanceof Error ? err.message : String(err), usage: NO_USAGE, readChars: 0 }),
+      ),
+  );
+  let next = 0;
+  const runs: HelperRun[] = tasks.map((_, i) => (toHelper[i] ? helperRuns[next++] : { text: '', error: null, usage: NO_USAGE, readChars: 0 }));
+  const results: DelegateTaskResult[] = runs.map((run, i) =>
+    !toHelper[i]
+      ? { answer: direct[i], error: null, readChars: 0, localTokens: 0, refused: kinds[i] === 'refused' }
+      : {
+          answer: run.error ? null : cleanAnswer(run.text),
+          error: run.error ? shortError(run.error) : null,
+          readChars: run.readChars,
+          localTokens: usageTotal(run.usage),
+        },
+  );
   const text = formatResults(results);
   const usage = runs.reduce(
     (acc, r) => ({

@@ -20,7 +20,7 @@ import {
 } from './core.js';
 import { reportHelperRedo, reportHelperRun, type HelperContext } from '../helper.js';
 import { createDocsSearchTools } from '../../tool-defs/docs-search-tool.js';
-import { createSearchCodeTool, type SearchListing } from '../../tool-defs/code-search-tool.js';
+import { createSearchCodeExecute, createSearchCodeTool, type SearchListing } from '../../tool-defs/code-search-tool.js';
 import type { AppConfig } from '../../../apps/apps.js';
 import { domainListing } from '../../../architecture/focus.js';
 import { createOutlineFileTool } from '../../tool-defs/outline-tool.js';
@@ -94,8 +94,15 @@ export function createDelegateExecute(deps: DelegateDeps) {
     (deps.model === BUILTIN_MODEL_ID
       ? (prompt: string) => runBuiltinHelper(deps, prompt)
       : (prompt: string) => runOllamaHelper(deps, prompt));
+  // A listing task is answered by search_code's listing: the domains' Files
+  // sections in a Wayfinding app, else the tracked paths.
+  const searchCode = createSearchCodeExecute({ repoRoot: deps.repoRoot, listing: deps.listing });
+  const listFiles = async (paths: string[]) => {
+    const lists = await Promise.all((paths.length ? paths : [undefined]).map((glob) => searchCode({ query: '.', glob })));
+    return lists.join('\n\n');
+  };
   return async (input: DelegateInput): Promise<string> => {
-    const { text, report } = await runDelegation(input, runHelper);
+    const { text, report } = await runDelegation(input, runHelper, undefined, listFiles);
     const { usage, paths, ...rest } = report;
     const stats = { helper: 'research' as const, model: deps.model, ...rest, localTokens: usage.input + usage.output };
     await reportHelperRun(deps.context, stats, delegateStatsLine(stats), usage);
