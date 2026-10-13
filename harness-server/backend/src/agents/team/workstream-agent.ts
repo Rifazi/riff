@@ -15,8 +15,8 @@ import { createAuditThemeToolClaude } from '../tool-defs-claude/theme-audit-tool
 import { architectureToolEntry } from '../tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from '../tool-defs-claude/architecture-audit-tool.js';
 import { architectureBriefingFor, promptForArchitecture } from '../../architecture/architecture-context.js';
-import { createClassifyTextTool } from '../helpers/classifier/tool.js';
-import { createClassifyTextToolClaude } from '../helpers/classifier/tool-claude.js';
+import { classifierToolEnabled, classifyTextToolEntry } from '../helpers/classifier/tool.js';
+import { classifyTextToolsClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
 import { COMPACT_AT_TOKENS, hopLimits, loadApprovedDocsForCoding } from '../coding-agent.js';
@@ -119,6 +119,7 @@ export async function runWorkstreamAgent({
     stage: 'coding',
     record: (entry) => appendTeamTranscriptEntry(session.id, member.id, entry),
   };
+  const classifierOn = await classifierToolEnabled();
   const delegateDeps = researchDeps({
     model: provider === 'ollama' ? null : delegateModel,
     repoRoot: worktreePath,
@@ -341,7 +342,7 @@ export async function runWorkstreamAgent({
       createSearchCodeToolClaude({ repoRoot: worktreePath, focus: searchFocus, listing: domainListing(app, worktreePath) }),
       createOutlineFileToolClaude({ repoRoot: worktreePath }),
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
-      createClassifyTextToolClaude(helperContext),
+      ...classifyTextToolsClaude(classifierOn, helperContext),
       readFileToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
@@ -362,7 +363,7 @@ export async function runWorkstreamAgent({
       'read_doc',
       'search_code',
       'audit_theme',
-      'classify_text',
+      ...(classifierOn ? ['classify_text'] : []),
       'read_file',
       'outline_file',
       'write_file',
@@ -426,7 +427,6 @@ export async function runWorkstreamAgent({
     search_code: createSearchCodeTool({ repoRoot: worktreePath, focus: searchFocus, listing: domainListing(app, worktreePath) }),
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
-    classify_text: createClassifyTextTool(helperContext),
     read_file: readFileTool,
     write_file: writeFileTool,
     edit_file: editFileTool,
@@ -439,6 +439,7 @@ export async function runWorkstreamAgent({
     report_workstream: createReportWorkstreamTool(reportDeps),
     finish_step: createFinishStepTool(finishDeps),
     ...(ownsPackageJson(member) ? { run_npm_install: createRunNpmInstallTool({ repoRoot: worktreePath }) } : {}),
+    ...classifyTextToolEntry(classifierOn, helperContext, member.history),
     ...architectureToolEntry(architectureDeps, member.history),
     ...delegateToolEntry(delegateDeps, member.history),
     ...recallToolEntry(memoryDeps, member.history),
@@ -468,7 +469,7 @@ export async function runWorkstreamAgent({
 const firstLine = (text: string) => text.trim().split('\n')[0].slice(0, 300);
 
 async function persistEvent(sessionId: string, memberId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event, memberId);
   if (event.type === 'assistant_text') {
     await appendTeamTranscriptEntry(sessionId, memberId, { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

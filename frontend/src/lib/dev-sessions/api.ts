@@ -307,7 +307,7 @@ export const api = {
     models?: Partial<Record<Role, RoleModelConfig>>;
     ollamaEndpoint?: string;
     jira?: Partial<JiraSettingsFields> & { apiToken?: string | null };
-    classification?: { model?: string };
+    classification?: { model?: string; agentTool?: boolean };
   }) =>
     fetch(apiUrl('/api/settings'), {
       method: 'POST',

@@ -1414,6 +1414,49 @@ below) — never inside the target repo.
    node:test shim. The git path (checking out the shared branch, diff from
    `branchBase`) was checked on a scratch repo. Not run with real agents yet.
 
+52. User asked whether the Oct 12-13 optimizations saved tokens. Across
+   `state/usage-log.jsonl` (Oct 5-13), coding cost per plan step roughly
+   halved (0.45-0.66M → 0.23-0.34M input-equivalent units; input + 1.25×
+   cache write + 0.1× cache read + 5× output). QA didn't fall, and now
+   costs about as much as coding. Fixed from what the transcripts showed:
+   - **Scoped QA diff**: the lead and every reviewer each pulled the full
+     ~27k-char diff. A reviewer's no-path `get_diff` now returns the whole
+     stat but only its focus paths' diffs (`QaExecutorDeps.focusPaths`, set
+     by `createReviewTools`). `path` still fetches any file. `get_diff`
+     answers an unchanged repeat in the same tool set with a `ReadMemo` note.
+   - **Reference sections in plan steps**: one 10-part reference doc was
+     read 46 times across stages. The plan prompt and `write_plan_doc` ask
+     each step to name the exact `read_doc` sections it needs, since the
+     coding agent sees only its current step.
+   - **`recall`**: half its answers were redone, nearly all after a result
+     labelled "changed since it was read: read_file … before relying on it"
+     (the agent had edited the file). `refreshChanged` now re-reads a
+     changed file in the asker's own view from disk before ranking, so the
+     answer is current. `RedoLedger.record` takes the recalled line ranges,
+     and only a read that overlaps one counts as a redo.
+   - **Research helper**: its coding useful rate fell from 91% to 30%
+     because turned-away "full contents" tasks were counted. They no longer
+     count as tasks. Its description and `DELEGATE_NOTE` say helpers can't
+     run git or shell commands, or count a long list exactly (agents kept
+     asking for both).
+   - **`classify_text` is opt-in** (`classification.agentTool`, Settings →
+     Dev Agents → Classifier helper; unset = off). No agent called it in 580
+     logged turns, and its ~2.8k-char schema went out with every request.
+     `classifyTextToolEntry` keeps a refusing stub for AI-SDK histories with
+     old calls. `write_plan_doc` still sizes steps with the classifier.
+   - **Usage log**: each line now has `agent` (the stage, or a team
+     member's id), `requests` (model requests in the turn) and, for coding,
+     `planSteps`, so cost per agent, per request and per step can be read
+     straight off the log.
+   The formatter's saving is still counted, not estimated (see
+   `helpers/format/format.ts`). `outline_file` repeats were across
+   agents, not within a conversation, so its own memo already covers what
+   a per-conversation memo can. Tests: `qa-scoped-diff.test.ts` (temp
+   repo), `research-core.test.ts` (ranged redo, refused tasks); the whole
+   folder (264) passes through a node:test shim. Not run with real agents
+   yet: compare full `get_diff` calls per QA round, `recall` redos and
+   coding cost per step on the next session.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -1446,7 +1489,7 @@ backend/src/
     prompts/customer-edi-legacy/*.md — verbatim archive of the original Customer-EDI-specific prompt content, seeded as that app's prompt overrides (see prompts-store.ts above)
     helpers/                  — local helpers: work an agent hands to a model on this machine instead of its paid context (step 29). helper.ts is the shared contract (HelperContext, reportHelperRun → one usage-log line + one chat entry per run, stageHelperContext). Each helper folder: core.ts (pure, tested from frontend/tests/harness-server/), the runtime, tool.ts (AI SDK) + tool-claude.ts (Claude engine)
     helpers/research/         — `delegate` (step 28): core.ts (schema, answer cleanup, formatting, savings, runDelegation), tool.ts (Ollama helper loops, delegateDeps, delegateToolEntry)
-    helpers/classifier/       — `classify_text`: classifier.ts is on-device zero-shot classification (all four roles + team members), a transformers.js pipeline over a small ONNX NLI model. It's one in-process singleton, hot-swapped when Settings → Dev Agents picks another of the three curated models, with weights cached under state/classification-models/ (not transformers.js's own OS cache). It also has the cache status/clear helpers routes/settings.ts exposes. It is deliberately NOT local-llm.ts's Qwen/llama.cpp stack, which is a causal chat model on a different runtime (see docs/classification-tool.md in the Riff repo). cache.ts is the on-disk half: recursive size walk, per-model cache status, clear-all; it takes the cache dir as an argument so it's tested against a temp dir. pipeline-cache.ts is the in-memory half: a single slot keyed by model id with an injected loader. core.ts holds the pure normalization/ranking/selection, and schema.ts the zod schema + description, importable by tests without `ai`. Optional tool params are `.optional()`, never zod `.default()`: a default makes the argument required on the Claude/MCP path
+    helpers/classifier/       — `classify_text`: classifier.ts is on-device zero-shot classification (all four roles + team members when Settings turns the tool on; `write_plan_doc` sizes steps with it regardless), a transformers.js pipeline over a small ONNX NLI model. It's one in-process singleton, hot-swapped when Settings → Dev Agents picks another of the three curated models, with weights cached under state/classification-models/ (not transformers.js's own OS cache). It also has the cache status/clear helpers routes/settings.ts exposes. It is deliberately NOT local-llm.ts's Qwen/llama.cpp stack, which is a causal chat model on a different runtime (see docs/classification-tool.md in the Riff repo). cache.ts is the on-disk half: recursive size walk, per-model cache status, clear-all; it takes the cache dir as an argument so it's tested against a temp dir. pipeline-cache.ts is the in-memory half: a single slot keyed by model id with an injected loader. core.ts holds the pure normalization/ranking/selection, and schema.ts the zod schema + description, importable by tests without `ai`. Optional tool params are `.optional()`, never zod `.default()`: a default makes the argument required on the Claude/MCP path
     tool-defs/*.ts            — one file per tool group (the local helpers' tools live in helpers/ instead); each exports schema + description + a factory (createXExecute(s)/createXTool(s)) that closes over a repoRoot/appId, built fresh per turn by the *-agent.ts files
     tool-defs-claude/*.ts     — same tool groups, Claude-Agent-SDK tool() wrappers around the SAME factory-produced execute functions from tool-defs/ via wrap.ts's wrapForClaudeSdk() — no logic duplicated, only the SDK-format glue
   repo/

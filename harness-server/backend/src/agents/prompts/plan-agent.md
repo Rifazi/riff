@@ -100,7 +100,11 @@ full; read the sections you need.
    plan's context in every step; the ticket this becomes will already be
    labeled with the feature and ticket key, so keep each step's section
    itself focused on that step's own files, mirror, and acceptance
-   criteria.
+   criteria. When a step needs a reference document (code lists, field
+   tables, a spec), name the exact sections it needs, as `read_doc` takes
+   them (e.g. `reference/session/x12-qualifiers-txt.md (part 3 of 10)`):
+   the coding agent sees only its current step and otherwise reads the
+   whole document again for every step.
 5. **Order the steps so each one, completed on its own, leaves the repo in
    a working state** — lint passes, nothing references a symbol that
    doesn't exist yet. The coding agent implements and lints one step per

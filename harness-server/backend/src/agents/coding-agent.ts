@@ -23,8 +23,8 @@ import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureBriefingFor, architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
 import { domainListing, namedDomainsFocus } from '../architecture/focus.js';
-import { createClassifyTextTool } from './helpers/classifier/tool.js';
-import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { classifierToolEnabled, classifyTextToolEntry } from './helpers/classifier/tool.js';
+import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffBaseFor, sharedBranchFor } from '../sessions/shared-branch.js';
@@ -84,7 +84,6 @@ const TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
-  'classify_text',
   'read_file',
   'outline_file',
   'write_file',
@@ -179,6 +178,7 @@ export async function runCodingAgentTurn(
   // Local helpers (helpers/): runs are reported into this chat. The research
   // helper is pointless when this turn already runs on Ollama.
   const helperContext = stageHelperContext(session.id, 'coding');
+  const classifierOn = await classifierToolEnabled();
   const delegateDeps = researchDeps({
     model: provider === 'ollama' ? null : roleConfig.delegateModel,
     repoRoot: app.repoRoot,
@@ -501,7 +501,7 @@ export async function runCodingAgentTurn(
             createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
             createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-            createClassifyTextToolClaude(helperContext),
+            ...classifyTextToolsClaude(classifierOn, helperContext),
             readFileToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
@@ -533,6 +533,7 @@ export async function runCodingAgentTurn(
         createMcpServer,
         toolNames: [
           ...TOOL_NAMES,
+          ...(classifierOn ? ['classify_text'] : []),
           ...(withLeadTools ? TEAM_LEAD_TOOL_NAMES : []),
           ...(withBuildSolo ? ['build_solo'] : []),
           ...architectureToolNames(architectureDeps),
@@ -592,7 +593,6 @@ export async function runCodingAgentTurn(
         search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-        classify_text: createClassifyTextTool(helperContext),
         read_file: readFileTool,
         write_file: writeFileTool,
         edit_file: editFileTool,
@@ -613,6 +613,7 @@ export async function runCodingAgentTurn(
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
         finish_step: createFinishStepTool(finishDeps),
+        ...classifyTextToolEntry(classifierOn, helperContext, session.histories.coding),
         ...architectureToolEntry(architectureDeps, session.histories.coding),
         ...delegateToolEntry(delegateDeps, session.histories.coding),
         ...recallToolEntry(memoryDeps, session.histories.coding),
@@ -804,7 +805,7 @@ export function suggestedBranchName(session: SessionRecord): string {
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'coding', event);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'coding', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

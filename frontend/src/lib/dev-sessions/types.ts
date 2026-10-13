@@ -590,7 +590,7 @@ export interface SettingsResponse {
   localModel: { available: boolean; model: string | null; reason: string | null };
   ollamaEndpoint: string;
   jira: RedactedJiraSettings;
-  classification: { model: string };
+  classification: { model: string; agentTool?: boolean };
   classificationModels: ClassificationModelOption[];
 }
 

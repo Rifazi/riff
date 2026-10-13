@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
 import type { SettingsResponse } from '@/lib/dev-sessions/types';
 import { ErrorText } from '../PageShell';
@@ -39,6 +40,11 @@ export function ClassificationToolSettings({ settings }: { settings: SettingsRes
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
   });
 
+  const toolMutation = useMutation({
+    mutationFn: (on: boolean) => api.updateSettings({ classification: { agentTool: on } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+  });
+
   const clearMutation = useMutation({
     mutationFn: api.clearClassificationCache,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['classification-cache'] }),
@@ -55,12 +61,19 @@ export function ClassificationToolSettings({ settings }: { settings: SettingsRes
         <div>
           <div className="font-medium text-foreground">Classifier helper</div>
           <div className="text-xs text-muted-foreground">
-            Every agent can ask it which of a set of labels fits a text (classify_text). Runs on this machine, free
-            after the first download. Weights are cached under harness-server/state/. Takes effect on the agents&apos; next classification
-            call — no restart.
+            When on, every agent can ask it which of a set of labels fits a text (classify_text). Off by default: agents
+            rarely call it, and the tool&apos;s description is sent with every request. Plan steps are sized with it either
+            way. Runs on this machine, free after the first download. Weights are cached under harness-server/state/.
+            Takes effect on the agents&apos; next turn — no restart.
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <Switch
+            checked={settings.classification.agentTool === true}
+            disabled={toolMutation.isPending}
+            onCheckedChange={(on) => toolMutation.mutate(on)}
+            aria-label="Give agents the classify_text tool"
+          />
           <Select value={model} onValueChange={setModel} disabled={saveMutation.isPending}>
             <SelectTrigger className="flex-1">
               <SelectValue placeholder="Select a model" />
@@ -86,6 +99,7 @@ export function ClassificationToolSettings({ settings }: { settings: SettingsRes
       </div>
 
       {saveMutation.isError && <ErrorText>Couldn&apos;t save the model: {errorText(saveMutation.error)}</ErrorText>}
+      {toolMutation.isError && <ErrorText>Couldn&apos;t save: {errorText(toolMutation.error)}</ErrorText>}
 
       <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
         <div className="flex flex-wrap items-center justify-between gap-2">

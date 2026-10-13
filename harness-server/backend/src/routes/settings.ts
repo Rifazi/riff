@@ -56,6 +56,9 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         }
       }
     }
+    if (body.classification?.agentTool !== undefined && typeof body.classification.agentTool !== 'boolean') {
+      return reply.code(400).send({ error: 'agentTool must be a boolean' });
+    }
     if (body.classification?.model !== undefined) {
       const model = body.classification.model;
       if (typeof model !== 'string' || !isClassificationModel(model)) {

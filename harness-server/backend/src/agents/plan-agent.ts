@@ -22,8 +22,8 @@ import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
 import { domainListing, namedDomainsFocus } from '../architecture/focus.js';
-import { createClassifyTextTool } from './helpers/classifier/tool.js';
-import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { classifierToolEnabled, classifyTextToolEntry } from './helpers/classifier/tool.js';
+import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
@@ -54,7 +54,6 @@ const TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
-  'classify_text',
   'read_file',
   'outline_file',
   'write_plan_doc',
@@ -76,6 +75,7 @@ export async function runPlanAgentTurn(
   const { delegateModel } = await getRoleModelConfig('coding');
   const helperContext = stageHelperContext(session.id, 'plan');
   const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext, app });
+  const classifierOn = await classifierToolEnabled();
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'plan');
@@ -169,12 +169,12 @@ export async function runPlanAgentTurn(
         name: 'harness-tools',
         version: '1.0.0',
         tools: [
+          ...classifyTextToolsClaude(classifierOn, stageHelperContext(session.id, 'plan')),
           searchDocsToolClaude,
           readDocToolClaude,
           createSearchCodeToolClaude({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          createClassifyTextToolClaude(stageHelperContext(session.id, 'plan')),
           readFileToolClaude,
           ...architectureToolsClaude(architectureDeps),
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
@@ -192,7 +192,7 @@ export async function runPlanAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: [...TOOL_NAMES, ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
+      toolNames: [...TOOL_NAMES, ...(classifierOn ? ['classify_text'] : []), ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
       model,
       resumeSessionId: session.claudeSessionIds.plan,
       prompt,
@@ -218,7 +218,7 @@ export async function runPlanAgentTurn(
       search_code: createSearchCodeTool({ repoRoot: app.repoRoot, focus: searchFocus, listing: domainListing(app, app.repoRoot) }),
       outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: createClassifyTextTool(stageHelperContext(session.id, 'plan')),
+      ...classifyTextToolEntry(classifierOn, stageHelperContext(session.id, 'plan'), session.histories.plan),
       read_file: readFileTool,
       ...architectureToolEntry(architectureDeps, session.histories.plan),
       ...delegateToolEntry(researchDeps, session.histories.plan),
@@ -273,7 +273,7 @@ export async function runPlanAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'plan', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'plan', event);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'plan', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

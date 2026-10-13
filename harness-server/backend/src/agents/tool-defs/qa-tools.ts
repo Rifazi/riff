@@ -9,6 +9,7 @@ import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
 import { ensureDependencies } from '../../repo/dependencies.js';
 import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
 import { reportHelperRun, type HelperContext } from '../helpers/helper.js';
+import { ReadMemo } from './read-memo.js';
 import { generateLocal } from '../local-llm.js';
 import {
   RUNNER_INPUT_CHARS,
@@ -133,7 +134,23 @@ export const getDiffDescription =
  * about, not a tool-execution error, so this always returns normally
  * (pass/fail is embedded in the text) rather than throwing.
  */
-export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
+export interface QaExecutorDeps {
+  repoRoot: string;
+  baseBranch?: string;
+  checkCommands?: Partial<Record<CheckCommand, string>>;
+  helperContext?: HelperContext;
+  /**
+   * A QA-team reviewer's focus paths. Its no-path get_diff then returns the
+   * whole stat but only these paths' diffs: the lead and every reviewer each
+   * pulling the full ~25k-char diff was half of QA's tool output.
+   */
+  focusPaths?: string[];
+}
+
+export function createQaExecutors(deps: QaExecutorDeps) {
+  // A repeat of an unchanged diff gets a note instead of the text — see ReadMemo.
+  const diffMemo = new ReadMemo();
+
   const runCheckedCommandExecute = async ({ command }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
     const script = deps.checkCommands?.[command] ?? DEFAULT_SCRIPTS[command];
     const timeoutMs = TIMEOUTS_MS[command];
@@ -201,21 +218,34 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
     }
   };
 
-  const getDiffExecute = async ({ branchName, path: filePath }: z.infer<typeof getDiffSchema>): Promise<string> => {
+  const getDiffExecute = async (args: z.infer<typeof getDiffSchema>): Promise<string> => {
+    const result = await diffText(args);
+    if (diffMemo.isRepeat(`diff\u0000${args.branchName}\u0000${args.path ?? ''}`, result)) {
+      return `[This diff${args.path ? ` of ${args.path}` : ''} is unchanged since you last fetched it — use that copy. Call again to get the text.]`;
+    }
+    return result;
+  };
+
+  const diffText = async ({ branchName, path: filePath }: z.infer<typeof getDiffSchema>): Promise<string> => {
     if (filePath) {
       const diff = compactDiff(await diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [filePath]));
       return diff.trim() ? diff.slice(0, 60_000) : `No changes to ${filePath} on this branch.`;
     }
+    const focus = deps.focusPaths?.length ? deps.focusPaths : null;
     // One line of context instead of git's three in the overview; `path`
     // returns a file's diff with full context.
     const [rawDiff, stat] = await Promise.all([
-      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, DIFF_NOISE_EXCLUDES, OVERVIEW_CONTEXT_LINES),
+      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [...(focus ?? []), ...DIFF_NOISE_EXCLUDES], OVERVIEW_CONTEXT_LINES),
       diffStatAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
     ]);
     const diff = compactDiff(rawDiff);
-    if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${diff}`;
+    const scope = focus
+      ? `[Diff below covers only your focus paths (${focus.join(', ')}). The stat above lists every changed file — ` +
+        'call get_diff with `path` for any other one your criteria need.]\n\n'
+      : '';
+    if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${scope}${diff}`;
     return (
-      `${stat}\n\n${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +
+      `${stat}\n\n${scope}${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +
       'call get_diff again with `path` for any file in the stat above that was cut off]'
     );
   };
@@ -223,7 +253,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
   return { runCheckedCommandExecute, getDiffExecute };
 }
 
-export function createQaTools(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
+export function createQaTools(deps: QaExecutorDeps) {
   const { runCheckedCommandExecute, getDiffExecute } = createQaExecutors(deps);
   return {
     runCheckedCommandTool: tool({

@@ -1,4 +1,5 @@
-import { tool } from 'ai';
+import { tool, type ToolSet } from 'ai';
+import { getSettings } from '../../../settings/settings-store.js';
 
 import { classifyText, type ClassifyTextResult } from './classifier.js';
 import { classifyTextDescription, classifyTextSchema, type ClassifyTextInput } from './schema.js';
@@ -47,4 +48,26 @@ export function createClassifyTextTool(context?: HelperContext) {
     inputSchema: classifyTextSchema,
     execute: createClassifyTextExecute(context),
   });
+}
+
+/** Whether agents get classify_text (Settings → Dev Agents → Local helpers). */
+export async function classifierToolEnabled(): Promise<boolean> {
+  return (await getSettings()).classification.agentTool === true;
+}
+
+/**
+ * The AI-SDK `classify_text` entry for a tool set. Turned off, a history that
+ * still has classify_text calls keeps a refusing stub so replays stay valid
+ * (like delegateToolEntry).
+ */
+export function classifyTextToolEntry(enabled: boolean, context: HelperContext | undefined, history: unknown[]): ToolSet {
+  if (enabled) return { classify_text: createClassifyTextTool(context) };
+  if (!JSON.stringify(history).includes('"toolName":"classify_text"')) return {};
+  return {
+    classify_text: tool({
+      description: classifyTextDescription,
+      inputSchema: classifyTextSchema,
+      execute: async () => 'The classifier tool is turned off in Settings.',
+    }),
+  };
 }

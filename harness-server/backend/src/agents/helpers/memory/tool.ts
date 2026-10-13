@@ -13,6 +13,7 @@ import {
   freshnessLabel,
   groundPicks,
   linesIn,
+  mergeRead,
   normalizePath,
   NOT_IN_MEMORY,
   packCandidates,
@@ -70,7 +71,8 @@ export function rememberRead(deps: ReadMemoryDeps | null, filePath: string, read
 export function notePaidRead(deps: ReadMemoryDeps | null, filePath: string, read: { text: string; fileHash: string }): void {
   if (!deps) return;
   rememberRead(deps, filePath, read);
-  for (const redo of deps.ledger.noteRead(filePath)) {
+  const { start, lines } = parseReadText(read.text);
+  for (const redo of deps.ledger.noteRead(filePath, { start, end: start + lines.length - 1 })) {
     void reportHelperRedo(deps.context, 'memory', redo.useful, redo.savedTokens);
   }
 }
@@ -103,13 +105,32 @@ async function rankedCandidates(deps: ReadMemoryDeps, question: string, entries:
   }
 }
 
-async function currentHash(repoRoot: string, filePath: string): Promise<string | null> {
+async function currentFile(repoRoot: string, filePath: string): Promise<{ content: string; hash: string } | null> {
   try {
     const content = await fs.readFile(assertPathAllowed(filePath, ['.'], repoRoot), 'utf8');
-    return createHash('sha1').update(content).digest('hex');
+    return { content, hash: createHash('sha1').update(content).digest('hex') };
   } catch {
     return null;
   }
+}
+
+/**
+ * Replaces each remembered file the asker has changed since reading it with
+ * the file as it is now. Recalling the old copy told the agent to read it
+ * again, which it did about half the time: the agent edits the files it read.
+ * Returns each file's current hash, null when it's gone.
+ */
+async function refreshChanged(deps: ReadMemoryDeps, entries: Map<string, MemoryEntry>): Promise<Map<string, string | null>> {
+  const hashes = new Map<string, string | null>();
+  for (const [key, entry] of entries) {
+    const file = await currentFile(deps.repoRoot, entry.path);
+    hashes.set(entry.path, file?.hash ?? null);
+    if (!file || file.hash === entry.fileHash || entry.view !== deps.view) continue;
+    const read = { view: entry.view, path: entry.path, fileHash: file.hash, start: 1, lines: file.content.split('\n'), reader: deps.reader };
+    entries.set(key, mergeRead(undefined, { ...read, at: new Date().toISOString() }));
+    void recordRead(deps.sessionId, read);
+  }
+  return hashes;
 }
 
 export function createRecallExecute(deps: ReadMemoryDeps) {
@@ -118,6 +139,7 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
     const scope = (paths ?? []).map(normalizePath).filter(Boolean);
     const inScope = (p: string) => scope.length === 0 || scope.some((s) => p === s || p.startsWith(`${s}/`));
     const entries = new Map([...all].filter(([, e]) => inScope(e.path)));
+    const hashes = await refreshChanged(deps, entries);
     if (entries.size === 0) {
       await reportHelperRun(deps.context, { helper: 'memory', model: 'none', tasks: 1, useful: 0, savedTokens: 0 }, NOT_IN_MEMORY);
       return NOT_IN_MEMORY;
@@ -144,12 +166,10 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
       return NOT_IN_MEMORY;
     }
 
-    const hashes = new Map<string, string | null>();
     const shown: { excerpt: Excerpt; lines: [number, string][]; label: string }[] = [];
     for (const excerpt of excerpts) {
       const entry = entries.get(excerpt.key)!;
-      if (!hashes.has(entry.path)) hashes.set(entry.path, await currentHash(deps.repoRoot, entry.path));
-      const label = freshnessLabel(freshness(entry, deps.view, hashes.get(entry.path)!), `${excerpt.path}:${excerpt.start}-${excerpt.end}`);
+      const label = freshnessLabel(freshness(entry, deps.view, hashes.get(entry.path) ?? null), `${excerpt.path}:${excerpt.start}-${excerpt.end}`);
       shown.push({ excerpt, lines: linesIn(entry, excerpt.start, excerpt.end), label });
     }
     const text = formatRecall(shown);
@@ -157,7 +177,7 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
     const recalled = [...new Set(excerpts.map((e) => e.path))];
     const saved = recallSavedTokens(keys.map((k) => entryChars(entries.get(k)!)), text.length);
     await touchEntries(deps.sessionId, keys);
-    deps.ledger.record(recalled, 1, saved);
+    deps.ledger.record(recalled, 1, saved, excerpts.map((e) => ({ path: e.path, start: e.start, end: e.end })));
     await reportHelperRun(
       deps.context,
       { helper: 'memory', model, tasks: 1, useful: 1, returnedChars: text.length, savedTokens: saved },

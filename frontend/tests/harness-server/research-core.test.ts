@@ -260,6 +260,14 @@ describe('RedoLedger', () => {
     expect(ledger.noteRead('src/a.ts')).toEqual([]);
   });
 
+  // A recall returns line ranges; reading another part of the same file isn't redoing it.
+  test('with ranges, only a read that overlaps one is a redo', () => {
+    const ledger = new RedoLedger();
+    ledger.record(['src/a.ts'], 1, 400, [{ path: 'src/a.ts', start: 429, end: 457 }]);
+    expect(ledger.noteRead('src/a.ts', { start: 753, end: 843 })).toEqual([]);
+    expect(ledger.noteRead('src/a.ts', { start: 440, end: 470 })).toEqual([{ useful: 1, savedTokens: 400 }]);
+  });
+
   test('runDelegation reports the files every successful task read', async () => {
     const runs: HelperRun[] = [
       { text: 'src/a.ts:3 does it', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 900, paths: ['src/a.ts'] },
@@ -322,6 +330,8 @@ describe('tasks that are not a helper\'s job', () => {
     expect(text).toContain('[3] client/src/pages/x.tsx:12');
     expect(text).toContain('Not delegated: 2 (a file\'s full contents');
     expect(report.useful).toBe(2);
+    // The turned-away task never reached a helper, so it isn't counted against them.
+    expect(report.tasks).toBe(2);
   });
 
   test('a single full-contents task costs one line', async () => {

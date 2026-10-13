@@ -22,8 +22,8 @@ import { architectureToolNames, architectureToolsClaude } from './tool-defs-clau
 import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
 import { changedDomainsFocus, domainListing } from '../architecture/focus.js';
 import type { AppConfig } from '../apps/apps.js';
-import { createClassifyTextTool } from './helpers/classifier/tool.js';
-import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { classifierToolEnabled, classifyTextToolEntry } from './helpers/classifier/tool.js';
+import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { delegateToolEntry } from './helpers/research/tool.js';
 import { stageHelperContext, type HelperContext } from './helpers/helper.js';
 import { tryCompressCode, compressMessages } from './helpers/compress.js';
@@ -64,7 +64,6 @@ export const REVIEW_TOOL_NAMES = [
   'read_doc',
   'search_code',
   'audit_theme',
-  'classify_text',
   'read_file',
   'outline_file',
   'get_diff',
@@ -88,11 +87,15 @@ export interface ReviewToolDeps {
   baseBranch: string;
   checkCommands?: Partial<Record<CheckCommand, string>>;
   helperContext: HelperContext;
+  /** A QA-team reviewer's focus paths: its no-path get_diff covers only these (createQaExecutors). */
+  focusPaths?: string[];
+  /** Whether classify_text is turned on (classifierToolEnabled). */
+  classifier: boolean;
 }
 
 /** The read-only review tools (REVIEW_TOOL_NAMES, plus audit_architecture when the app has one) for either engine. */
 export function createReviewTools(deps: ReviewToolDeps) {
-  const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext };
+  const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext, focusPaths: deps.focusPaths };
   const architectureDeps = { app: deps.app, repoRoot: deps.repoRoot, scope: true, branch: deps.branch, baseBranch: deps.baseBranch, allowRegenerate: false };
   // search_code without a glob starts in the domains the branch touched (read once: QA doesn't change the branch).
   let changed: Promise<string[]> | null = null;
@@ -101,7 +104,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
     return changed;
   });
   return {
-    names: [...REVIEW_TOOL_NAMES, ...architectureToolNames(architectureDeps)],
+    names: [...REVIEW_TOOL_NAMES, ...(deps.classifier ? ['classify_text'] : []), ...architectureToolNames(architectureDeps)],
     claude: () => {
       const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: deps.appId, sessionId: deps.sessionId });
       const { readFileToolClaude } = createFileToolsClaude({ repoRoot: deps.repoRoot, compress: tryCompressCode });
@@ -112,7 +115,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
         createSearchCodeToolClaude({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         createOutlineFileToolClaude({ repoRoot: deps.repoRoot }),
         createAuditThemeToolClaude({ repoRoot: deps.repoRoot }),
-        createClassifyTextToolClaude(deps.helperContext),
+        ...classifyTextToolsClaude(deps.classifier, deps.helperContext),
         readFileToolClaude,
         getDiffToolClaude,
         ...architectureToolsClaude(architectureDeps),
@@ -128,7 +131,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
         search_code: createSearchCodeTool({ repoRoot: deps.repoRoot, focus: searchFocus, listing: domainListing(deps.app, deps.repoRoot) }),
         outline_file: createOutlineFileTool({ repoRoot: deps.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: deps.repoRoot }),
-        classify_text: createClassifyTextTool(deps.helperContext),
+        ...classifyTextToolEntry(deps.classifier, deps.helperContext, history),
         read_file: readFileTool,
         get_diff: getDiffTool,
         ...architectureToolEntry(architectureDeps, history),
@@ -266,6 +269,7 @@ export async function runQaAgentTurn(
     baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext,
+    classifier: await classifierToolEnabled(),
   });
   const reportInfo = { sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id, branch, requirementsPath };
   const checkDeps = { repoRoot: app.repoRoot, baseBranch: diffBaseFor(session, app), checkCommands: app.checkCommands, helperContext };
@@ -341,7 +345,7 @@ export async function runQaAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'qa', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

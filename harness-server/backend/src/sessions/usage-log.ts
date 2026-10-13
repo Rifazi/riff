@@ -19,6 +19,13 @@ export interface UsageLogEntry {
   usage: TokenUsage;
   // Absent on entries from before tool output was tracked.
   toolOutput?: ToolOutputStats;
+  // Who ran the turn: the stage's agent ("coding" is the coding agent or
+  // Jack), or a team member's id. Absent on older entries.
+  agent?: string;
+  // Model requests the turn made. Absent on older entries.
+  requests?: number;
+  // Coding only: steps in the session's checklist then, for cost per step.
+  planSteps?: number;
   // Set on a local helper run's entry (agents/helpers/helper.ts): `usage`
   // is then the helper's local tokens, which cost nothing and are kept out
   // of the paid totals and of the session's own `usage`.

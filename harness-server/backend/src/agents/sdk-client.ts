@@ -98,7 +98,7 @@ export type AgentEvent =
   | { type: 'coordinator_decision'; action: 'continue' | 'ready' | 'advanced'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
-  | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats };
+  | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number };
 
 // Bounds automatic continuation (see runAgentTurn/runClaudeAgentTurn below):
 // when a turn is cut off purely because it hit its own per-call step/turn
@@ -386,10 +386,10 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   if (result.finishReason === 'tool-calls' && used >= budget.total) {
     const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
-    onEvent({ type: 'usage', usage, toolOutput });
+    onEvent({ type: 'usage', usage, toolOutput, requests: used });
     return { updatedHistory: result.updatedHistory, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
-  onEvent({ type: 'usage', usage, toolOutput });
+  onEvent({ type: 'usage', usage, toolOutput, requests: used });
 
   return {
     updatedHistory: result.updatedHistory,
@@ -711,14 +711,14 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   if (unfinished() && used >= budget.total) {
     const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
-    onEvent({ type: 'usage', usage, toolOutput });
+    onEvent({ type: 'usage', usage, toolOutput, requests: used });
     return { sdkSessionId: result.sdkSessionId, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
   // Stopped at the cap without continuing (no session id to resume, or aborted).
   if (result.subtype === 'error_max_turns' && !params.abortSignal?.aborted) {
     onEvent({ type: 'done', text: result.resultText, isError: true });
   }
-  onEvent({ type: 'usage', usage, toolOutput });
+  onEvent({ type: 'usage', usage, toolOutput, requests: used });
 
   return {
     sdkSessionId: result.sdkSessionId,

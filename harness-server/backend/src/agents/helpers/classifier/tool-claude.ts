@@ -11,3 +11,8 @@ export function createClassifyTextToolClaude(context?: HelperContext) {
     wrapForClaudeSdk(createClassifyTextExecute(context)),
   );
 }
+
+/** classify_text for the Claude engine's tool list, when it's turned on. */
+export function classifyTextToolsClaude(enabled: boolean, context?: HelperContext) {
+  return enabled ? [createClassifyTextToolClaude(context)] : [];
+}

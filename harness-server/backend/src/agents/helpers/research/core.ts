@@ -53,7 +53,8 @@ export const delegateDescription =
   "architecture, from the domains' generated Files sections), without a helper. " +
   "Don't use for a file's full contents (answers are cut at 2,400 characters, so such a task is turned away: " +
   "outline_file it and read_file the range you need), for text you're about to edit (edit_file needs it verbatim — " +
-  'read that range yourself), or for anything that needs judgment about the plan. ' +
+  'read that range yourself), or for anything that needs judgment about the plan. Helpers only search and read ' +
+  "files: they can't run git or shell commands, see history or uncommitted diffs, or count a long list exactly. " +
   'Ask each task as a precise question: ask for a path:line, a complete list, or a yes/no with the path — ' +
   'whatever the question actually needs. A task that finds nothing comes back as one line. ' +
   'Verify a surprising answer with ranged read_file before acting.';
@@ -218,7 +219,8 @@ export const DELEGATE_NOTE =
   'instead of many. Group unrelated lookups that can happen at the same time.\n\n' +
   "**Don't delegate** a file's full contents (turned away: outline_file it and read_file the range you need), " +
   'text you are about to edit (you need it verbatim for edit_file — read that range yourself), ' +
-  'facts you already have in the conversation, or questions that need judgment about the plan.\n\n' +
+  'facts you already have in the conversation, questions that need judgment about the plan, or anything that needs ' +
+  'git, a shell command or an exact count of a long list (helpers only search and read files).\n\n' +
   'A task that finds nothing comes back as one short line. Check a surprising answer with a ranged read_file ' +
   'before acting on it — the helpers are smaller models.';
 
@@ -462,7 +464,8 @@ export async function runDelegation(
   return {
     text,
     report: {
-      tasks: tasks.length,
+      // A turned-away task never reached a helper, so it doesn't count against them.
+      tasks: kinds.filter((k) => k !== 'refused').length,
       useful: results.filter((r) => r.answer).length,
       usage,
       savedTokens: savedTokens(results, text),
@@ -484,21 +487,32 @@ const normalizePath = (p: string) => p.replace(/^\.\//, '');
  * cancels them.
  */
 export class RedoLedger {
-  private open: { paths: Set<string>; useful: number; savedTokens: number }[] = [];
+  private open: { paths: Set<string>; ranges: LineRange[] | null; useful: number; savedTokens: number }[] = [];
 
-  record(paths: string[], useful: number, savedTokens: number): void {
+  /** `ranges`: the lines a recall returned. A later read redoes it only if it overlaps one; without, any read of the path does. */
+  record(paths: string[], useful: number, savedTokens: number, ranges?: LineRange[]): void {
     if (useful <= 0 || paths.length === 0) return;
-    this.open.push({ paths: new Set(paths.map(normalizePath)), useful, savedTokens });
+    const normalized = ranges?.map((r) => ({ ...r, path: normalizePath(r.path) })) ?? null;
+    this.open.push({ paths: new Set(paths.map(normalizePath)), ranges: normalized, useful, savedTokens });
   }
 
-  /** Delegations the paid agent just redid by reading `filePath`; each is returned at most once. */
-  noteRead(filePath: string): { useful: number; savedTokens: number }[] {
+  /** Delegations the paid agent just redid by reading `filePath` (`lines` of it); each is returned at most once. */
+  noteRead(filePath: string, lines?: { start: number; end: number }): { useful: number; savedTokens: number }[] {
     const p = normalizePath(filePath);
-    const redone = this.open.filter((d) => d.paths.has(p));
+    const redoes = (d: (typeof this.open)[number]) =>
+      d.paths.has(p) &&
+      (!d.ranges || !lines || d.ranges.some((r) => r.path === p && r.start <= lines.end && lines.start <= r.end));
+    const redone = this.open.filter(redoes);
     if (redone.length === 0) return [];
-    this.open = this.open.filter((d) => !d.paths.has(p));
+    this.open = this.open.filter((d) => !redoes(d));
     return redone.map(({ useful, savedTokens }) => ({ useful, savedTokens }));
   }
+}
+
+export interface LineRange {
+  path: string;
+  start: number;
+  end: number;
 }
 
 const approxTokens = (chars: number) => {
