@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DOMAIN_DOC, MAP_PATH, interfaceStem, type WayfindingConfig } from './architecture.js';
+import { publicSignatures } from './signatures.js';
 
 // The mechanical guardrails and doc checks of a Wayfinding codebase (paper
 // sections 10 and 12), generalized from the reference repo's
@@ -164,6 +165,25 @@ function testExists(body: string, name: string): boolean {
   if ([`'${name}'`, `"${name}"`, `\`${name}\``].some((q) => body.includes(q))) return true;
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`\\b(?:def|fn|func|function)\\s+${escaped}\\b`).test(body);
+}
+
+/**
+ * The test in `body` whose name shares the most words with `name`, for a rule
+ * anchored to a name that doesn't exist (usually a reworded or retyped
+ * title), so the fix needs no search. Null when nothing is close.
+ */
+export function closestTestName(body: string, name: string): string | null {
+  const words = (s: string) => new Set(s.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const wanted = words(name);
+  if (!wanted.size) return null;
+  let best: { name: string; score: number } | null = null;
+  for (const m of body.matchAll(/\b(?:it|test|describe)(?:\.\w+)?\(\s*(['"`])((?:(?!\1).)+)\1/g)) {
+    const have = words(m[2]);
+    const shared = [...wanted].filter((w) => have.has(w)).length;
+    const score = shared / new Set([...wanted, ...have]).size;
+    if (score > (best?.score ?? 0)) best = { name: m[2], score };
+  }
+  return best && best.score >= 0.5 ? best.name : null;
 }
 
 // ----------------------------------------------------------- import resolution
@@ -396,9 +416,11 @@ export function exportedNames(source: string): string[] {
 /**
  * The generated Files section: one line per file the domain itself holds
  * (child domains list their own), with what each code file exports, so an
- * agent goes from DOMAIN.md straight to the file it needs.
+ * agent goes from DOMAIN.md straight to the file it needs. `api` is the
+ * public file's signatures (publicSignatures), listed under it so another
+ * domain can call this one without opening its code.
  */
-export function filesBlock(files: { path: string; source: string | null }[], publicStem: string): string {
+export function filesBlock(files: { path: string; source: string | null }[], publicStem: string, api: string[] = []): string {
   const isInterface = (file: string) => !file.includes('/') && isCode(file) && stemOf(file) === publicStem;
   const tests = files.filter((f) => isTest(f.path)).map((f) => `\`${f.path}\``);
   // The interface first: it's what other domains call.
@@ -406,6 +428,10 @@ export function filesBlock(files: { path: string; source: string | null }[], pub
     .filter((f) => !isTest(f.path))
     .sort((a, b) => Number(isInterface(b.path)) - Number(isInterface(a.path)) || a.path.localeCompare(b.path))
     .map((f) => {
+      if (isInterface(f.path) && api.length) {
+        const entries = api.map((line) => (line.startsWith('… ') ? `  - ${line}` : `  - \`${line}\``));
+        return `- \`${f.path}\` (interface):\n${entries.join('\n')}`;
+      }
       const names = f.source === null ? [] : exportedNames(f.source);
       const shown = names.slice(0, MAX_EXPORTS_LISTED).join(', ') + (names.length > MAX_EXPORTS_LISTED ? ', …' : '');
       return `- \`${f.path}\`${isInterface(f.path) ? ' (interface)' : ''}${shown ? `: ${shown}` : ''}`;
@@ -624,8 +650,12 @@ export function auditWayfinding(
       } else {
         const candidates = [path.join(d.dir, rule.anchor.file), path.join(repoRoot, rule.anchor.file)];
         const testFile = candidates.find((c) => existsSync(c));
-        if (!testFile || !testExists(readText(testFile), rule.anchor.test)) {
-          fail('docs', here, d, `rule anchored to a missing test: ${rule.anchor.file} › "${rule.anchor.test}"`);
+        const body = testFile ? readText(testFile) : '';
+        if (!testFile) {
+          fail('docs', here, d, `rule anchored to a test file that doesn't exist: ${rule.anchor.file} › "${rule.anchor.test}"`);
+        } else if (!testExists(body, rule.anchor.test)) {
+          const closest = closestTestName(body, rule.anchor.test);
+          fail('docs', here, d, `rule anchored to a missing test: ${rule.anchor.file} › "${rule.anchor.test}"${closest ? ` (closest test there: "${closest}")` : ''}`);
         }
       }
       const key = rule.text.toLowerCase();
@@ -652,8 +682,10 @@ export function auditWayfinding(
       .map((other) => (other.parent && other.parent !== d.parent ? other.id : other.name))
       .sort();
     const files = ownFiles(d).map((f) => ({ path: f, source: isCode(f) ? readText(path.join(d.dir, f)) : null }));
+    const publicFile = files.find((f) => !f.path.includes('/') && isCode(f.path) && stemOf(f.path) === publicStems.get(d));
+    const api = publicFile ? publicSignatures(path.join(d.dir, publicFile.path), (spec, from) => resolveImport(spec, from, resolver)) : [];
     const sections = [
-      { title: 'Files', pattern: FILES_BLOCK, expected: filesBlock(files, publicStems.get(d)!), stale: 'Files section is stale (a file was added, removed or changed its exports)' },
+      { title: 'Files', pattern: FILES_BLOCK, expected: filesBlock(files, publicStems.get(d)!, api), stale: 'Files section is stale (a file was added, removed or changed its exports)' },
       { title: 'Consumers', pattern: GENERATED_BLOCK, expected: consumersBlock(consumers), stale: `Consumers section is stale (should be: ${consumers.join(', ') || 'none'})` },
     ];
     let rewritten = false;

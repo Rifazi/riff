@@ -92,6 +92,16 @@ describe('search_code with a focus', () => {
     expect(result).not.toContain('Searched src/pricing');
     expect(result).toContain('src/invoice/service.ts');
   });
+
+  test("finds files the agent hasn't committed yet, but not ignored ones", async () => {
+    write('.gitignore', 'generated/\n');
+    write('src/pricing/discount.ts', 'export const discountFor = () => 0\n');
+    write('generated/discount.ts', 'export const discountFor = () => 0\n');
+    const result = await search({ query: 'discountFor', glob: '.' });
+    expect(result).toContain('src/pricing/discount.ts');
+    expect(result).not.toContain('generated/discount.ts');
+    expect(await search({ query: 'discount\\.ts', glob: '.' })).toContain("No line matches");
+  });
 });
 
 describe('listing files with search_code', () => {
@@ -135,6 +145,15 @@ describe('listing files with search_code', () => {
     expect(result).toContain('On no domain yet:\nclient/src/main.tsx');
     expect(result).not.toContain('package-lock.json');
     expect(result).not.toContain('render()');
+  });
+
+  test("lists new files a domain's Files section doesn't have yet", async () => {
+    write('client/src/pages/Extra.tsx', 'export const Extra = 1\n');
+    write('client/src/pages/ListPage/Row.tsx', 'export const Row = 1\n');
+    const result = (await listByDomain(repo, domains, 'client/**'))!;
+    expect(result).toContain('- `service.ts` (interface): ListPage\nNot in Files yet (new since its last regenerate):\n- `Extra.tsx`');
+    // A domain with no Files section lists all its files, new ones included.
+    expect(result).toContain('- `Row.tsx`');
   });
 
   test('a glob over DOMAIN.md files lists the domains', async () => {

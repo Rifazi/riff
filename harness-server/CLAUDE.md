@@ -1273,239 +1273,105 @@ below) — never inside the target repo.
      the map (match-all search, a glob over DOMAIN.md, a delegate listing
      task); open a file only for code you'll change, call or reuse; a wrong
      DOMAIN.md is fixed or reported, not a reason to distrust the rest.
-   Tests: `wayfinding-navigation.test.ts` (listing), run through a node:test
+   - **`delegate` no longer lists or fetches files** (every comic-drafter
+     session sent it "list all files under X" and "show me the full
+     contents of Y", and its description recommended listing). In
+     `runDelegation` (`helpers/research/core.ts`) a listing task
+     (`isListFilesTask`) is answered straight from search_code's listing for
+     the task's paths (`listingPaths`), never by a helper; a full-contents
+     task (`isFullContentsTask`) is turned away in one line (answers are cut
+     at 2,400 chars, so the agent read the file again anyway) pointing at
+     outline_file + ranged read_file. The tool description and
+     `DELEGATE_NOTE` say so. The `client-views` engineer's call from session
+     `a58b69ad` (1 listing + 3 full-contents tasks) now runs no helper.
+   Tests: `wayfinding-navigation.test.ts` (listing) and `research-core.test.ts`
+   (task kinds, on the tasks agents actually sent), run through a node:test
    shim. Not yet run with real agents; compare read_file/read_doc per step in
    `state/usage-log.jsonl` on the next comic-drafter session.
 
-46. User asked for smaller coding chunks, and for only the relevant data to
-   pass between the engineers and Jack. The SDK transcripts for the dev-tools
-   sessions showed two problems:
-   - **Hops ran to their full size.** Every Claude-engine hop started near 29k,
-     grew ~3.5k per request (mostly `read_file`), ran all 20 requests to
-     88-118k and cost ~1.25M cache reads. Compaction was only checked between
-     hops, so it never stopped that growth.
-   - **Agents re-read each other's work.** Jack's review turns made 1-4
-     `review_workstream` calls and then 6-18 `read_file` and 8-14
-     `search_code` calls (17-41 requests, 0.8-2M), re-reading files the
-     engineer had just written. Before a merge his checkout is the session
-     branch, so those reads showed the *old* code. Engineers started cold
-     (5-14 `search_code`) on files Jack had already read. A dependent
-     engineer was told only "already merged into your branch".
-
-   Now:
-   - **Cut by context** (`sdk-client.ts`, `compaction.ts`): a hop ends as
-     soon as the context reaches `atTokens` and every tool call in flight has
-     its result. The AI SDK engine adds a `stopWhen` condition. The Claude
-     engine aborts its `query()` and reports `context_budget`, summing usage
-     from the assistant messages, since no `result` message arrives. The
-     next hop compacts. A turn's ceiling is now requests, not hops:
-     `stepsPerHop × (1 + maxHops)` (80 for coding). `COMPACT_AT_TOKENS` is
-     55k and `FRESH_CONTEXT_AT_TOKENS` 50k. Expected: chunks of 7-8 requests
-     averaging ~42k instead of ~64k, minus what the extra handoffs (~20s of
-     Qwen each, a new cache write) and re-reads after a cut cost.
-   - **`report_workstream`** (`tool-defs/workstream-report-tool.ts`): an
-     engineer's last call, with a summary, a line per step, the interfaces
-     other code uses, its last check results and notes for the lead. It is
-     stored as `member.report` and cleared when the member runs again. If it
-     never calls the tool, the runner uses its last message (≤1,200 chars,
-     `fallback: true`).
-   - **`changedExports`** (`team/changed-exports.ts`): the top-level exports
-     the branch adds or changes, from `outlineText` over the changed hunks
-     (tests skipped, ≤40 lines), costing no tokens. It is stored as
-     `member.changedExports`. The runner attaches it and the fallback report
-     in `prepareForLead` whenever the branch has commits.
-   - **Jack** gets each finished branch's report and exports in his review
-     message (`workstreamHandover` in `lead-core.ts`), and
-     `review_workstream` shows them first. Both say his checkout lacks the
-     branch's changes until he merges (`STALE_CHECKOUT_NOTE`).
-   - **Dependents** get each merged dependency's summary, interfaces and
-     exports in their brief, instead of only "already merged".
-   - **Jack's exploration**: `assign_team` workstreams take `context`
-     (≤8 `{ path, lines?, note }`). These are the places Jack read that the
-     engineer needs, shown as "Start here".
-   - `prompts/coding-team-member.md` no longer says the branch merges
-     automatically.
-
-   Tests: `context-cut.test.ts`, `changed-exports.test.ts` (temp repo) and
-   `coding-team-lead.test.ts`, run under Node with a `bun:test` shim since
-   bun wasn't installed. Not yet run with real agents. To check, re-scan the
-   SDK transcripts (unique `message.id` → context per request). Each
-   conversation should peak near 55-60k, Jack should make ≤3 `read_file` per
-   workstream before merging, and a coding turn's cacheRead in
-   `usage-log.jsonl` should fall below ~4M.
-
-47. User asked whether the local helpers could keep what has been read in
-   memory and answer the agents from it, within the local models' limits. A
-   model keeps nothing between calls, and the built-in Qwen has a 16k-token
-   window, while one coding turn reads 150-300k chars. So the memory is on
-   disk and searched, and the model sees one budgeted slice per recall. It
-   only *picks* lines, which go back verbatim: the research helper's
-   paraphrased answers were redone by the paid agent in 20% of runs.
-   - **Record** (`helpers/memory/store.ts`): every `read_file` by the coding
-     agent and Jack (view `session`), each engineer (view = its branch), and
-     the research helper's Ollama reads. `FileToolDeps.onRead` now gets the
-     text read and the whole file's sha1. One JSON file per (view, path) is
-     kept under `state/read-memory/<sessionId>/`. Pages of the same file
-     version merge, and a new hash replaces the old lines. The cap is 8M chars
-     per session, evicting the least recently recalled. It's removed with the
-     session. `read_doc` isn't recorded, since `search_docs` already indexes docs.
-   - **`recall({ question, paths? })`** (`helpers/memory/tool.ts`, both
-     engines, coding agent/Jack and engineers):
-     1. Search scope `memory:session:<id>`: 20-line windows headed
-        `path:a-b`, with a keyword fallback (`rankByTerms`) when the engine
-        is unavailable.
-     2. Pack candidates to 24k chars (`packCandidates`).
-     3. Qwen picks ranges (`PICK_SYSTEM`). `groundPicks` keeps only ranges
-        inside the candidates, accepts a bare `a-b` (Qwen often drops the
-        path) and adds 2 lines of context.
-     4. Return at most 3k chars, each excerpt labelled `current`, `changed
-        since it was read`, `as read on <branch>` or `no longer in your
-        checkout`. Without Qwen, the top 3 windows go back as they are.
-     5. A miss is one line.
-   - **Reporting:** a run reports as helper `memory`. Saved = the stored
-     chars of the recalled files (≤ one read_file page each) minus what came
-     back. A later `read_file` of a recalled path cancels the saving
-     (`RedoLedger`).
-   - **Prompts:** `MEMORY_NOTE` goes in the system prompt after any
-     override, and handoffs head "Files you read" with a recall hint.
-   - **Settings:** coding `readMemory` (unset = on). Settings → Dev Agents
-     → Local helpers → Read memory has the switch, the size, and Clear
-     (`GET /api/settings/read-memory`, `POST …/clear`). Chat card
-     `MemoryDialog`; Token usage line. Saving a role's model in Settings no
-     longer drops `localTeamModel`/`delegateModel`/`readMemory`.
-
-   Smoke-tested on this repo with real `read_file`, the search engine and
-   qwen3.5:4b. "How many times can the lead send a workstream back" returned
-   `lead-core.ts:20-26` (346 chars, against a 10.6k-char read) in ~8s. A
-   question about a ranged page of `sdk-client.ts` found it. A question about
-   code never read returned "Not in memory". Tests:
-   `read-memory-core.test.ts`. Not yet run inside a real coding session. To
-   check, look at `memory` lines in `usage-log.jsonl` (useful, redo) and
-   whether repeat `read_file` paths drop in the SDK transcripts.
-
-48. User asked whether git commands should be a helper. They shouldn't:
-   git tools run no model. `git_commit` was 2.6% of coding tool calls and
-   0.5% of their output, and the one large git output (`review_workstream`'s
-   diff) is what Jack has to read. Their cost was requests. The end of every
-   step took 3-5 of them (`run_prettier`, `git_commit`, lint, test, a status
-   update), each re-reading the whole context. `finish_step`
-   (`tool-defs/finish-step-tool.ts`, coding agent and engineers, both
-   engines) does them in one:
-   - **Refuses first, before changing anything:** an invalid commit message,
-     a step that isn't on the checklist (or isn't the engineer's), files
-     outside the owned paths.
-   - **Steps:** `prettier --write --ignore-unknown` on the files that still
-     exist → commit → lint → unit tests (through `run_checked_command`'s
-     execute, so failures get the runner's report) → step `done` and the next
-     pending one (the engineer's own) `in_progress`.
-   - **Failures:** a prettier error commits nothing. Failing checks keep the
-     commit and leave the step in progress. "Nothing staged" is fine, so a
-     second call after a fix re-runs the checks.
-   - **What stays:** `git_commit`/`run_checked_command` remain for partial
-     commits and checkpoints (`run_prettier` was retired in step 50).
-   - **Prompts:** `coding-agent.md` and `coding-team-member.md` now end each
-     step with it. An app's prompt override (e.g. customer-edi's) still
-     describes the old sequence; the tool description says to use it
-     instead.
-
-   Smoke-tested on a temp repo with a stub prettier and a real session
-   record. Tests: `finish-step.test.ts`. Also in this change: the chat stopped
-   tinting agent messages green when the turn used a helper (every
-   `run_checked_command` is the runner helper, so it looked random). A
-   helper card turns red when its run went wrong (`helperFailed` in
-   `HelperBubbles.tsx`), as does any tool card whose badge reports a failure.
-
-49. User asked for auto-driving with Bridget to stop needing an approval at
-   every stage: keep going unless there's a question or a possible issue,
-   all the way to a merge request. **Supersedes step 6's "the coordinator
-   never approves anything" and step 41's loop.** The user chose:
-   - **Always on:** this is how auto-drive always works, not a separate mode.
-   - **No remote:** stop before merging into main locally.
-   - **QA fail:** stop, with no automatic fix rounds.
-   - **QA pass-with-notes:** stop too.
-
-   - **One approval path** (`sessions/stage-actions.ts`): the approve and
-     delivery logic moved out of the routes. The buttons
-     (`routes/stage-action-reply.ts` maps `StageActionError`) and Bridget
-     run the same code.
-   - **The loop** (`routes/coordinator.ts`): one run drives one stage and
-     ends when the stage advances. Before each turn, `tryAdvance` checks
-     whether the stage's deliverable is finished:
-     - Requirements and plan: a doc not yet approved.
-     - Coding: every step done, no pending team decision or reconciliation.
-     - QA: the report's `result`.
-
-     If finished, she approves when nothing needs the human, or stops with
-     the reason. The approval check (`decideGate` + `GATE_INSTRUCTIONS`)
-     runs on the built-in Qwen, then the coordinator model. Unparseable or
-     erroring means stop. A pending question tool stops without a model.
-     Coding also stops, without a model, when the latest lint/test result
-     failed (`latestChecksFailed`, including finish_step's) or Jack's
-     closing message has a worrying word (`concernInLastMessage`: fail,
-     couldn't, untested, skipped, pre-existing…). On an 8-case set, 3 runs
-     each, Qwen alone approved "2 tests fail, they look pre-existing" every
-     time. With the word check it was 24/24, with 0 unsafe approvals.
-   - **QA and shipping:** a clean `pass` is marked reviewed, then
-     `planDelivery`. A `merge` plan (no remote) stops: "click Ship". A
-     remote gets `deliverSession`, which pushes and opens the MR via
-     glab/gh/push options. A failed delivery stops with the error.
-   - **Within a stage:** steps left in coding get "Continue with the next
-     step" without asking a model. Teams are waited for, and an `assigned`
-     or `interrupted` round is started by Bridget if the tab hasn't started
-     it within 10s (`settleTeam`). `needs_attention` stops. A finished QA
-     round's wrap-up message is sent by her. A run is capped at 30 agent
-     turns.
-   - **Notes:** every approval and stop is written to the stage's chat as
-     `Bridget: …`. A note identical to the last entry isn't repeated, and a
-     delivered session is left alone.
-   - **Client:** `useCoordinatorAutoRun`
-     (`frontend/src/lib/dev-sessions/useCoordinatorAutoRun.ts`) replaced the
-     four tabs' "start when the chat is empty" effects. It starts a run on
-     the live stage whenever there's something new: an empty non-requirements
-     stage, an agent turn, or a QA rerun. It doesn't start one while
-     Bridget's own note is last, so a stop or a persistent error can't
-     loop. The QA tab's own kickoff and wrap-up skip themselves when she's
-     on. The session page follows the live stage when she advances it
-     (if you were watching the stage she finished). The toggle reads
-     "approves each stage and opens the MR, stopping for questions or
-     issues".
-
-   Typechecked, tests in `coordinator-gate.test.ts`, gate evaluated as
-   above. A full unattended run from requirements to an MR has not been
-   done yet.
-
-50. User asked for prettier to be run by a helper instead of the agents. The
-   usage log had 154 paid `run_prettier` calls and 150 `git_commit`s. Each
-   `run_prettier` returned one line but cost a request that re-read the whole
-   context, and it nearly always came right before a commit.
-   - **`helpers/format/format.ts`** (`formatFiles`): `npx prettier --write
-     --ignore-unknown` on the files that still exist. It runs no model and
-     has no tool of its own, but each run is reported as helper `format`
-     through `reportHelperRun` (`GitToolDeps`/`FinishStepDeps.helperContext`):
-     files given and formatted, `savedTokens: null`. Counted, not estimated,
-     like the classifier: it saves one paid request per commit, and that
-     request's size (the agent's whole context) isn't visible from the tool.
-     The chat shows `git_commit` as a Formatter card (`FormatDialog` in
-     `HelperBubbles.tsx`); `finish_step` keeps its own card. Token usage has
-     a Formatter line.
-   - **`git_commit`** checks the message first, then formats the files an
-     agent could have written (`assertWritable`; lockfiles, generated theme
-     files and paths outside an engineer's owned paths are left alone), then
-     commits. A prettier error returns "Nothing committed: prettier failed…"
-     with the output. `finish_step` uses the same function.
-   - **`run_prettier`** is no longer offered on either engine. On the AI-SDK
-     engine it's registered only when a replayed history already called it
-     (`runPrettierToolEntry`), and `tool-defs-claude/format-tool.ts` is gone.
-   - **Prompts:** the coding, team-member and plan prompts and the
-     customer-edi legacy overrides no longer have a formatting step. The
-     customer-edi coding override stored in `local-prompts.json` got the
-     same edit, since it had been seeded from the old text.
-
-   Tests: `format-files.test.ts` (temp repo, stub prettier; `formatRunReport`), run with
-   `finish-step`, `git-commit-message` and `coding-team-git` through a Node
-   `bun:test` shim. Not yet run with real agents. To check, look for the
-   `run_prettier` count in `usage-log.jsonl` dropping to 0 with no rise in
-   `git_commit` calls.
+46. User restarted the server and coding agents still read whole files
+   instead of relying on DOMAIN.md. Step 45's code was live (the delegate
+   refusal fired), but the `client-views` engineer in session `a58b69ad`
+   still read 10 files in full after a restart: Files listed export names
+   only, so to call `addPage` or use `Button` it had to open the file (the
+   briefing allowed "code you'll call or reuse"), and its own uncommitted
+   `PagesSidebar/` files were invisible to `search_code` and the delegate's
+   listing, and the handoff named only the folder.
+   - **Signatures in Files** (`architecture/signatures.ts`
+     `publicSignatures`): the public file's line is now a sub-list, one
+     entry per export: `addPage(projectId: string): Promise<Page>`, a
+     type's shape, a class's constructor plus public fields and methods, a
+     `forwardRef<El, Props>(…)` component, and the non-exported props type
+     an exported function's parameters use. Re-exports (`export { a as b }
+     from`, `export *`) are followed through `resolveImport`. Comments are
+     dropped, 160 chars per line, 20 lines max. Every existing Files section
+     is stale once, until `regenerate: true`. Prettier keeps it in sync.
+   - **Briefing**: call or reuse another domain from its Files signatures,
+     opening its public file (a range) only when a signature isn't enough;
+     read code only where you'll change it; a file you wrote is in the
+     handoff.
+   - **Uncommitted files**: `search_code` greps with `--untracked` and its
+     listings and path matches use `ls-files -co --exclude-standard`
+     (`.gitignore` still applies). `listByDomain` adds "Not in Files yet"
+     for a domain's files its Files section doesn't list.
+   - **Handoff**: `shortStatus` uses `-uall`, and "Files you changed" is the
+     conversation's writes plus every uncommitted file (`statusPaths`), each
+     with its line count and exports, so a restarted run (empty
+     conversation) still knows what it wrote.
+   Tests: `wayfinding-signatures.test.ts` (signatures, `statusPaths`),
+   `wayfinding-navigation.test.ts` (uncommitted files in search and
+   listings), `wayfinding-audit.test.ts` (new Files format), run through a
+   node:test shim. Checked by regenerating a clone of comic-drafter. Not yet
+   run with real agents.
+47. User said QA kept failing the coders' first passes. Sessions `71b0dbe6`
+   and `a58b69ad` showed engineers reported "failed: Reached maximum number
+   of turns (20)" after they had finished and committed, and in `a58b69ad`
+   Jack's wrap-up turn (lint/tests on the merged branch, regenerating
+   Files sections) never ran, so QA found exactly what it would have fixed.
+   The Claude engine emitted `done { isError: true }` at the end of every
+   20-turn hop, before the wrapper continued the turn. `workstream-agent.ts`
+   latched it as the run's error and `coding-team.ts` set `leadBroken`,
+   which cancels the rest of Jack's lead turns, wrap-up included. Now a hop
+   that ends at the cap emits no `done`; `runClaudeAgentTurn` emits one
+   error `done` only when it can't continue (hops used up, or nothing to
+   resume). The AI-SDK engine now emits that error `done` too when hops run
+   out, and a thrown tool call (`tool-error`) no longer marks the turn
+   `isError`: it failed a member, cancelled the lead, or escalated a light
+   step over an ordinary `edit_file` miss. Typechecked only.
+   - **Pre-QA gate** (`agents/pre-qa-gate.ts`, pure half in
+     `pre-qa-gate-core.ts`): before auto-drive approves coding (after a
+     team round or a "ready" decision), `routes/coordinator.ts` runs lint,
+     the unit tests and, for a Wayfinding app, the audit problems the branch
+     is answerable for (MAP.md, touched domains, changed code with no
+     DOMAIN.md), in the main checkout. No model runs unless the runner
+     helper shortens a long log. A pass approves as before. A failure sends
+     Jack one plain coding turn with only the failing output (at most
+     `MAX_GATE_SEND_BACKS` = 2, `session.coordinatorGateSendBacks`, reset
+     with the QA count when auto-drive is turned on), then stops for the
+     human. It's skipped (QA runs the checks) with no branch, or when the
+     checkout is on another branch. The human's "Approve diff" button isn't
+     gated.
+   - `checkSucceeded` finds `run_checked_command`'s status line after any
+     install notes. The QA team read the first line, so a passing check
+     that installed dependencies was reported as failed.
+   - A rule anchored to a test name that doesn't exist now names the
+     closest test in that file (`closestTestName`, word overlap ≥ 0.5),
+     e.g. session `71b0dbe6`'s "… project id".
+   Tests: `frontend/tests/harness-server/pre-qa-gate.test.ts`. The whole
+   folder (215) passes through a node:test shim.
+48. User asked for agents not to comment code, and for code to be split into
+   files as small as possible so agents don't read huge files. The coding
+   prompt has "No comments" (only tool-required ones, e.g. lint-disable;
+   existing comments in untouched code stay) and "Small files" (one
+   responsibility per file, smaller wherever a part can stand on its own, no
+   line limit, no pass-through files), replacing "not maximal
+   decomposition". The plan prompt plans small files and names where a new
+   job goes; QA reports added comments and new or grown files doing more
+   than one job as non-blocking findings, which
+   reach the coder as actionable notes. `write_file`/`edit_file`
+   descriptions repeat both rules (`CODE_STYLE_RULES` in
+   `tool-defs/file-tools.ts`) so apps with a prompt override get them too.
+   Not run with real agents yet.
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

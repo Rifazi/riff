@@ -178,7 +178,7 @@ describe('generated Files section', () => {
   test("lists the domain's own files with their exports, interface first, tests last, child domains left out", () => {
     expect(doc('src/pricing/DOMAIN.md')).toContain(
       '## Files\n<!-- generated: files, do not edit -->\n' +
-        '- `service.ts` (interface): priceFor\n- `model.ts`: table\n- tests: `service.test.ts`\n<!-- end generated -->'
+        '- `service.ts` (interface):\n  - `priceFor()`\n- `model.ts`: table\n- tests: `service.test.ts`\n<!-- end generated -->'
     );
     expect(doc('src/pricing/DOMAIN.md')).not.toContain('promotions/service.ts');
     // Placed before Consumers.
@@ -197,7 +197,7 @@ describe('generated Files section', () => {
     write('src/invoice/DOMAIN.md', domainDoc('invoice'));
     expect(messages()).toContain('missing the generated Files block');
     auditWayfinding(repo, CONFIG, { regenerate: true });
-    expect(doc('src/invoice/DOMAIN.md')).toContain('## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface): render\n');
+    expect(doc('src/invoice/DOMAIN.md')).toContain('## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface):\n  - `render()`\n');
   });
 
   test('exportedNames covers declarations, lists, aliases and anonymous defaults', () => {
@@ -226,7 +226,7 @@ describe('a domain without service.ts', () => {
     auditWayfinding(repo, CONFIG, { regenerate: true });
     expect(messages()).toEqual([]);
     expect(readFileSync(path.join(repo, 'src/invoice/InvoicePage/DOMAIN.md'), 'utf8')).toContain(
-      '- `InvoicePage.tsx` (interface): InvoicePage\n- `InvoicePage.css`\n- `Row.tsx`: Row\n'
+      '- `InvoicePage.tsx` (interface):\n  - `InvoicePage()`\n- `InvoicePage.css`\n- `Row.tsx`: Row\n'
     );
   });
 

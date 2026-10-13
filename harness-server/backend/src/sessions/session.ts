@@ -386,6 +386,13 @@ export interface SessionRecord {
   // approves each finished stage itself and starts the next one. It stops
   // for a human whenever an agent waits on one. Off by default.
   coordinatorEnabled: boolean;
+  // How many failed QA reports the coordinator has sent back to coding since
+  // it was last turned on. It stops for a human at MAX_QA_SEND_BACKS.
+  coordinatorQaSendBacks: number;
+  // How many times the coordinator has sent coding back because the pre-QA
+  // gate (lint, unit tests, Wayfinding audit) failed, since it was last
+  // turned on. It stops for a human at MAX_GATE_SEND_BACKS.
+  coordinatorGateSendBacks: number;
 
   // Set once, permanently, by coding/send-back-to-requirements — this
   // session's requirements/plan were revised after coding had already

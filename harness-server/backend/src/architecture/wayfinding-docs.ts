@@ -212,14 +212,18 @@ const FINDING_CODE = (c: WayfindingConfig) =>
   `child domains are under "Child domains" in its ${DOMAIN_DOC}.\n` +
   `2. read_doc that domain's ${DOMAIN_DOC}, one heading at a time when you need only part of it ("Files", "Rules", ` +
   `"Hidden behavior", "Recipes"). Its Files section lists every file the domain holds and what each exports, the public ` +
-  `file first, marked "(interface)". Read ${MAP_PATH} and ${DOMAIN_DOC} with read_doc, not read_file.\n` +
+  `file first, marked "(interface)", with the signature of everything it exports (parameters, return types, props, type ` +
+  `shapes). Read ${MAP_PATH} and ${DOMAIN_DOC} with read_doc, not read_file.\n` +
   `3. Go straight to the file Files names: outline_file it, then read_file only the range you need. To find a call site ` +
   `or a symbol, search_code for it inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob ` +
   `already starts in the domains you're working on and says so.\n` +
-  `4. Another domain: read its public file, never its private files.\n` +
+  `4. To call or reuse another domain's code, use the signatures in its Files section: don't open its public file, and ` +
+  `never its private files. Open its public file only when a signature there isn't enough to call it correctly, and then ` +
+  `only the range you need.\n` +
   `5. Trust the map. Never list folders or files to check it: no search_code with a pattern that matches everything ` +
   `(".") or a glob over ${DOMAIN_DOC} files, and no delegate task to list files. Files already answers that. Don't open a ` +
-  `file to confirm what its ${DOMAIN_DOC} says; open one only for the code you'll change, call or reuse. A ${DOMAIN_DOC} ` +
+  `file to confirm what its ${DOMAIN_DOC} says; read code only where you'll change it. A file you wrote or edited earlier ` +
+  `is listed in your handoff with its exports: read only the range you will change, not the whole file. A ${DOMAIN_DOC} ` +
   `that turns out wrong is something to fix (or report), not a reason to stop trusting the rest.\n` +
   `6. Search the whole repo (search_code with glob ".") only for code that's on no domain yet: config, entry points, and ` +
   `the folders audit_architecture lists as not on the map yet, and then with a real pattern. Never read a whole folder's ` +

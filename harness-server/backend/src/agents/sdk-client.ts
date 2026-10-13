@@ -270,7 +270,9 @@ async function runAgentTurnOnce(params: RunAgentTurnParams & HopParams): Promise
           break;
         }
         case 'tool-error': {
-          sawError = true;
+          // A thrown tool call (oldText not found, path refused) is the
+          // model's information to act on, not a failed turn — same as the
+          // Claude engine, where it's only a tool_result with is_error.
           const message = part.error instanceof Error ? part.error.message : String(part.error);
           onEvent({ type: 'tool_result', toolCallId: part.toolCallId, content: message, isError: true });
           break;
@@ -381,17 +383,13 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
     used += result.requests;
     if (compacting) conversationStart = result.startTokens;
   }
-  onEvent({ type: 'usage', usage, toolOutput });
-
-  if (result.finishReason === 'tool-calls' && used >= budget.total) {
-    return {
-      updatedHistory: result.updatedHistory,
-      resultText: outOfStepsText(budget.total),
-      isError: true,
-      usage,
-      contextTokens: result.contextTokens,
-    };
+  if (result.finishReason === 'tool-calls' && hop >= maxHops) {
+    const resultText = `${OUT_OF_STEPS} ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`;
+    onEvent({ type: 'done', text: resultText, isError: true });
+    onEvent({ type: 'usage', usage, toolOutput });
+    return { updatedHistory: result.updatedHistory, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
+  onEvent({ type: 'usage', usage, toolOutput });
 
   return {
     updatedHistory: result.updatedHistory,
@@ -622,7 +620,12 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
             cacheWrite: message.usage.cache_creation_input_tokens ?? 0,
           };
           gotResult = true;
-          onEvent({ type: 'done', text: resultText, isError });
+          // Hitting the per-hop turn cap isn't the end of the turn: the
+          // wrapper below continues it, and emits the error `done` itself
+          // only if it can't. Emitting it here made every hop look like a
+          // failed run (team members marked failed after finishing, the
+          // lead's later turns cancelled).
+          if (subtype !== 'error_max_turns') onEvent({ type: 'done', text: resultText, isError });
           break;
         }
         default:
@@ -704,17 +707,18 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
     usage = addUsage(usage, result.usage);
     used += result.requests;
   }
-  onEvent({ type: 'usage', usage, toolOutput });
 
-  if (unfinished() && used >= budget.total) {
-    return {
-      sdkSessionId: result.sdkSessionId,
-      resultText: outOfStepsText(budget.total),
-      isError: true,
-      usage,
-      contextTokens: result.contextTokens,
-    };
+  if (result.subtype === 'error_max_turns' && hop >= maxHops) {
+    const resultText = `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`;
+    onEvent({ type: 'done', text: resultText, isError: true });
+    onEvent({ type: 'usage', usage, toolOutput });
+    return { sdkSessionId: result.sdkSessionId, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
+  // Stopped at the cap without continuing (no session id to resume, or aborted).
+  if (result.subtype === 'error_max_turns' && !params.abortSignal?.aborted) {
+    onEvent({ type: 'done', text: result.resultText, isError: true });
+  }
+  onEvent({ type: 'usage', usage, toolOutput });
 
   return {
     sdkSessionId: result.sdkSessionId,

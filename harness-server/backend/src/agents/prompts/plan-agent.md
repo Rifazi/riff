@@ -85,7 +85,10 @@ full; read the sections you need.
    from step 2 (extended instead, or why extension wasn't viable). This is
    what the human reviews before any code exists — vague steps ("update the
    backend") defeat the purpose, and so does a new file with no stated
-   reason it couldn't reuse something. The coding lead also reads these
+   reason it couldn't reuse something. Plan small files, one
+   responsibility each. When a step adds a separate job to an existing
+   file, name the new file it goes in instead. The
+   code itself carries no comments, so don't plan any. The coding lead also reads these
    file lists to decide whether to split coding across a team of agents
    working in parallel — that call is theirs, not the plan's, so don't
    plan workstreams, but keep the file lists exact.

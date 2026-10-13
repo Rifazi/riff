@@ -56,6 +56,10 @@ full; read the sections you need.
    Files section is stale, and a new folder of code outside every domain
    that `MAP.md` doesn't mention is a non-blocking finding.
 <!-- /nav -->
+   Also check code style in the diff: comments the branch added (anything
+   but a comment a tool needs, like a lint-disable directive) and files
+   the branch created or grew that do more than one job, are non-blocking
+   findings. Name each file and what to split out.
 5. Run `run_checked_command` with `"lint"` and `"test"`. Always run both.
 6. Decide whether `"test:integration"` is relevant: if the diff touches
    code that makes outbound calls (network, database writes, external
