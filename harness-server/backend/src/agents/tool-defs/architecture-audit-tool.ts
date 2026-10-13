@@ -27,6 +27,9 @@ export interface AuditArchitectureDeps {
   scope: boolean;
   // The branch to compare, when it may not be the one checked out (QA).
   branch?: string;
+  // What the branch is compared against: where a part of a shared branch
+  // started, else the app's base branch.
+  baseBranch?: string;
   allowRegenerate: boolean;
   // A team member regenerates only the DOMAIN.md files inside its owned paths.
   writablePaths?: string[];
@@ -51,7 +54,7 @@ export function createAuditArchitectureExecute(deps: AuditArchitectureDeps) {
     const audit = auditWayfinding(deps.repoRoot, config, { regenerate });
     let scope = null;
     if (deps.scope) {
-      const base = baseBranchFor(deps.app);
+      const base = deps.baseBranch ?? baseBranchFor(deps.app);
       const changes = await branchChanges(deps.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, deps.branch);
       if (changes) scope = branchScope(audit, base, changes.files, changes.docDiff);
     }

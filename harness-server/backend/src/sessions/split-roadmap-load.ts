@@ -4,7 +4,7 @@ import matter from 'gray-matter';
 import { config } from '../config.js';
 import type { SessionRecord } from './session.js';
 import { getSession, listSessions } from './session-store.js';
-import { acceptanceCriteria, buildSplitRoadmap, roadmapProgressBrief, type SplitRoadmap } from './split-roadmap.js';
+import { acceptanceCriteria, buildSplitRoadmap, isBuilt, roadmapProgressBrief, type SplitRoadmap } from './split-roadmap.js';
 
 /** The roadmap a session belongs to — its own if it was split, its parent's if it's a part. Null otherwise. */
 export async function loadSplitRoadmap(session: SessionRecord): Promise<SplitRoadmap | null> {
@@ -21,7 +21,7 @@ export async function loadProgressBrief(session: SessionRecord): Promise<string 
 
   const criteria = new Map<string, string | null>();
   for (const part of roadmap.parts) {
-    if (part.status !== 'shipped') continue;
+    if (!isBuilt(part.status)) continue;
     const child = await getSession(part.sessionId);
     let text: string | null = null;
     if (child?.requirementsPath) {

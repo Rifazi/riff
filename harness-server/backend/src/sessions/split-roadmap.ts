@@ -11,6 +11,9 @@ export type RoadmapPartStatus =
   | 'in-progress'
   // QA reviewed (stage 'done') — the work is delivered.
   | 'shipped'
+  // QA reviewed and left on the split's shared branch for the next part
+  // (sessions/shared-branch.ts): built, but not merged yet.
+  | 'kept'
   // Rejected; the human can reopen it.
   | 'dropped'
   // The child session was deleted.
@@ -34,9 +37,20 @@ export interface RoadmapPart {
 }
 
 export interface SplitRoadmap {
-  parent: { sessionId: string; sessionKey: string; title: string; rationale: string | null };
+  parent: {
+    sessionId: string;
+    sessionKey: string;
+    title: string;
+    rationale: string | null;
+    // Build every part on one branch and ship once at the end.
+    oneBranch: boolean;
+    // The branch parts were kept on, which the next part continues on.
+    sharedBranch: string | null;
+  };
   parts: RoadmapPart[];
   shipped: number;
+  // Built and kept on the shared branch, not shipped yet.
+  kept: number;
   // The part to work on next: the earliest part in build order that isn't
   // shipped and whose dependencies all are. Null when everything shipped or
   // every remaining part is waiting on something.
@@ -45,7 +59,7 @@ export interface SplitRoadmap {
 
 export function partStatus(child: SessionRecord | undefined): RoadmapPartStatus {
   if (!child) return 'missing';
-  if (child.stage === 'done') return 'shipped';
+  if (child.stage === 'done') return child.delivery?.kind === 'kept' ? 'kept' : 'shipped';
   if (child.stage === 'abandoned') return 'dropped';
   if (child.stage === 'requirements-in-progress' && child.transcripts.requirements.length === 0 && !child.requirementsPath) {
     return 'not-started';
@@ -83,7 +97,8 @@ export function buildSplitRoadmap(parent: SessionRecord, children: Iterable<Sess
       delivery: child?.delivery ?? null,
     };
   });
-  for (const part of parts) part.blockedBy = part.dependsOn.filter((d) => parts[d]?.status !== 'shipped');
+  // A kept part's code is on the shared branch the next part continues on.
+  for (const part of parts) part.blockedBy = part.dependsOn.filter((d) => !isBuilt(parts[d]?.status));
 
   const next = parts.find(
     (p) => (p.status === 'in-progress' || p.status === 'not-started') && p.blockedBy.length === 0
@@ -94,15 +109,24 @@ export function buildSplitRoadmap(parent: SessionRecord, children: Iterable<Sess
       sessionKey: parent.sessionKey,
       title: parent.title,
       rationale: parent.splitProposal?.rationale ?? null,
+      oneBranch: parent.splitOneBranch ?? false,
+      sharedBranch: parent.splitBranch ?? null,
     },
     parts,
     shipped: parts.filter((p) => p.status === 'shipped').length,
+    kept: parts.filter((p) => p.status === 'kept').length,
     nextIndex: next?.index ?? null,
   };
 }
 
+/** Shipped, or kept on the shared branch: either way its code exists for the parts after it. */
+export function isBuilt(status: RoadmapPartStatus | undefined): boolean {
+  return status === 'shipped' || status === 'kept';
+}
+
 export function deliverySummary(part: RoadmapPart): string {
   if (!part.delivery) return part.branch ? `branch ${part.branch}` : 'no branch';
+  if (part.delivery.kind === 'kept') return `on branch ${part.delivery.target}, not merged yet`;
   if (part.delivery.kind === 'merged') return `merged into ${part.delivery.target}`;
   return `${part.delivery.kind === 'merge_request' ? 'merge request' : 'pushed'} into ${part.delivery.target}${
     part.delivery.url ? ` (${part.delivery.url})` : ''
@@ -113,6 +137,7 @@ const STATUS_TEXT: Record<RoadmapPartStatus, string> = {
   'not-started': 'not started',
   'in-progress': 'in progress',
   shipped: 'shipped',
+  kept: 'built',
   dropped: 'dropped',
   missing: 'deleted',
 };
@@ -144,11 +169,11 @@ export function roadmapProgressBrief(
   const self = roadmap.parts[forIndex];
   const lines = roadmap.parts.map((p) => {
     const here = p.index === forIndex ? ' ← this session' : '';
-    const status = p.status === 'shipped' ? `shipped, ${deliverySummary(p)}` : STATUS_TEXT[p.status];
+    const status = isBuilt(p.status) ? `${STATUS_TEXT[p.status]}, ${deliverySummary(p)}` : STATUS_TEXT[p.status];
     return `${p.index + 1}. **${p.title}** (${p.sessionKey}) — ${status}${here}`;
   });
 
-  const shipped = roadmap.parts.filter((p) => p.status === 'shipped' && p.index !== forIndex);
+  const shipped = roadmap.parts.filter((p) => isBuilt(p.status) && p.index !== forIndex);
   const delivered = shipped.map((p) => {
     const criteria = criteriaFor(p);
     return `### ${p.title} (${p.sessionKey})\n${p.outcome ? `${p.outcome}\n\n` : ''}${criteria ?? '(no acceptance criteria on record)'}`;
@@ -157,7 +182,9 @@ export function roadmapProgressBrief(
   const waiting = self?.blockedBy.map((d) => roadmap.parts[d]) ?? [];
   return [
     `# Progress on "${roadmap.parent.title}" (${roadmap.parent.sessionKey})`,
-    `${roadmap.shipped} of ${roadmap.parts.length} parts shipped so far, in build order:`,
+    `${roadmap.shipped} of ${roadmap.parts.length} parts shipped so far${
+      roadmap.kept ? `, ${roadmap.kept} more built on branch ${roadmap.parent.sharedBranch ?? 'their shared branch'}` : ''
+    }, in build order:`,
     lines.join('\n'),
     delivered.length
       ? `## Already built\n\nThis is in place — build on it rather than re-specifying it.\n\n${delivered.join('\n\n')}`

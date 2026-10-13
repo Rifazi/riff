@@ -11,7 +11,8 @@ import { compactQaFindings } from '../sessions/qa-findings.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
-import { approveQa, deliverSession, planDelivery } from '../sessions/stage-actions.js';
+import { approveQa, deliverSession, keepSessionOnBranch, planDelivery } from '../sessions/stage-actions.js';
+import { isShipped } from '../sessions/shared-branch.js';
 import { sendStageActionError } from './stage-action-reply.js';
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
@@ -134,8 +135,8 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/send-back', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (session.delivery && session.delivery.kind !== 'pushed') {
-      return reply.code(400).send({ error: `already delivered: ${session.delivery.detail}` });
+    if (isShipped(session.delivery)) {
+      return reply.code(400).send({ error: `already delivered: ${session.delivery!.detail}` });
     }
     if (isQaTeamRunning(session.id)) return reply.code(409).send({ error: 'the QA team is still reviewing' });
     if (session.qaStatus === 'reviewed' && session.qaReportPath) {
@@ -148,6 +149,8 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     const retireTeam = session.codingTeam && session.codingTeam.status !== 'assigned';
     return updateSession(session.id, {
       codingApprovedAt: null,
+      // A part kept on its branch for the next part is back in progress.
+      ...(session.delivery?.kind === 'kept' && { delivery: null }),
       stage: 'coding-review',
       qaFindingsPending: Boolean(session.qaReportPath),
       qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
@@ -192,6 +195,18 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return reply.code(404).send({ error: 'session not found' });
     try {
       return await deliverSession(session);
+    } catch (err) {
+      return sendStageActionError(reply, err);
+    }
+  });
+
+  // A split part's alternative to shipping: leaves the reviewed branch as it
+  // is, and the next part continues on it (sessions/shared-branch.ts).
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/delivery/keep', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    try {
+      return await keepSessionOnBranch(session);
     } catch (err) {
       return sendStageActionError(reply, err);
     }

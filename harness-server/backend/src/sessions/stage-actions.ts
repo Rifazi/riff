@@ -10,6 +10,7 @@ import { buildDeliveryText } from '../repo/delivery-text.js';
 import { resolveBaseBranch } from '../repo/git.js';
 import { updateSession } from './session-store.js';
 import { loadSplitRoadmap } from './split-roadmap-load.js';
+import { isShipped, keepOnBranch, recordSharedBranchShipped } from './shared-branch.js';
 import type { SessionRecord } from './session.js';
 
 // The approval gates, shared by the stage tabs' buttons (routes/*.ts) and
@@ -147,11 +148,34 @@ export async function planDelivery(session: SessionRecord): Promise<DeliveryPlan
 export async function deliverSession(session: SessionRecord, plan?: DeliveryPlan): Promise<SessionRecord> {
   if (!session.branch) throw new StageActionError('no branch to deliver yet');
   if (session.qaStatus !== 'reviewed') throw new StageActionError('mark QA reviewed before shipping');
-  if (session.delivery && session.delivery.kind !== 'pushed') {
-    throw new StageActionError(`already delivered: ${session.delivery.detail}`);
+  if (isShipped(session.delivery)) {
+    throw new StageActionError(`already delivered: ${session.delivery!.detail}`);
   }
   const app = await getApp(session.appId);
   const delivery = plan ?? (await planDelivery(session));
-  const result = await deliver(app.repoRoot, delivery, await buildDeliveryText(session, app.repoRoot, delivery.baseBranch));
-  return updateSession(session.id, { delivery: result });
+  const text = await buildDeliveryText(session, app.repoRoot, delivery.baseBranch, await sharedBranchFeature(session));
+  const result = await deliver(app.repoRoot, delivery, text);
+  const updated = await updateSession(session.id, { delivery: result });
+  await recordSharedBranchShipped(updated);
+  return updated;
+}
+
+/** The feature a shared branch ships, when earlier parts were kept on this session's branch. */
+async function sharedBranchFeature(session: SessionRecord): Promise<{ title: string; parts: string[] } | undefined> {
+  const roadmap = await loadSplitRoadmap(session);
+  if (!roadmap || !session.branch) return undefined;
+  const onBranch = roadmap.parts.filter(
+    (p) => p.sessionId === session.id || (p.delivery?.kind === 'kept' && p.delivery.target === session.branch),
+  );
+  if (onBranch.length < 2) return undefined;
+  return { title: roadmap.parent.title, parts: onBranch.map((p) => p.title) };
+}
+
+/** A split part's alternative to shipping: stays on its branch, and the next part continues on it. Only after QA is reviewed. */
+export async function keepSessionOnBranch(session: SessionRecord): Promise<SessionRecord> {
+  try {
+    return await keepOnBranch(session);
+  } catch (err) {
+    throw new StageActionError(err instanceof Error ? err.message : String(err));
+  }
 }

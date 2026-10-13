@@ -27,6 +27,7 @@ import { createClassifyTextTool } from './helpers/classifier/tool.js';
 import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
+import { diffBaseFor, sharedBranchFor } from '../sessions/shared-branch.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { listSessionReferenceDocs, referenceDocsManifest, referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
@@ -241,7 +242,7 @@ export async function runCodingAgentTurn(
       entries: entriesSince(session.transcripts.coding, contextStartEntryId),
       repoRoot: app.repoRoot,
       branch: session.branch,
-      baseBranch: baseBranchFor(app),
+      baseBranch: diffBaseFor(session, app),
       checklist: session.codingPlan,
     });
     await setClaudeSessionId(session.id, 'coding', null);
@@ -270,7 +271,7 @@ export async function runCodingAgentTurn(
   const architectureContext = await architectureContextForTurn(session, 'coding', app, isFirstTurn);
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
-  const architectureDeps = { app, repoRoot: app.repoRoot, scope: true, allowRegenerate: true };
+  const architectureDeps = { app, repoRoot: app.repoRoot, scope: true, baseBranch: diffBaseFor(session, app), allowRegenerate: true };
   // search_code without a glob starts in the domains the step being worked on names.
   const searchFocus = namedDomainsFocus(app, app.repoRoot, 'the domains your current step names', async () => {
     const latest = (await getSession(session.id)) ?? session;
@@ -320,9 +321,10 @@ export async function runCodingAgentTurn(
   const referenceNote = await referenceDocsTurnNote(session, 'coding', isFirstTurn);
   if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
 
-  const onBranchCreated = async (branchName: string) => {
-    await updateSession(session.id, { branch: branchName, stage: 'coding-in-progress' });
+  const onBranchCreated = async (branchName: string, base?: string) => {
+    await updateSession(session.id, { branch: branchName, branchBase: base ?? null, stage: 'coding-in-progress' });
   };
+  const sharedBranch = await sharedBranchFor(session);
 
   // The lead's team tools (tool-defs/team-lead-tools.ts): tracking, review
   // and merging of the engineers' branches whenever a team round exists,
@@ -375,7 +377,7 @@ export async function runCodingAgentTurn(
         entries: contextLog.entries,
         repoRoot: app.repoRoot,
         branch: latest?.branch ?? session.branch,
-        baseBranch: baseBranchFor(app),
+        baseBranch: diffBaseFor(latest ?? session, app),
         checklist: latest?.codingPlan ?? session.codingPlan,
       });
       contextLog.reset();
@@ -476,6 +478,7 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         onBranchCreated,
+        sharedBranch,
         guard,
         helperContext,
       });
@@ -484,7 +487,7 @@ export async function runCodingAgentTurn(
       });
       const { runCheckedCommandToolClaude } = createQaToolsClaude({
         repoRoot: app.repoRoot,
-        baseBranch: baseBranchFor(app),
+        baseBranch: diffBaseFor(session, app),
         checkCommands: app.checkCommands,
         helperContext,
       });
@@ -571,13 +574,14 @@ export async function runCodingAgentTurn(
         repoRoot: app.repoRoot,
         baseBranch: baseBranchFor(app),
         onBranchCreated,
+        sharedBranch,
         guard,
         helperContext,
       });
       const { runGeneratePathsTool, runGenerateOpenApiTool } = createGenerateTools({ repoRoot: app.repoRoot });
       const { runCheckedCommandTool } = createQaTools({
         repoRoot: app.repoRoot,
-        baseBranch: baseBranchFor(app),
+        baseBranch: diffBaseFor(session, app),
         checkCommands: app.checkCommands,
         helperContext,
       });
@@ -682,7 +686,13 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
       `status "pending" except the first, which is "in_progress":\n\n${stepsList}`;
   }
 
-  if (!session.codingTeam && !session.branch)
+  const sharedBranch = await sharedBranchFor(session);
+  if (!session.codingTeam && !session.branch && sharedBranch) {
+    text +=
+      `\n\n# Session\n\nThis feature's earlier parts were built on branch "${sharedBranch}" and haven't shipped yet. ` +
+      `This part continues on it: call git_create_branch with branchName "${sharedBranch}" and it checks that branch ` +
+      `out instead of creating one. Their code is there to build on.`;
+  } else if (!session.codingTeam && !session.branch)
     text += `\n\n# Session\n\nSuggested branch name: ${suggestedBranchName(session)}`;
   return text;
 }

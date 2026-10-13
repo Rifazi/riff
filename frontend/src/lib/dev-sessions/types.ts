@@ -272,7 +272,8 @@ export interface SplitPart {
 }
 
 /** GET /api/sessions/:id/roadmap — a split feature's build order and progress. */
-export type RoadmapPartStatus = 'not-started' | 'in-progress' | 'shipped' | 'dropped' | 'missing';
+/** 'kept' = QA reviewed and left on the split's shared branch for the next part; built, not merged yet. */
+export type RoadmapPartStatus = 'not-started' | 'in-progress' | 'shipped' | 'kept' | 'dropped' | 'missing';
 
 export interface RoadmapPart {
   index: number;
@@ -290,9 +291,20 @@ export interface RoadmapPart {
 }
 
 export interface SplitRoadmap {
-  parent: { sessionId: string; sessionKey: string; title: string; rationale: string | null };
+  parent: {
+    sessionId: string;
+    sessionKey: string;
+    title: string;
+    rationale: string | null;
+    /** Build every part on one branch and ship once at the end. */
+    oneBranch: boolean;
+    /** The branch parts were kept on; the next part continues on it. */
+    sharedBranch: string | null;
+  };
   parts: RoadmapPart[];
   shipped: number;
+  /** Built and kept on the shared branch, not shipped yet. */
+  kept: number;
   /** The earliest unshipped part whose dependencies have all shipped. */
   nextIndex: number | null;
 }
@@ -402,7 +414,8 @@ export type TeamEvent =
   | { type: 'error'; message: string };
 
 export interface SessionDelivery {
-  kind: 'merged' | 'merge_request' | 'pushed';
+  /** 'kept' = a split part left on its branch for the next part to continue on; not shipped. */
+  kind: 'merged' | 'merge_request' | 'pushed' | 'kept';
   target: string;
   url: string | null;
   detail: string;

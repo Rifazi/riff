@@ -2,6 +2,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getApp } from '../../apps/apps-store.js';
 import { baseBranchFor } from '../../apps/apps.js';
+import { checkoutSharedBranch, sharedBranchFor } from '../../sessions/shared-branch.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
 import { getRoleModelConfig } from '../../settings/settings-store.js';
 import { lightModelFor, planStepEfforts } from '../model-routing.js';
@@ -93,9 +94,16 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   // The main checkout stays on the session branch the whole time: the lead
   // merges every member's branch into it there.
   if (!session.branch) {
-    const branch = suggestedBranchName(session);
-    await withRepoLock(app.repoRoot, () => createBranch(app.repoRoot, branch, baseBranchFor(app)));
-    session = await updateSession(sessionId, { branch, stage: 'coding-in-progress' });
+    // A part of a split built on one branch continues on it (sessions/shared-branch.ts).
+    const shared = await sharedBranchFor(session);
+    if (shared) {
+      const branchBase = await withRepoLock(app.repoRoot, () => checkoutSharedBranch(app.repoRoot, shared));
+      session = await updateSession(sessionId, { branch: shared, branchBase, stage: 'coding-in-progress' });
+    } else {
+      const branch = suggestedBranchName(session);
+      await withRepoLock(app.repoRoot, () => createBranch(app.repoRoot, branch, baseBranchFor(app)));
+      session = await updateSession(sessionId, { branch, stage: 'coding-in-progress' });
+    }
   } else {
     await assertOnBranch(app.repoRoot, session.branch);
     if (await hasUncommittedChanges(app.repoRoot)) {

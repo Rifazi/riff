@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ExternalLink, GitMerge, GitPullRequest, Loader2, Upload } from 'lucide-react';
+import { CheckCircle2, ExternalLink, GitBranch, GitMerge, GitPullRequest, Loader2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
 import type { DeliveryPlan, SessionRecord } from '@/lib/dev-sessions/types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ExternalAnchor } from './ExternalAnchor';
 import { ErrorText, Notice } from './PageShell';
+import { useRoadmap } from './SplitPanel';
 
 function actionFor(plan: DeliveryPlan): {
   label: string;
@@ -41,13 +42,22 @@ function actionFor(plan: DeliveryPlan): {
  * The QA tab's last step once QA is reviewed: ship the branch. What that
  * means is detected from the repo — merge locally when there's no remote,
  * otherwise push and open an MR/PR — and always runs on an explicit,
- * confirmed click.
+ * confirmed click. A part of a split with parts still to build can instead
+ * stay on its branch, and the next part continues on it.
  */
 export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; qaResult: string | null }) {
   const queryClient = useQueryClient();
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<'ship' | 'keep' | null>(null);
   const delivered = session.delivery;
-  const canShip = !delivered || delivered.kind === 'pushed';
+  const kept = delivered?.kind === 'kept';
+  const canShip = !delivered || delivered.kind === 'pushed' || kept;
+
+  const { data: roadmap } = useRoadmap(session);
+  const partsLeft =
+    roadmap?.parts.filter((p) => p.sessionId !== session.id && (p.status === 'in-progress' || p.status === 'not-started'))
+      .length ?? 0;
+  const canKeep = Boolean(session.splitFrom) && !delivered && partsLeft > 0;
+  const preferKeep = canKeep && Boolean(roadmap?.parent.oneBranch);
 
   const {
     data: plan,
@@ -67,17 +77,30 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
     },
   });
 
+  const keepMutation = useMutation({
+    mutationFn: () => api.keepOnBranch(session.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['session', session.id] });
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['roadmap'] });
+    },
+  });
+
   const action = plan ? actionFor(plan) : null;
   const Icon = action?.icon ?? GitMerge;
+  const busy = deliverMutation.isPending || keepMutation.isPending;
+  const keepConfirm =
+    `Leaves ${session.branch} as it is: nothing is merged or pushed. The next part of this feature continues on ` +
+    `${session.branch}, and shipping the last part ships every part together. ${partsLeft} part${partsLeft === 1 ? '' : 's'} left to build.`;
 
   return (
     <div className="mt-3 rounded-lg border border-border bg-card p-3 space-y-2.5">
-      <div className="text-sm font-semibold text-card-foreground">Ship it</div>
+      <div className="text-sm font-semibold text-card-foreground">{canKeep ? 'Ship it, or keep building on this branch' : 'Ship it'}</div>
 
       {delivered && (
         <Notice tone="green">
           <div className="flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            {kept ? <GitBranch className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />}
             <div className="space-y-1">
               <div>{delivered.detail}</div>
               {delivered.url && (
@@ -102,33 +125,67 @@ export function DeliveryPanel({ session, qaResult }: { session: SessionRecord; q
               Checking how this repo is set up…
             </div>
           )}
-          {plan && <p className="text-sm text-muted-foreground">{plan.reason}</p>}
+          {plan && (
+            <p className="text-sm text-muted-foreground">
+              {kept && 'Ship it from here only if no later part is on this branch yet: shipping it ships whatever is on it. '}
+              {plan.reason}
+            </p>
+          )}
+          {canKeep && (
+            <p className="text-sm text-muted-foreground">
+              Or keep it on {session.branch} without merging: the next part continues on that branch, and the last part
+              ships them all.
+            </p>
+          )}
           {plan && qaResult && qaResult !== 'pass' && (
             <Notice tone="amber">
               QA&apos;s result was &quot;{qaResult}&quot; — make sure you&apos;re happy with that before shipping.
             </Notice>
           )}
           <ErrorText>
-            {(planError as Error | null)?.message ?? (deliverMutation.error as Error | null)?.message ?? null}
+            {(planError as Error | null)?.message ??
+              (deliverMutation.error as Error | null)?.message ??
+              (keepMutation.error as Error | null)?.message ??
+              null}
           </ErrorText>
-          {plan && action && (
-            <Button size="sm" onClick={() => setConfirming(true)} disabled={deliverMutation.isPending}>
-              {deliverMutation.isPending ? <Loader2 className="animate-spin" /> : <Icon />}
-              {deliverMutation.isPending ? 'Working…' : action.label}
-            </Button>
-          )}
+          <div className={`flex flex-wrap gap-2 ${preferKeep ? 'flex-row-reverse justify-end' : ''}`}>
+            {plan && action && (
+              <Button
+                size="sm"
+                variant={preferKeep ? 'outline' : 'default'}
+                onClick={() => setConfirming('ship')}
+                disabled={busy}
+              >
+                {deliverMutation.isPending ? <Loader2 className="animate-spin" /> : <Icon />}
+                {deliverMutation.isPending ? 'Working…' : action.label}
+              </Button>
+            )}
+            {canKeep && (
+              <Button
+                size="sm"
+                variant={preferKeep ? 'default' : 'outline'}
+                onClick={() => setConfirming('keep')}
+                disabled={busy}
+              >
+                {keepMutation.isPending ? <Loader2 className="animate-spin" /> : <GitBranch />}
+                {keepMutation.isPending ? 'Working…' : 'Keep on branch for the next part'}
+              </Button>
+            )}
+          </div>
         </>
       )}
 
       <ConfirmDialog
-        open={confirming}
-        title={action ? `${action.label}?` : ''}
-        description={action?.confirm ?? ''}
-        confirmLabel={action?.label ?? 'Continue'}
-        onCancel={() => setConfirming(false)}
+        open={confirming !== null}
+        title={confirming === 'keep' ? 'Keep on branch for the next part?' : action ? `${action.label}?` : ''}
+        description={confirming === 'keep' ? keepConfirm : (action?.confirm ?? '')}
+        confirmLabel={confirming === 'keep' ? 'Keep on branch' : (action?.label ?? 'Continue')}
+        onCancel={() => setConfirming(null)}
         onConfirm={() => {
-          setConfirming(false);
-          deliverMutation.mutate();
+          const which = confirming;
+          setConfirming(null);
+          if (which === 'keep') keepMutation.mutate();
+          else deliverMutation.mutate();
         }}
       />
     </div>

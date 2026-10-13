@@ -1,5 +1,6 @@
 import { getApp } from '../../apps/apps-store.js';
 import { baseBranchFor } from '../../apps/apps.js';
+import { diffBaseFor } from '../../sessions/shared-branch.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession } from '../../sessions/session-store.js';
 import type { QaCheckCommand, QaReviewerStatus, QaTeamCheck } from '../../sessions/session.js';
 import { createQaExecutors } from '../tool-defs/qa-tools.js';
@@ -177,7 +178,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   // other — alongside the reviewers, which only read.
   const { runCheckedCommandExecute } = createQaExecutors({
     repoRoot: app.repoRoot,
-    baseBranch: baseBranchFor(app),
+    baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     // The runner helper may shorten a failing log; it's logged, but has no
     // chat of its own to show up in.

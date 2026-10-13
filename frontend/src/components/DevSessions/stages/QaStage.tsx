@@ -181,7 +181,8 @@ export function QaStage({ session }: { session: SessionRecord }) {
   const entries = streaming ? [...session.transcripts.qa, ...overlay] : session.transcripts.qa;
   const reviewed = session.qaStatus === 'reviewed';
   // Once merged or an MR is open, fixes on the branch no longer reach anything.
-  const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed');
+  // A part kept on its branch for the next one can still be sent back.
+  const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed' && session.delivery.kind !== 'kept');
   const markdown = report?.markdown ?? null;
   const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
 

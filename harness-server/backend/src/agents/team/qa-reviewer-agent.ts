@@ -5,6 +5,7 @@ import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../../config.js';
 import type { AppConfig } from '../../apps/apps.js';
 import { baseBranchFor } from '../../apps/apps.js';
+import { diffBaseFor } from '../../sessions/shared-branch.js';
 import { addStageUsage, appendTeamTranscriptEntry, mutateSession } from '../../sessions/session-store.js';
 import type { QaTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../../settings/settings-store.js';
@@ -92,7 +93,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     appId: app.id,
     sessionId: session.id,
     repoRoot: app.repoRoot,
-    baseBranch: baseBranchFor(app),
+    baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext,
   });

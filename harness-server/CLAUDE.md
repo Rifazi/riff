@@ -1373,6 +1373,47 @@ below) — never inside the target repo.
    `tool-defs/file-tools.ts`) so apps with a prompt override get them too.
    Not run with real agents yet.
 
+51. User asked that a large task split into several requirements under one
+   ticket not be merged into master part by part, but stay on its branch
+   until every part is done, with the choice offered after QA.
+   `sessions/shared-branch.ts`:
+   - **Keep instead of ship**: once QA is reviewed, a split part can be
+     kept (`POST /api/sessions/:id/delivery/keep`, `keepOnBranch`) instead
+     of shipped. Its `delivery` becomes `{ kind: 'kept', target: <branch> }`
+     and the parent's `splitBranch` records the branch. Nothing is merged or
+     pushed. Sending a kept part back to coding clears its delivery.
+   - **The next part continues on it**: a part that starts coding while the
+     parent has a `splitBranch` checks that branch out instead of branching
+     off the base branch. For a solo build, `git_create_branch` does it
+     (`GitToolDeps.sharedBranch`; the kickoff prompt names the branch). For a
+     team, `coding-team.ts` does. The commit it started from is stored as
+     `session.branchBase`, and `diffBaseFor(session, app)` replaces
+     `baseBranchFor(app)` wherever a session's work is compared (coding
+     diff route, handoffs, QA tools and team, pre-QA gate, architecture audit
+     scope, requirements/plan revision stats), so each part's diff and QA
+     cover only its own changes.
+   - **Shipping**: delivery always targets the app's base branch, so
+     shipping any part on the shared branch ships every part on it. The MR
+     is titled after the feature and lists the parts (`buildDeliveryText`'s
+     `feature`). `recordSharedBranchShipped` then gives the kept parts the
+     same delivery and clears `splitBranch`.
+   - **Roadmap**: new part status `kept` (built, not merged). It satisfies
+     dependencies like `shipped`, is listed under "Already built" in a
+     part's progress brief, and is counted in `roadmap.kept`. The parent
+     carries `splitOneBranch` (toggle "Build every part on one branch" on the
+     roadmap, `POST /api/sessions/:id/roadmap/branch`), which also has a
+     button to stop continuing on the kept branch (`clearBranch`).
+   - **Bridget**: on a clean pass she keeps the part instead of opening an MR
+     when `splitOneBranch` is on (or the part is already on `splitBranch`)
+     and other parts are still to build (`shouldKeepOnBranch`). The last
+     part ships as before.
+   - UI: `DeliveryPanel` offers "Keep on branch for the next part" next to
+     Ship while parts remain (primary when the toggle is on), and the
+     roadmap shows "Built, on branch".
+   Tests: `split-roadmap.test.ts` (kept status, brief), run through a
+   node:test shim. The git path (checking out the shared branch, diff from
+   `branchBase`) was checked on a scratch repo. Not run with real agents yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

@@ -383,8 +383,8 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
     used += result.requests;
     if (compacting) conversationStart = result.startTokens;
   }
-  if (result.finishReason === 'tool-calls' && hop >= maxHops) {
-    const resultText = `${OUT_OF_STEPS} ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`;
+  if (result.finishReason === 'tool-calls' && used >= budget.total) {
+    const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
     onEvent({ type: 'usage', usage, toolOutput });
     return { updatedHistory: result.updatedHistory, resultText, isError: true, usage, contextTokens: result.contextTokens };
@@ -708,8 +708,8 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
     used += result.requests;
   }
 
-  if (result.subtype === 'error_max_turns' && hop >= maxHops) {
-    const resultText = `This step needed more tool calls than ${maxHops} continuation rounds could cover — consider splitting the plan/checklist step further.`;
+  if (unfinished() && used >= budget.total) {
+    const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
     onEvent({ type: 'usage', usage, toolOutput });
     return { sdkSessionId: result.sdkSessionId, resultText, isError: true, usage, contextTokens: result.contextTokens };

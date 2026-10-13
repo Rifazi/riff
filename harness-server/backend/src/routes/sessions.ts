@@ -12,6 +12,7 @@ import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { removeReadMemory } from '../agents/helpers/memory/store.js';
 import { listApps } from '../apps/apps-store.js';
 import { loadSplitRoadmap } from '../sessions/split-roadmap-load.js';
+import { updateSplitBranchSettings } from '../sessions/shared-branch.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
   removeMeetingSource,
@@ -93,6 +94,25 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
     if (!roadmap) return reply.code(404).send({ error: 'this session is not part of a split' });
     return roadmap;
   });
+
+  // A split's branch settings, from the parent or any part: build every part
+  // on one branch (oneBranch), or stop continuing on the kept one
+  // (clearBranch: the next part branches off the base branch again).
+  app.post<{ Params: { id: string }; Body: { oneBranch?: boolean; clearBranch?: boolean } }>(
+    '/api/sessions/:id/roadmap/branch',
+    async (request, reply) => {
+      const session = await getSession(request.params.id);
+      if (!session) return reply.code(404).send({ error: 'session not found' });
+      const { oneBranch, clearBranch } = request.body ?? {};
+      if (oneBranch !== undefined && typeof oneBranch !== 'boolean') return reply.code(400).send({ error: 'oneBranch must be a boolean' });
+      try {
+        await updateSplitBranchSettings(session, { oneBranch, clearBranch: clearBranch === true });
+      } catch (err) {
+        return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+      return loadSplitRoadmap(session);
+    },
+  );
 
   // Human-only, permanent. Removes this project's own records for the
   // session (its state file, and the requirements/plan/QA docs it wrote

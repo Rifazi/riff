@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { createBranch, stageAndCommit } from '../../repo/git.js';
+import { checkoutSharedBranch } from '../../sessions/shared-branch.js';
 import { formatFiles } from '../helpers/format/format.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { assertWritable } from './file-tools.js';
@@ -57,7 +58,12 @@ export const gitCommitDescription =
 export interface GitToolDeps {
   repoRoot: string;
   baseBranch?: string;
-  onBranchCreated: (branchName: string) => Promise<void>;
+  // `base` is the commit the work starts from when it continues an existing
+  // branch (SessionRecord.branchBase).
+  onBranchCreated: (branchName: string, base?: string) => Promise<void>;
+  // A split's shared branch this part continues on (sessions/shared-branch.ts):
+  // git_create_branch checks it out instead of creating a branch.
+  sharedBranch?: string | null;
   // A coding-team member's owned paths: commits can't include anything else.
   writablePaths?: string[];
   // Where formatter runs are reported (helpers/format).
@@ -83,6 +89,14 @@ function formattable(repoRoot: string, files: string[], writablePaths?: string[]
 export function createGitExecutors(deps: GitToolDeps) {
   const gitCreateBranchExecute = async ({ branchName }: z.infer<typeof gitCreateBranchSchema>): Promise<string> => {
     await deps.guard?.();
+    if (deps.sharedBranch) {
+      const base = await checkoutSharedBranch(deps.repoRoot, deps.sharedBranch);
+      await deps.onBranchCreated(deps.sharedBranch, base);
+      return (
+        `Checked out the feature's existing branch ${deps.sharedBranch}, where its earlier parts were built` +
+        `${branchName !== deps.sharedBranch ? ` (instead of creating ${branchName})` : ''}. Commit this part's work on it.`
+      );
+    }
     await createBranch(deps.repoRoot, branchName, deps.baseBranch);
     await deps.onBranchCreated(branchName);
     return `Created and checked out branch ${branchName}.`;

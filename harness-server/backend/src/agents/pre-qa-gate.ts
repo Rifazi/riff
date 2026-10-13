@@ -1,4 +1,5 @@
 import { baseBranchFor, type AppConfig } from '../apps/apps.js';
+import { diffBaseFor } from '../sessions/shared-branch.js';
 import { DOMAIN_DOC } from '../architecture/architecture.js';
 import { auditWayfinding, branchScope } from '../architecture/wayfinding-audit.js';
 import { branchChanges, currentBranch } from '../repo/git.js';
@@ -28,7 +29,7 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
 
   const { runCheckedCommandExecute } = createQaExecutors({
     repoRoot: app.repoRoot,
-    baseBranch: baseBranchFor(app),
+    baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext: { sessionId: session.id, stage: 'coding', record: async () => {} },
   });
@@ -47,7 +48,7 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
   let auditProblems: string[] = [];
   if (app.architecture) {
     const audit = auditWayfinding(app.repoRoot, app.architecture);
-    const base = baseBranchFor(app);
+    const base = diffBaseFor(session, app);
     const changes = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
     auditProblems = blockingAuditProblems(audit, changes ? branchScope(audit, base, changes.files, changes.docDiff) : null);
   }

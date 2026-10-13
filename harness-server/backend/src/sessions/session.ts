@@ -363,7 +363,14 @@ export interface SessionRecord {
   qaTeamHistory: QaTeamState[];
   // How the reviewed branch was shipped (repo/delivery.ts): merged into the
   // base branch for a local-only repo, or pushed with an MR/PR opened.
-  delivery: { kind: 'merged' | 'merge_request' | 'pushed'; target: string; url: string | null; detail: string; at: string } | null;
+  // 'kept' = a split part left on its branch for the next part to continue
+  // on (sessions/shared-branch.ts); not shipped yet.
+  delivery: { kind: 'merged' | 'merge_request' | 'pushed' | 'kept'; target: string; url: string | null; detail: string; at: string } | null;
+  // Where this session's work starts when it continues a split's shared
+  // branch: the commit it was at when this part took it over. Diffs, QA and
+  // handoffs compare against it, so a part only sees its own changes. Null =
+  // the app's base branch.
+  branchBase: string | null;
   qaStatus: 'pending-review' | 'reviewed' | null;
   // Set when a QA report is sent back to Coding for fixes instead of being
   // marked reviewed — true until the next coding message is sent, at which
@@ -386,9 +393,6 @@ export interface SessionRecord {
   // approves each finished stage itself and starts the next one. It stops
   // for a human whenever an agent waits on one. Off by default.
   coordinatorEnabled: boolean;
-  // How many failed QA reports the coordinator has sent back to coding since
-  // it was last turned on. It stops for a human at MAX_QA_SEND_BACKS.
-  coordinatorQaSendBacks: number;
   // How many times the coordinator has sent coding back because the pre-QA
   // gate (lint, unit tests, Wayfinding audit) failed, since it was last
   // turned on. It stops for a human at MAX_GATE_SEND_BACKS.
@@ -428,6 +432,14 @@ export interface SessionRecord {
   // message — one-shot, same lifecycle as meetingKickoffPending.
   splitBrief: string | null;
   splitKickoffPending: boolean;
+  // On the parent: build every part on one branch and ship once at the end,
+  // instead of shipping each part. Bridget keeps a passed part on the branch
+  // while other parts remain.
+  splitOneBranch: boolean;
+  // On the parent: the branch parts were kept on. The next part to start
+  // coding continues on it instead of branching off the base branch.
+  // Cleared when it ships.
+  splitBranch: string | null;
 
   // Pending until the human applies or dismisses it in the theme picker.
   themeProposal: ThemeProposal | null;

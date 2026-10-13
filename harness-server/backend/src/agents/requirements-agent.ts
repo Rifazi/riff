@@ -17,6 +17,7 @@ import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { getPromptOverride } from '../settings/prompts-store.js';
 import { getApp } from '../apps/apps-store.js';
 import { docsDirFor, baseBranchFor } from '../apps/apps.js';
+import { diffBaseFor } from '../sessions/shared-branch.js';
 import { diffStatAgainstBase } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
@@ -121,7 +122,7 @@ export async function runRequirementsAgentTurn(
     let diffStat = '(unable to read diff stat)';
     try {
       diffStat =
-        (await diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app))).trim() || '(no changes yet)';
+        (await diffStatAgainstBase(app.repoRoot, session.branch, diffBaseFor(session, app))).trim() || '(no changes yet)';
     } catch {
       // repo/branch not in a readable state — proceed without it
     }
@@ -129,7 +130,7 @@ export async function runRequirementsAgentTurn(
       `# Coding already in progress\n\nThis session's requirements are being revised while coding has already ` +
       `started on branch "${session.branch}". Treat this as a change to something partially built, not a fresh ` +
       `design — reason about what should change and what existing work should be preserved.\n\n` +
-      `Coding checklist:\n${stepsText}\n\nDiff stat against ${baseBranchFor(app)}:\n${diffStat}`;
+      `Coding checklist:\n${stepsText}\n\nDiff stat against ${diffBaseFor(session, app)}:\n${diffStat}`;
     prompt = `${contextBlock}\n\n---\n\n${prompt}`;
   }
 

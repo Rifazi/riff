@@ -58,8 +58,19 @@ async function localSummary(input: string): Promise<string | null> {
 
 const cell = (v: unknown) => String(v ?? '—').replace(/\|/g, '\\|');
 
-export async function buildDeliveryText(session: SessionRecord, repoRoot: string, baseBranch: string): Promise<DeliveryText> {
+/**
+ * `feature` is set when the branch carries several parts of a split built on
+ * one branch (sessions/shared-branch.ts): the MR is named after the feature
+ * and lists the parts it ships.
+ */
+export async function buildDeliveryText(
+  session: SessionRecord,
+  repoRoot: string,
+  baseBranch: string,
+  feature?: { title: string; parts: string[] },
+): Promise<DeliveryText> {
   const branch = session.branch!;
+  const title = feature?.title ?? session.title;
   const [requirements, qa, commits, diffStat] = await Promise.all([
     readDoc(session.requirementsPath),
     readDoc(session.qaReportPath),
@@ -71,7 +82,8 @@ export async function buildDeliveryText(session: SessionRecord, repoRoot: string
 
   // Kept well inside the local model's 16k context.
   const modelInput = [
-    `Title: ${session.title}`,
+    `Title: ${title}`,
+    feature ? `Parts built on this branch:\n${feature.parts.map((p) => `- ${p}`).join('\n')}` : null,
     requirements ? `Requirements:\n${requirements.content.slice(0, 9_000)}` : null,
     commitLines.length ? `Commits:\n${commitLines.slice(0, 40).join('\n')}` : null,
     diffStat ? `Files changed:\n${diffStat.trim().split('\n').slice(-40).join('\n')}` : null,
@@ -81,11 +93,12 @@ export async function buildDeliveryText(session: SessionRecord, repoRoot: string
   const summary =
     (await localSummary(modelInput)) ??
     [
-      firstParagraph(requirements?.content ?? '') || session.title,
+      firstParagraph(requirements?.content ?? '') || title,
       commitLines.length ? `### Changes\n${commitLines.slice(0, 15).join('\n')}` : null,
     ].filter(Boolean).join('\n\n');
 
   const sections = [`## Summary\n\n${summary}`];
+  if (feature) sections.push(`## Parts\n\n${feature.parts.map((p, i) => `${i + 1}. ${p}`).join('\n')}`);
 
   if (qa) {
     const d = qa.data;
@@ -114,8 +127,8 @@ export async function buildDeliveryText(session: SessionRecord, repoRoot: string
   }
 
   return {
-    title: session.ticket ? `${session.ticket}: ${session.title}` : session.title,
+    title: session.ticket ? `${session.ticket}: ${title}` : title,
     description: sections.join('\n\n').slice(0, 60_000),
-    summary: (firstParagraph(summary) || session.title).replace(/\s+/g, ' ').trim(),
+    summary: (firstParagraph(summary) || title).replace(/\s+/g, ' ').trim(),
   };
 }

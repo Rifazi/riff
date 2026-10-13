@@ -4,6 +4,7 @@ import type { ToolSet } from 'ai';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../../config.js';
 import type { AppConfig } from '../../apps/apps.js';
+import { diffBaseFor } from '../../sessions/shared-branch.js';
 import { appendTeamTranscriptEntry, getSession, mutateSession, addStageUsage } from '../../sessions/session-store.js';
 import type { CodingTeamMember, SessionRecord } from '../../sessions/session.js';
 import { getApiKey, getRoleModelConfig } from '../../settings/settings-store.js';
@@ -311,7 +312,7 @@ export async function runWorkstreamAgent({
     helperContext,
     runCheck: (command) => runCheckedCommandExecute({ command }),
   };
-  const architectureDeps = { app, repoRoot: worktreePath, scope: true, allowRegenerate: true, writablePaths: member.ownedPaths };
+  const architectureDeps = { app, repoRoot: worktreePath, scope: true, baseBranch: diffBaseFor(session, app), allowRegenerate: true, writablePaths: member.ownedPaths };
 
   if (provider === 'claude') {
     const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({

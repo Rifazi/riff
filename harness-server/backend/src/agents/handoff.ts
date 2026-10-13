@@ -229,6 +229,11 @@ export async function buildHandoff(params: HandoffParams): Promise<string> {
         `rather than reading it whole.\n\n${describeFiles(repoRoot, changedFiles).join('\n')}`
     );
   }
-  if (read.length > 0) parts.push(`## Files you read (not changed)\n\n${read.slice(0, 40).map((p) => `- ${p}`).join('\n')}`);
+  if (read.length > 0) {
+    const heading = params.recall
+      ? '## Files you read (not changed): `recall` what you need from them instead of reading them again'
+      : '## Files you read (not changed)';
+    parts.push(`${heading}\n\n${read.slice(0, 40).map((p) => `- ${p}`).join('\n')}`);
+  }
   return parts.join('\n\n');
 }

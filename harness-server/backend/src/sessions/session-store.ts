@@ -50,7 +50,6 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.planPath ??= null;
   session.planStatus ??= null;
   session.coordinatorEnabled ??= false;
-  session.coordinatorQaSendBacks ??= 0;
   session.coordinatorGateSendBacks ??= 0;
   session.qaFindingsPending ??= false;
   session.qaRerunPending ??= false;
@@ -73,11 +72,14 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.qaNotes ??= [];
   session.qaHandoffNotes ??= [];
   session.delivery ??= null;
+  session.branchBase ??= null;
   session.splitProposal ??= null;
   session.splitInto ??= [];
   session.splitFrom ??= null;
   session.splitBrief ??= null;
   session.splitKickoffPending ??= false;
+  session.splitOneBranch ??= false;
+  session.splitBranch ??= null;
   session.referenceDocsSeen ??= {};
   session.usage ??= { requirements: ZERO_USAGE, plan: ZERO_USAGE, coding: ZERO_USAGE, qa: ZERO_USAGE };
   session.themeProposal ??= null;
@@ -178,9 +180,9 @@ export async function createSession(input: {
     qaHandoffNotes: [],
     qaReportPath: null,
     delivery: null,
+    branchBase: null,
     qaStatus: null,
     coordinatorEnabled: false,
-    coordinatorQaSendBacks: 0,
     coordinatorGateSendBacks: 0,
     qaFindingsPending: false,
     qaRerunPending: false,
@@ -198,6 +200,8 @@ export async function createSession(input: {
     splitFrom: input.splitFrom ?? null,
     splitBrief: input.splitBrief ?? null,
     splitKickoffPending: Boolean(input.splitBrief),
+    splitOneBranch: false,
+    splitBranch: null,
     themeProposal: null,
     themeContextSeen: {},
     architectureContextSeen: {},

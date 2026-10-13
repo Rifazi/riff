@@ -9,6 +9,7 @@ import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../
 import { diffAgainstBase, diffStatAgainstBase, commitLogAgainstBase } from '../repo/git.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
+import { diffBaseFor } from '../sessions/shared-branch.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam, type TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
@@ -123,9 +124,9 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     if (!session.branch) return { diff: null, stat: null, commits: [] };
     const app = await getApp(session.appId);
     const [diff, stat, commits] = await Promise.all([
-      diffAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
-      diffStatAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
-      commitLogAgainstBase(app.repoRoot, session.branch, baseBranchFor(app)),
+      diffAgainstBase(app.repoRoot, session.branch, diffBaseFor(session, app)),
+      diffStatAgainstBase(app.repoRoot, session.branch, diffBaseFor(session, app)),
+      commitLogAgainstBase(app.repoRoot, session.branch, diffBaseFor(session, app)),
     ]);
     return { diff, stat, commits };
   });

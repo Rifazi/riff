@@ -29,6 +29,7 @@ import { stageHelperContext, type HelperContext } from './helpers/helper.js';
 import { tryCompressCode, compressMessages } from './helpers/compress.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
+import { diffBaseFor } from '../sessions/shared-branch.js';
 import { branchChanges } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
@@ -92,7 +93,7 @@ export interface ReviewToolDeps {
 /** The read-only review tools (REVIEW_TOOL_NAMES, plus audit_architecture when the app has one) for either engine. */
 export function createReviewTools(deps: ReviewToolDeps) {
   const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext };
-  const architectureDeps = { app: deps.app, repoRoot: deps.repoRoot, scope: true, branch: deps.branch, allowRegenerate: false };
+  const architectureDeps = { app: deps.app, repoRoot: deps.repoRoot, scope: true, branch: deps.branch, baseBranch: deps.baseBranch, allowRegenerate: false };
   // search_code without a glob starts in the domains the branch touched (read once: QA doesn't change the branch).
   let changed: Promise<string[]> | null = null;
   const searchFocus = changedDomainsFocus(deps.app, deps.repoRoot, 'the domains this branch touched', () => {
@@ -262,12 +263,12 @@ export async function runQaAgentTurn(
     appId: app.id,
     sessionId: session.id,
     repoRoot: app.repoRoot,
-    baseBranch: baseBranchFor(app),
+    baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext,
   });
   const reportInfo = { sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id, branch, requirementsPath };
-  const checkDeps = { repoRoot: app.repoRoot, baseBranch: baseBranchFor(app), checkCommands: app.checkCommands, helperContext };
+  const checkDeps = { repoRoot: app.repoRoot, baseBranch: diffBaseFor(session, app), checkCommands: app.checkCommands, helperContext };
 
   if (provider === 'claude') {
     const tools = [

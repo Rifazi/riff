@@ -81,6 +81,23 @@ describe('buildSplitRoadmap', () => {
     expect(finished.nextIndex).toBeNull();
   });
 
+  test('a part kept on the shared branch unblocks its dependents without counting as shipped', () => {
+    const shared = { ...parent, splitOneBranch: true, splitBranch: 'KEY-1_feature' } as SessionRecord;
+    const roadmap = buildSplitRoadmap(shared, [
+      session('a', 'done', { delivery: { kind: 'kept', target: 'KEY-1_feature', url: null, detail: '', at: '' } }),
+      session('b', 'requirements-in-progress'),
+      session('c', 'requirements-in-progress'),
+      session('d', 'requirements-in-progress'),
+    ]);
+    expect(roadmap.parts.map((p) => p.status)).toEqual(['kept', 'not-started', 'not-started', 'not-started']);
+    expect(roadmap.parts[1].blockedBy).toEqual([]);
+    expect(roadmap.nextIndex).toBe(1);
+    expect(roadmap.shipped).toBe(0);
+    expect(roadmap.kept).toBe(1);
+    expect(roadmap.parent.oneBranch).toBe(true);
+    expect(roadmap.parent.sharedBranch).toBe('KEY-1_feature');
+  });
+
   test('without a matching proposal, dependencies come from the children', () => {
     const legacy = session('p', 'split', { splitInto: ['a', 'b'], splitProposal: null });
     const roadmap = buildSplitRoadmap(legacy, [
@@ -110,6 +127,20 @@ describe('roadmapProgressBrief', () => {
     expect(brief).toContain('shipped, merge request into main (https://x/mr/1) — may not be merged yet');
     expect(brief).toContain('### Title a (KEY-a)\nData model exists\n\n- [x] Table exists');
     expect(brief).toContain(`builds on "Title b", which hasn't shipped`);
+  });
+});
+
+describe('roadmapProgressBrief on a shared branch', () => {
+  test('lists a kept part as built on the branch, with what it delivered', () => {
+    const shared = { ...parent, splitBranch: 'KEY-1_feature' } as SessionRecord;
+    const roadmap = buildSplitRoadmap(shared, [
+      session('a', 'done', { delivery: { kind: 'kept', target: 'KEY-1_feature', url: null, detail: '', at: '' } }),
+      session('b', 'requirements-in-progress'),
+    ]);
+    const brief = roadmapProgressBrief(roadmap, 1, () => '- [x] Table exists');
+    expect(brief).toContain('0 of 4 parts shipped so far, 1 more built on branch KEY-1_feature');
+    expect(brief).toContain('**Title a** (KEY-a) — built, on branch KEY-1_feature, not merged yet');
+    expect(brief).toContain('### Title a (KEY-a)\nData model exists\n\n- [x] Table exists');
   });
 });
 

@@ -2,15 +2,16 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CheckCircle2, ChevronDown, Circle, CircleDot, GitFork, Loader2, XCircle } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowRight, CheckCircle2, ChevronDown, Circle, CircleDot, GitBranch, GitFork, Loader2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/dev-sessions/api';
 import type { RoadmapPart, SessionRecord, SplitProposal, SplitRoadmap } from '@/lib/dev-sessions/types';
 import { sessionHref, STAGE_LABEL } from '@/lib/dev-sessions/stage';
-import { Notice } from './PageShell';
+import { ErrorText, Notice } from './PageShell';
 
 /** The requirements agent's pending propose_split, for the human to accept or turn down. */
 export function SplitProposalCard({
@@ -97,7 +98,7 @@ export function SplitProposalCard({
   );
 }
 
-function useRoadmap(session: SessionRecord) {
+export function useRoadmap(session: SessionRecord) {
   const related = session.splitInto.length > 0 || Boolean(session.splitFrom);
   return useQuery({
     // Keyed on the stage so the page refetches as this session moves on.
@@ -109,6 +110,7 @@ function useRoadmap(session: SessionRecord) {
 
 const STATUS: Record<RoadmapPart['status'], { label: string; variant: 'success' | 'info' | 'secondary' | 'destructive' }> = {
   shipped: { label: 'Shipped', variant: 'success' },
+  kept: { label: 'Built, on branch', variant: 'success' },
   'in-progress': { label: 'In progress', variant: 'info' },
   'not-started': { label: 'Not started', variant: 'secondary' },
   dropped: { label: 'Dropped', variant: 'destructive' },
@@ -118,6 +120,7 @@ const STATUS: Record<RoadmapPart['status'], { label: string; variant: 'success' 
 function StatusIcon({ status }: { status: RoadmapPart['status'] }) {
   const cls = 'w-4 h-4 flex-shrink-0';
   if (status === 'shipped') return <CheckCircle2 className={`${cls} text-success`} />;
+  if (status === 'kept') return <GitBranch className={`${cls} text-success`} />;
   if (status === 'in-progress') return <CircleDot className={`${cls} text-primary`} />;
   if (status === 'not-started') return <Circle className={`${cls} text-muted-foreground`} />;
   return <XCircle className={`${cls} text-destructive`} />;
@@ -132,6 +135,7 @@ function deliveryText(part: RoadmapPart): string | null {
   const d = part.delivery;
   if (!d) return null;
   if (d.kind === 'merged') return `Merged into ${d.target}`;
+  if (d.kind === 'kept') return `On ${d.target}, ships with the last part`;
   return d.kind === 'merge_request' ? `Merge request into ${d.target}` : `Pushed, merge into ${d.target} by hand`;
 }
 
@@ -139,7 +143,7 @@ function RoadmapList({ roadmap, currentId }: { roadmap: SplitRoadmap; currentId:
   return (
     <ol className="space-y-1.5">
       {roadmap.parts.map((part) => {
-        const waiting = part.status !== 'shipped' && part.blockedBy.length > 0;
+        const waiting = !isBuilt(part.status) && part.blockedBy.length > 0;
         const delivery = deliveryText(part);
         const isNext = part.index === roadmap.nextIndex;
         const row = (
@@ -187,6 +191,59 @@ function RoadmapList({ roadmap, currentId }: { roadmap: SplitRoadmap; currentId:
   );
 }
 
+/** Shipped, or kept on the shared branch: either way the parts after it can build on it. */
+function isBuilt(status: RoadmapPart['status']): boolean {
+  return status === 'shipped' || status === 'kept';
+}
+
+/**
+ * Whether the parts share one branch (one MR for the ticket) or each ships
+ * into the base branch, and which branch the next part continues on.
+ */
+function SplitBranchSettings({ session, roadmap }: { session: SessionRecord; roadmap: SplitRoadmap }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (body: { oneBranch?: boolean; clearBranch?: boolean }) => api.updateSplitBranch(session.id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roadmap'] }),
+  });
+  const { oneBranch, sharedBranch } = roadmap.parent;
+  return (
+    <div className="rounded border border-border bg-card px-2.5 py-2 space-y-1.5 text-sm">
+      <label className="flex items-center gap-2">
+        <Switch
+          checked={oneBranch}
+          disabled={mutation.isPending}
+          onCheckedChange={(checked) => mutation.mutate({ oneBranch: checked })}
+        />
+        <span className="font-medium">Build every part on one branch</span>
+      </label>
+      <p className="text-xs text-muted-foreground">
+        {oneBranch
+          ? 'After QA, each part stays on the branch and the next part continues on it. The last part ships them all in one merge request. Auto-drive does this too.'
+          : 'After QA, each part can ship on its own, or you can keep it on its branch for the next part from the QA tab.'}
+      </p>
+      {sharedBranch && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <GitBranch className="w-3.5 h-3.5 text-primary" />
+          <span>
+            The next part continues on <span className="font-mono">{sharedBranch}</span>.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate({ clearBranch: true })}
+            title="Parts that haven't started coding branch off the base branch instead. The kept branch is left as it is."
+          >
+            Start the next part from the base branch instead
+          </Button>
+        </div>
+      )}
+      <ErrorText>{(mutation.error as Error | null)?.message ?? null}</ErrorText>
+    </div>
+  );
+}
+
 function ContinueButton({ roadmap, label = 'Continue' }: { roadmap: SplitRoadmap; label?: string }) {
   const next = roadmap.nextIndex === null ? null : roadmap.parts[roadmap.nextIndex];
   if (!next) return null;
@@ -216,12 +273,14 @@ function ParentRoadmap({ session, roadmap }: { session: SessionRecord; roadmap: 
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-foreground">
             Split into {total} parts · {roadmap.shipped} of {total} shipped
+            {roadmap.kept > 0 && ` · ${roadmap.kept} built on ${roadmap.parent.sharedBranch ?? 'a branch'}`}
           </div>
           {roadmap.parent.rationale && <p className="text-sm text-muted-foreground mt-0.5">{roadmap.parent.rationale}</p>}
         </div>
       </div>
-      <Progress value={(roadmap.shipped / total) * 100} className="h-1.5" />
+      <Progress value={((roadmap.shipped + roadmap.kept) / total) * 100} className="h-1.5" />
       <RoadmapList roadmap={roadmap} currentId={session.id} />
+      <SplitBranchSettings session={session} roadmap={roadmap} />
       {done ? (
         <Notice tone="green">Every part has shipped.</Notice>
       ) : stuck ? (
@@ -243,7 +302,7 @@ export function SplitPartStrip({ session }: { session: SessionRecord }) {
   if (!session.splitFrom || !roadmap) return null;
   const self = roadmap.parts.find((p) => p.sessionId === session.id);
   if (!self) return null;
-  const waiting = self.status !== 'shipped' ? self.blockedBy.map((d) => roadmap.parts[d]) : [];
+  const waiting = !isBuilt(self.status) ? self.blockedBy.map((d) => roadmap.parts[d]) : [];
 
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2 text-sm space-y-2">
@@ -264,7 +323,7 @@ export function SplitPartStrip({ session }: { session: SessionRecord }) {
           </Badge>
         )}
         <span className="flex-1" />
-        {self.status === 'shipped' && <ContinueButton roadmap={roadmap} label="Next part" />}
+        {isBuilt(self.status) && <ContinueButton roadmap={roadmap} label="Next part" />}
         <Button size="sm" variant="ghost" onClick={() => setOpen(!open)}>
           Roadmap
           <ChevronDown className={`transition-transform ${open ? 'rotate-180' : ''}`} />

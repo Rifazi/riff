@@ -245,6 +245,17 @@ export const api = {
   deliver: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/delivery`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
+  /** A split part's alternative to shipping: stays on its branch for the next part. */
+  keepOnBranch: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/delivery/keep`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+
+  updateSplitBranch: (id: string, body: { oneBranch?: boolean; clearBranch?: boolean }) =>
+    fetch(apiUrl(`/api/sessions/${id}/roadmap/branch`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => json<SplitRoadmap>(r)),
+
   getTeamStatus: (id: string, team: TeamKind = 'coding') =>
     fetch(apiUrl(`/api/sessions/${id}/${team}/team`)).then((r) => json<{ running: boolean }>(r)),
 
