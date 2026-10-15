@@ -10,7 +10,7 @@
 
 ## Why "Riff"?
 
-Riff is named for its maker, **Rifaz Iqbal**. It takes the "Rif" in Rifaz, and it describes what a good meeting is: people riffing on an idea until it takes shape. Most meeting tools stop at the notes. Riff keeps going and carries the idea through requirements, plan, code and QA.
+It describes what a good meeting is: people riffing on an idea until it takes shape. Most meeting tools stop at the notes. Riff keeps going and carries the idea through requirements, plan, code and QA.
 
 ## What it does
 
