@@ -3,7 +3,7 @@ import { baseBranchFor } from '../../apps/apps.js';
 import { diffBaseFor } from '../../sessions/shared-branch.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession } from '../../sessions/session-store.js';
 import type { QaCheckCommand, QaReviewerStatus, QaTeamCheck } from '../../sessions/session.js';
-import { createQaExecutors } from '../tool-defs/qa-tools.js';
+import { createQaExecutors, sessionCheckCache } from '../tool-defs/qa-tools.js';
 import type { AgentEvent } from '../sdk-client.js';
 import type { TeamEvent } from './coding-team.js';
 import { runQaReviewerAgent } from './qa-reviewer-agent.js';
@@ -183,6 +183,9 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     // The runner helper may shorten a failing log; it's logged, but has no
     // chat of its own to show up in.
     helperContext: { sessionId, stage: 'qa', record: async () => {} },
+    checkCache: sessionCheckCache(session.id),
+    checkRunBy: 'QA',
+    reuseChecks: true,
   });
   const setCheck = async (command: QaCheckCommand, status: QaTeamCheck['status'], output: string | null = null) => {
     await mutateSession(sessionId, (s) => {

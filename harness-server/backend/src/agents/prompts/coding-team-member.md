@@ -63,15 +63,17 @@ don't tell you enough.
 
 <!-- nav -->
 Beyond that, find code from the docs down, as above: `search_docs` for
-where it lives, then `search_code`, `outline_file`, and only then a ranged
-`read_file`. Put
+where it lives, then `search_code`, and only then `read_file` of just the
+part you need (`symbol` when you know its name, else `outline_file` and a
+range). Put
 independent calls in one message, and all of a file's changes in one
 `edit_file` call (`edits`). If
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
 <!-- nav: wayfinding -->
 Find code from the map down, as above: `MAP.md`, the domain's `DOMAIN.md`
-and its Files section, `outline_file`, and only then a ranged `read_file`.
+and its Files section, and only then `read_file` of just the part you need
+(`symbol` when you know its name, else `outline_file` and a range).
 `search_code` without a glob starts in your owned paths. Put independent
 calls in one message, and all of a file's changes in one `edit_file` call
 (`edits`). Regenerate the Files section of the domains you own

@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import type { TranscriptEntry } from '../sessions/session.js';
-import { exportedNames } from '../architecture/wayfinding-audit.js';
 import { commitLogAgainstBase, diffStatAgainstBase, shortStatus } from '../repo/git.js';
+import { describeFiles } from './describe-files.js';
 import { generateLocal } from './local-llm.js';
 import type { AgentEvent } from './sdk-client.js';
+import { renderWorkingSet } from './working-set.js';
 
 // A coding conversation re-sends its whole context on every tool step, so
 // cost grows with (steps × context). Rather than let one conversation run
@@ -28,8 +27,11 @@ export class ContextLog {
 
   record(event: AgentEvent): void {
     if (event.type === 'assistant_text') this.entries.push({ role: 'assistant', text: event.text });
-    else if (event.type === 'tool_call') this.entries.push({ role: 'tool_call', toolName: event.name, toolInput: event.input });
-    else if (event.type === 'tool_result') this.entries.push({ role: 'tool_result', toolResult: event.content, isError: event.isError });
+    else if (event.type === 'tool_call') {
+      this.entries.push({ role: 'tool_call', toolName: event.name, toolInput: event.input, toolCallId: event.toolCallId });
+    } else if (event.type === 'tool_result') {
+      this.entries.push({ role: 'tool_result', toolResult: event.content, isError: event.isError, toolCallId: event.toolCallId });
+    }
   }
 
   reset(): void {
@@ -141,8 +143,6 @@ function filesTouched(entries: ContextEntry[]): { changed: string[]; read: strin
   };
 }
 
-const CODE_FILE = /\.(?:[cm]?[jt]sx?)$/;
-const MAX_DESCRIBED_FILES = 20;
 
 /** The paths `git status --short` lists, a rename's new name. */
 export function statusPaths(status: string): string[] {
@@ -151,25 +151,6 @@ export function statusPaths(status: string): string[] {
     .filter((line) => line.length > 3 && !line.startsWith(' D') && !line.startsWith('D '))
     .map((line) => line.slice(3).split(' -> ').pop()!.replace(/^"|"$/g, ''))
     .filter((p) => !p.endsWith('/'));
-}
-
-/**
- * `- path (N lines): exports` for each file, so a fresh conversation knows
- * what it already wrote without reading it back in full (a restarted
- * engineer re-read every file it had written, session a58b69ad).
- */
-function describeFiles(repoRoot: string, files: string[]): string[] {
-  return files.slice(0, MAX_DESCRIBED_FILES).map((file) => {
-    let source: string;
-    try {
-      source = readFileSync(path.join(repoRoot, file), 'utf8');
-    } catch {
-      return `- ${file}`;
-    }
-    const lines = source.split('\n').length;
-    const names = CODE_FILE.test(file) ? exportedNames(source) : [];
-    return `- ${file} (${lines} lines)${names.length ? `: ${names.slice(0, 10).join(', ')}${names.length > 10 ? ', …' : ''}` : ''}`;
-  }).concat(files.length > MAX_DESCRIBED_FILES ? [`- … ${files.length - MAX_DESCRIBED_FILES} more`] : []);
 }
 
 export interface HandoffParams {
@@ -182,6 +163,8 @@ export interface HandoffParams {
   checklist?: { id: string; title: string; status: string }[] | null;
   // The agent has `recall` (helpers/memory/): point it there for files it read.
   recall?: boolean;
+  // Decisions the new conversation must not make again, e.g. build_solo.
+  decided?: string;
 }
 
 export async function buildHandoff(params: HandoffParams): Promise<string> {
@@ -224,16 +207,20 @@ export async function buildHandoff(params: HandoffParams): Promise<string> {
   // restarted run has no conversation, only the files.
   const changedFiles = [...new Set([...changed, ...statusPaths(status)])];
   if (changedFiles.length > 0) {
-    parts.push(
-      `## Files you changed\n\nWhat each exports is below; outline_file one and read_file only the range you'll change, ` +
-        `rather than reading it whole.\n\n${describeFiles(repoRoot, changedFiles).join('\n')}`
-    );
+    const howToRead = params.recall
+      ? '`recall` the lines you need (it has what you wrote), or outline_file one and read_file only the range ' +
+        "you'll change, rather than reading it whole."
+      : "outline_file one and read_file only the range you'll change, rather than reading it whole.";
+    parts.push(`## Files you changed\n\nWhat each exports is below; ${howToRead}\n\n${describeFiles(repoRoot, changedFiles).join('\n')}`);
   }
+  const workingSet = renderWorkingSet(repoRoot, entries);
   if (read.length > 0) {
     const heading = params.recall
       ? '## Files you read (not changed): `recall` what you need from them instead of reading them again'
       : '## Files you read (not changed)';
     parts.push(`${heading}\n\n${read.slice(0, 40).map((p) => `- ${p}`).join('\n')}`);
   }
+  if (params.decided) parts.push(`## Decided\n\n${params.decided}`);
+  if (workingSet) parts.push(workingSet);
   return parts.join('\n\n');
 }

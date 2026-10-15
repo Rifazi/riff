@@ -85,6 +85,11 @@ full; read the sections you need.
      passes" still goes back with these, so never leave an actionable
      observation only in the report body. Same format as
      `blockingFindings`. Skip pure taste with nothing to do.
+   - Grade each finding once, for good. Anything that breaks an acceptance
+     criterion or a check is blocking now, however small; a note is
+     something the branch could ship with. A later pass won't turn a note
+     into a blocker unless it breaks a criterion, so never park a
+     criterion failure in the notes.
    - A markdown body following this structure. Keep it short — the human
      skims it and every word costs tokens:
 

@@ -33,7 +33,8 @@ import { diffBaseFor } from '../sessions/shared-branch.js';
 import { branchChanges } from '../repo/git.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
-import { compactQaFindings } from '../sessions/qa-findings.js';
+import { rereviewBrief, soloRereview, type QaRoundRecord } from '../sessions/qa-loop.js';
+import { previousPassRef, recordQaRound, rereviewContext } from '../sessions/qa-rounds.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
@@ -54,7 +55,7 @@ import { qaHandoffSection } from './tool-defs/qa-notes-tool.js';
 import { createAssignQaTeamTool } from './tool-defs/qa-team-tools.js';
 import { createAssignQaTeamToolClaude } from './tool-defs-claude/qa-team-tools.js';
 import { formatQaTeamFindings } from './team/qa-review-areas.js';
-import type { CheckCommand } from './tool-defs/qa-tools.js';
+import { sessionCheckCache, type CheckCommand } from './tool-defs/qa-tools.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/qa-agent.md');
 // What QA reads the branch with — shared by the QA lead and its reviewers
@@ -89,13 +90,22 @@ export interface ReviewToolDeps {
   helperContext: HelperContext;
   /** A QA-team reviewer's focus paths: its no-path get_diff covers only these (createQaExecutors). */
   focusPaths?: string[];
+  /** On a re-review, the commit the last pass reviewed: get_diff defaults to the fix since it. */
+  sinceRef?: { ref: string; pass: number } | null;
   /** Whether classify_text is turned on (classifierToolEnabled). */
   classifier: boolean;
 }
 
 /** The read-only review tools (REVIEW_TOOL_NAMES, plus audit_architecture when the app has one) for either engine. */
 export function createReviewTools(deps: ReviewToolDeps) {
-  const qaDeps = { repoRoot: deps.repoRoot, baseBranch: deps.baseBranch, checkCommands: deps.checkCommands, helperContext: deps.helperContext, focusPaths: deps.focusPaths };
+  const qaDeps = {
+    repoRoot: deps.repoRoot,
+    baseBranch: deps.baseBranch,
+    checkCommands: deps.checkCommands,
+    helperContext: deps.helperContext,
+    focusPaths: deps.focusPaths,
+    sinceRef: deps.sinceRef ?? undefined,
+  };
   const architectureDeps = { app: deps.app, repoRoot: deps.repoRoot, scope: true, branch: deps.branch, baseBranch: deps.baseBranch, allowRegenerate: false };
   // search_code without a glob starts in the domains the branch touched (read once: QA doesn't change the branch).
   let changed: Promise<string[]> | null = null;
@@ -180,18 +190,20 @@ export async function runQaAgentTurn(
   // A rerun after coding fixes starts a fresh QA conversation rather than
   // resuming the old one: that one's diffs, file reads and test logs are of
   // the pre-fix branch — stale, and re-billed on every step. What carries
-  // over is the previous report's findings, in the system prompt below.
-  let previousFindings: string | null = null;
+  // over is every earlier pass's findings and what the fix changed, in the
+  // system prompt below (sessions/qa-loop.ts rereviewBrief).
+  const app = await getApp(session.appId);
+  let previousPasses: string | null = null;
+  let review: { rounds: QaRoundRecord[]; fixFiles: string[] | null } | null = null;
   if (session.qaRerunPending) {
-    if (session.qaReportPath) {
-      try {
-        previousFindings = compactQaFindings(
-          await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8'),
-        );
-      } catch {
-        // report unreadable — the fresh pass just reviews from scratch
-      }
-    }
+    review = await rereviewContext(session, app.repoRoot);
+    const { rounds, fixFiles } = review;
+    const pass = (rounds[rounds.length - 1]?.pass ?? session.qaPass) + 1;
+    if (rounds.length > 0) previousPasses = rereviewBrief(rounds, fixFiles, pass);
+    // Rounds rebuilt from older sessions are frozen now, with the report they ended on.
+    session.qaRounds = rounds;
+    session.qaPass = pass;
+    await updateSession(session.id, { qaRounds: rounds, qaPass: pass });
     session.histories.qa = [];
     session.claudeSessionIds.qa = null;
     await setHistory(session.id, 'qa', []);
@@ -216,7 +228,11 @@ export async function runQaAgentTurn(
   let prompt = await applyAttachments(session.id, 'qa', userMessage, attachments);
   if (relayFindings) prompt = `${formatQaTeamFindings(team!)}\n\n---\n\n${prompt}`;
 
-  const app = await getApp(session.appId);
+  // A re-review small enough to do alone has no assign_qa_team: a team re-reads
+  // the whole branch, and the fix changed a few files (sessions/qa-loop.ts).
+  if (!review && session.qaPass > 1) review = await rereviewContext(session, app.repoRoot);
+  const solo = review ? soloRereview(review.rounds, review.fixFiles) : false;
+  const sinceRef = previousPassRef(session);
   const { provider, model } = await getRoleModelConfig('qa');
   const helperContext = stageHelperContext(session.id, 'qa');
 
@@ -237,13 +253,8 @@ export async function runQaAgentTurn(
     systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
     systemPrompt += `\n\n# Session\n\nBranch to review: ${session.branch}`;
     systemPrompt += qaHandoffSection(session.qaHandoffNotes);
-    if (previousFindings) {
-      systemPrompt +=
-        `\n\n# Your previous QA pass on this branch\n\nThe coding agent has since pushed fixes for these. Confirm ` +
-        `each one is actually resolved, but still do the full review above — every acceptance criterion, lint ` +
-        `and tests — since the fixes may have broken something else.\n\n${previousFindings}`;
-    }
-    if (!session.qaTeam) systemPrompt += QA_TEAM_FIRST_TURN_NOTE;
+    if (previousPasses) systemPrompt += previousPasses;
+    if (!session.qaTeam && !solo) systemPrompt += QA_TEAM_FIRST_TURN_NOTE;
   }
   if (session.qaTeam) systemPrompt += qaTeamSection(session.qaTeam);
 
@@ -254,9 +265,11 @@ export async function runQaAgentTurn(
 
   // Each result's tool, so the chat can show a helper's result as its own card.
   const toolNames = new Map<string, string>();
+  let wroteReport = false;
   const wrappedOnEvent = (event: AgentEvent) => {
     onEvent(event);
     if (event.type === 'tool_call') toolNames.set(event.toolCallId, event.name);
+    if (event.type === 'tool_result' && !event.isError && toolNames.get(event.toolCallId)?.endsWith('write_qa_report')) wroteReport = true;
     void persistEvent(session.id, event, event.type === 'tool_result' ? toolNames.get(event.toolCallId) : undefined);
   };
 
@@ -270,16 +283,25 @@ export async function runQaAgentTurn(
     checkCommands: app.checkCommands,
     helperContext,
     classifier: await classifierToolEnabled(),
+    sinceRef,
   });
   const reportInfo = { sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id, branch, requirementsPath };
-  const checkDeps = { repoRoot: app.repoRoot, baseBranch: diffBaseFor(session, app), checkCommands: app.checkCommands, helperContext };
+  const checkDeps = {
+    repoRoot: app.repoRoot,
+    baseBranch: diffBaseFor(session, app),
+    checkCommands: app.checkCommands,
+    helperContext,
+    checkCache: sessionCheckCache(session.id),
+    checkRunBy: 'QA',
+    reuseChecks: true,
+  };
 
   if (provider === 'claude') {
     const tools = [
       ...reviewTools.claude(),
       createQaToolsClaude(checkDeps).runCheckedCommandToolClaude,
       createWriteQaReportToolClaude(reportInfo),
-      createAssignQaTeamToolClaude({ sessionId: session.id }),
+      ...(solo ? [] : [createAssignQaTeamToolClaude({ sessionId: session.id })]),
       askMultipleChoiceToolClaude,
       askQuestionToolClaude,
     ];
@@ -288,7 +310,7 @@ export async function runQaAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: [...TOOL_NAMES, ...reviewTools.names.filter((n) => !REVIEW_TOOL_NAMES.includes(n))],
+      toolNames: [...TOOL_NAMES.filter((n) => !(solo && n === 'assign_qa_team')), ...reviewTools.names.filter((n) => !REVIEW_TOOL_NAMES.includes(n))],
       model,
       resumeSessionId: session.claudeSessionIds.qa,
       prompt,
@@ -313,7 +335,7 @@ export async function runQaAgentTurn(
       ...delegateToolEntry(null, session.histories.qa),
       run_checked_command: createQaTools(checkDeps).runCheckedCommandTool,
       write_qa_report: createWriteQaReportTool(reportInfo),
-      assign_qa_team: createAssignQaTeamTool({ sessionId: session.id }),
+      ...(solo ? {} : { assign_qa_team: createAssignQaTeamTool({ sessionId: session.id }) }),
       ask_multiple_choice: askMultipleChoiceTool,
       ask_question: askQuestionTool,
     };
@@ -338,10 +360,11 @@ export async function runQaAgentTurn(
     ? path.relative(config.harnessRoot, qaReportFilePath)
     : session.qaReportPath;
 
-  return updateSession(session.id, {
+  const updated = await updateSession(session.id, {
     qaReportPath,
     qaStatus: qaReportPath ? (session.qaStatus ?? 'pending-review') : session.qaStatus,
   });
+  return wroteReport ? recordQaRound(updated, app.repoRoot) : updated;
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {

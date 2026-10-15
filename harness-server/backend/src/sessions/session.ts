@@ -1,3 +1,4 @@
+import type { QaRoundRecord } from './qa-loop.js';
 import type { ModelMessage } from 'ai';
 import type { TokenUsage } from '../agents/sdk-client.js';
 import type { ThemeDefinition } from '../themes/presets.js';
@@ -202,6 +203,12 @@ export interface QaNote {
   at: string;
 }
 
+export interface FixScope {
+  paths: string[];
+  widened: { paths: string[]; reason: string; at: string }[];
+  pass: number;
+}
+
 export interface CodingContext {
   stepId: string | null;
   startEntryId: string | null;
@@ -361,6 +368,17 @@ export interface SessionRecord {
   qaTeam: QaTeamState | null;
   // Earlier QA rounds, oldest first — a rerun after fixes retires the last one.
   qaTeamHistory: QaTeamState[];
+  // Every QA pass's findings and the commit it reviewed (sessions/qa-rounds.ts),
+  // so a branch that keeps coming back from QA can be told apart from one that
+  // just needs another fix (qa-loop.ts). Older sessions have none; their
+  // passes are rebuilt from qaTeamHistory when needed.
+  qaRounds: QaRoundRecord[];
+  // Which QA pass is running: 1 for the first review, +1 per re-review.
+  qaPass: number;
+  // During a QA fix: the files QA's findings named, which the coder's write
+  // tools are fenced to (agents/fix-scope.ts), and every widening with its
+  // reason. Set on the fix turn, cleared when coding is approved again.
+  fixScope: FixScope | null;
   // How the reviewed branch was shipped (repo/delivery.ts): merged into the
   // base branch for a local-only repo, or pushed with an MR/PR opened.
   // 'kept' = a split part left on its branch for the next part to continue

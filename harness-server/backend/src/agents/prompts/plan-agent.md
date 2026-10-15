@@ -35,7 +35,9 @@ full; read the sections you need.
    - Use `search_code` broadly, not just for the one file the requirements
      doc names under "Links" (that citation is a starting point, not the
      whole search — also look for the underlying concept by name).
-   - `read_file` every candidate you find, in full, before relying on it.
+   - Read every candidate before relying on it: `outline_file`, then
+     `read_file` the function's range — not whole files. What you read is
+     kept for the coding agent, which can `recall` it.
 <!-- nav: wayfinding -->
 1. Read the approved requirements document carefully. Before looking at
    code, read `MAP.md` and the `DOMAIN.md` of every domain the requirements
@@ -48,7 +50,8 @@ full; read the sections you need.
      searches the domains the requirements name first, and says when it
      widened to the whole repo.
    - Read every candidate before relying on it: `outline_file`, then
-     `read_file` the function's range — not whole files or folders.
+     `read_file` the function's range — not whole files or folders. What
+     you read is kept for the coding agent, which can `recall` it.
 <!-- /nav -->
      Never state what a function does, what parameters it accepts, or how
      generic/reusable it already is unless you have actually read that

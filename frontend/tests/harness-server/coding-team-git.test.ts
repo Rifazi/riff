@@ -7,6 +7,7 @@ import path from 'node:path';
 import { validateWorkstreams } from '../../../harness-server/backend/src/agents/team/workstreams';
 import {
   committedPathsOutside,
+  copyLocalEnvFiles,
   discardPaths,
   mergeBranch,
   stageAndCommit,
@@ -147,5 +148,25 @@ describe('team git guards', () => {
     git('checkout', '--', 'src/ui/b.ts');
     expect((await mergeBranch(repo, 'member', 'chore: merge', 'feature')).ok).toBe(true);
     expect(git('log', '-1', '--format=%s', 'feature')).toBe('chore: merge');
+  });
+
+  // A worktree has only tracked files, so a build step reading .env failed there.
+  test('a worktree gets the repo\'s ignored env files', async () => {
+    write('.gitignore', '.env\n.env.*\nnode_modules/\n');
+    write('client/.gitkeep', '');
+    git('add', '-A');
+    git('commit', '-qm', 'ignore');
+    write('.env', 'COUNTRY=US\n');
+    write('client/.env.local', 'X=1\n');
+    write('node_modules/pkg/.env', 'nope\n');
+    const tree = path.join(mkdtempSync(path.join(tmpdir(), 'team-wt-')), 'wt');
+    git('worktree', 'add', '-q', '-b', 'member', tree, 'feature');
+    writeFileSync(path.join(tree, 'client', '.env.local'), 'mine\n');
+    expect((await copyLocalEnvFiles(repo, tree)).sort()).toEqual(['.env']);
+    expect(readFileSync(path.join(tree, '.env'), 'utf8')).toBe('COUNTRY=US\n');
+    expect(readFileSync(path.join(tree, 'client', '.env.local'), 'utf8')).toBe('mine\n');
+    expect(existsSync(path.join(tree, 'node_modules'))).toBe(false);
+    expect(await copyLocalEnvFiles(repo, tree)).toEqual([]);
+    expect(git('-C', tree, 'status', '--porcelain')).toBe('');
   });
 });

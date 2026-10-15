@@ -2,11 +2,13 @@ import path from 'node:path';
 import { tool } from 'ai';
 import { z } from 'zod';
 import { mutateSession, getSession } from '../../sessions/session-store.js';
-import { GitPreconditionError, stageAndCommit } from '../../repo/git.js';
+import { GitPreconditionError, stageAndCommit, worktreeFingerprint } from '../../repo/git.js';
 import { assertWritable } from './file-tools.js';
 import { commitMessageProblem } from './git-tools.js';
 import { formatFiles } from '../helpers/format/format.js';
 import type { HelperContext } from '../helpers/helper.js';
+import { checkSucceeded } from '../pre-qa-gate-core.js';
+import type { CheckCache } from './qa-tools.js';
 
 // The end of every plan step used to take three to five requests — format,
 // commit, lint, test, mark done — each re-reading the whole context. This
@@ -44,11 +46,18 @@ export interface FinishStepDeps {
   helperContext?: HelperContext;
   // run_checked_command's execute, so failures get the runner helper's report.
   runCheck: (command: 'lint' | 'test') => Promise<string>;
+  // The run_checked_command results the agent already has (qa-tools.ts).
+  checkCache?: CheckCache;
 }
 
 /** Whether a run_checked_command report says the script passed. */
 export function checkPassed(report: string): boolean {
-  return /\bsucceeded\.$/.test(report.split('\n')[0].trim());
+  return checkSucceeded(report);
+}
+
+/** A check's report when it already passed on this code. */
+export function alreadyPassed(command: 'lint' | 'test'): string {
+  return `${command} succeeded. (It passed on this same code when you ran it, so it wasn't run again.)`;
 }
 
 /** The finish_step reply when the checks fail: the commit stands, the step stays open. */
@@ -73,6 +82,10 @@ export function createFinishStepExecute(deps: FinishStepDeps) {
     if (!branch) throw new Error('There is no branch yet — create it with git_create_branch first. Nothing done.');
     const absolute = files.map((f) => assertWritable(f, deps.repoRoot, deps.writablePaths));
 
+    // The code as the agent last saw it: checks that passed on exactly this
+    // aren't run again below. Taken before formatting, which only restyles.
+    const fingerprint = deps.checkCache ? await worktreeFingerprint(deps.repoRoot).catch(() => null) : null;
+
     // 1. Format what still exists (a deleted file is only committed).
     const formatted = await formatFiles(deps.repoRoot, absolute, deps.helperContext);
     if (!formatted.ok) return `Nothing committed: prettier failed (usually a syntax error).\n\n${formatted.output}`;
@@ -90,9 +103,11 @@ export function createFinishStepExecute(deps: FinishStepDeps) {
     }
 
     // 3. Lint, then the unit tests (they'd fail for the same reason otherwise).
-    const lint = await deps.runCheck('lint');
+    const check = async (command: 'lint' | 'test') =>
+      fingerprint && deps.checkCache!.passedOn(command, fingerprint) ? alreadyPassed(command) : deps.runCheck(command);
+    const lint = await check('lint');
     if (!checkPassed(lint)) return checksFailedReply(stepId, committed, 'lint', lint);
-    const test = await deps.runCheck('test');
+    const test = await check('test');
     if (!checkPassed(test)) return checksFailedReply(stepId, committed, 'test', test);
 
     // 4. Done, and the next pending step (a team member's own) is started.

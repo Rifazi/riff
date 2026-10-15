@@ -3,10 +3,10 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, TriangleAlert, Wrench, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Repeat, TriangleAlert, Wrench, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
-import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
+import type { AttachmentInput, QaBlockerKind, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS, QA_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
 import { teamStatusKey, useTeamBoard } from '@/lib/dev-sessions/useTeamBoard';
@@ -97,6 +97,47 @@ function QaVerdict({ markdown }: { markdown: string }) {
   );
 }
 
+const BLOCKER_KIND: Record<QaBlockerKind, string> = {
+  repeated: 'came back',
+  'was-note': 'was a note',
+  'in-fix': 'in the fix',
+  missed: 'new',
+};
+
+// Shown when QA keeps sending the branch back (harness-server sessions/qa-loop.ts):
+// why, per blocker, and what to do instead of another full round.
+function QaLoopNotice({ sessionId, version }: { sessionId: string; version: string }) {
+  const { data } = useQuery({
+    queryKey: ['qa-loop', sessionId, version],
+    queryFn: () => api.getQaLoop(sessionId),
+  });
+  const loop = data?.loop;
+  if (!loop?.looping) return null;
+  return (
+    <Notice tone="amber">
+      <div className="flex items-center gap-2 font-semibold">
+        <Repeat className="h-4 w-4" /> This branch keeps coming back from QA
+      </div>
+      <div className="mt-1 text-xs">{loop.reasons.join(' ')}</div>
+      <ul className="mt-2 space-y-1 text-xs">
+        {loop.blockers.map((b, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <Badge variant="outline" className="shrink-0">
+              {BLOCKER_KIND[b.kind]}
+            </Badge>
+            <span className="line-clamp-2">{b.text}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 text-xs">
+        {loop.smallFix
+          ? 'What’s left is small. Sending it back runs one solo fix and a QA pass on just that fix, or fix it by hand and mark it reviewed.'
+          : 'Read the report before sending it back: the same areas keep failing, so the requirements or the plan may be what’s wrong.'}
+      </div>
+    </Notice>
+  );
+}
+
 export function QaStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
   const queryClient = useQueryClient();
@@ -112,6 +153,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
     queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] });
+    queryClient.invalidateQueries({ queryKey: ['qa-loop', sessionId] });
     queryClient.invalidateQueries({ queryKey: teamStatusKey('qa', sessionId) });
   };
 
@@ -184,7 +226,9 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // A part kept on its branch for the next one can still be sent back.
   const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed' && session.delivery.kind !== 'kept');
   const markdown = report?.markdown ?? null;
-  const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
+  // The report on file is an earlier pass's until this pass writes its own (harness-server qaReportIsCurrent).
+  const staleReport = Boolean(markdown) && report?.current === false;
+  const qaResult = markdown && !staleReport ? parseFrontmatterField(markdown, 'result') : null;
 
   const busy = streaming || teamActive;
   const canStartTeam =
@@ -250,14 +294,32 @@ export function QaStage({ session }: { session: SessionRecord }) {
           emptyText={teamActive ? 'Not written yet — the reviewers are still checking…' : 'Not written yet — QA is running…'}
           badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
           scrollFooter
-          notices={markdown && <QaVerdict markdown={markdown} />}
+          notices={
+            markdown && (
+              <div className="space-y-2">
+                {staleReport ? (
+                  <Notice tone="neutral">
+                    This is the last pass’s report. {AGENT.name} hasn’t written this pass’s yet, so it can’t be marked
+                    reviewed or sent back as findings.
+                  </Notice>
+                ) : (
+                  <>
+                    <QaVerdict markdown={markdown} />
+                    <QaLoopNotice sessionId={sessionId} version={session.updatedAt} />
+                  </>
+                )}
+              </div>
+            )
+          }
           footer={
             <>
               <ApprovalBar
                 approveLabel={reviewed ? 'Reviewed' : 'Mark reviewed'}
                 onApprove={() => approveMutation.mutate()}
-                approveDisabled={reviewed || !session.qaReportPath || busy}
-                approveDisabledReason={!session.qaReportPath ? 'No QA report yet' : undefined}
+                approveDisabled={reviewed || !session.qaReportPath || staleReport || busy}
+                approveDisabledReason={
+                  !session.qaReportPath ? 'No QA report yet' : staleReport ? 'This pass hasn’t written its report yet' : undefined
+                }
                 busy={approveMutation.isPending}
                 onReject={() => rejectMutation.mutate()}
                 rejectDisabled={reviewed || busy}

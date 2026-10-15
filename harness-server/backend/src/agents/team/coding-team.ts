@@ -3,7 +3,14 @@ import path from 'node:path';
 import { getApp } from '../../apps/apps-store.js';
 import { baseBranchFor } from '../../apps/apps.js';
 import { checkoutSharedBranch, sharedBranchFor } from '../../sessions/shared-branch.js';
-import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession, updateSession } from '../../sessions/session-store.js';
+import {
+  appendTeamTranscriptEntry,
+  appendTranscriptEntry,
+  getSession,
+  listSessions,
+  mutateSession,
+  updateSession,
+} from '../../sessions/session-store.js';
 import { getRoleModelConfig } from '../../settings/settings-store.js';
 import { lightModelFor, planStepEfforts } from '../model-routing.js';
 import type {
@@ -20,6 +27,7 @@ import {
   commitAll,
   commitCount,
   committedPathsOutside,
+  copyLocalEnvFiles,
   createBranch,
   discardPaths,
   hasUncommittedChanges,
@@ -30,7 +38,17 @@ import {
 import { runCodingAgentTurn, suggestedBranchName } from '../coding-agent.js';
 import type { AgentEvent } from '../sdk-client.js';
 import { runWorkstreamAgent } from './workstream-agent.js';
-import { fallbackReport, leadReviewMessage, leadWrapUpMessage, roundOutcome, startable, stuckDependencies } from './lead-core.js';
+import {
+  autoMergedNote,
+  autoMergeProblem,
+  fallbackReport,
+  leadReviewMessage,
+  leadWrapUpMessage,
+  roundOutcome,
+  startable,
+  stuckDependencies,
+} from './lead-core.js';
+import { createMergeWorkstreamExecute } from '../tool-defs/team-lead-tools.js';
 import { changedExports } from './changed-exports.js';
 import {
   isTeamRunning,
@@ -167,6 +185,8 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       const modules = path.join(app.repoRoot, 'node_modules');
       const linked = path.join(worktreePath, 'node_modules');
       if (existsSync(modules) && !existsSync(linked)) await fs.symlink(modules, linked, 'dir');
+      // ...and its local env files, which a checkout doesn't have.
+      await copyLocalEnvFiles(app.repoRoot, worktreePath).catch(() => []);
 
       // Already built (e.g. cut off by a restart after its last commit):
       // goes straight back to the lead.
@@ -266,15 +286,23 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     });
   };
 
+  // Members whose run ended with changes the runner had to commit or throw
+  // away, and members already considered for an automatic merge.
+  const leftUncommitted = new Set<string>();
+  const autoTried = new Set<string>();
+
   // Leaves the branch clean and inside its owned paths for the lead to
   // review, or fails it with why. A run that errored (out of steps or
   // usage) still has its work committed, so the lead can judge what's there.
   const prepareForLead = async (member: CodingTeamMember, worktreePath: string, runError: string | null) => {
+    leftUncommitted.delete(member.id);
+    autoTried.delete(member.id);
     // Checks and formatters can touch files the member doesn't own (lint
     // --fix, snapshots, a lockfile). Those belong to a teammate or nobody,
     // and would collide at merge, so they're thrown away, not committed.
     const stray = await uncommittedPathsOutside(worktreePath, member.ownedPaths);
     if (stray.length) {
+      leftUncommitted.add(member.id);
       await discardPaths(worktreePath, stray);
       await appendTeamTranscriptEntry(sessionId, member.id, {
         role: 'system',
@@ -282,6 +310,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
       });
     }
     if (await hasUncommittedChanges(worktreePath)) {
+      leftUncommitted.add(member.id);
       await commitAll(worktreePath, `chore(${member.id}): commit remaining workstream changes`, member.ownedPaths);
     }
     const commits = await commitCount(worktreePath, sessionBranch, member.branch);
@@ -309,6 +338,37 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   };
 
   // --- the lead ---------------------------------------------------------
+
+  // A finished branch that needs no review (lead-core.ts autoMergeProblem)
+  // is merged here, the way the lead's merge_workstream would, and he hears
+  // about it in his next turn instead of reviewing it. One that can't merge
+  // cleanly (a conflict, a dirty checkout) goes to him as before.
+  const mergeWorkstream = createMergeWorkstreamExecute({ sessionId, repoRoot: app.repoRoot });
+  const autoMerged: string[] = [];
+  let unreviewed: string[] = [];
+  const tryAutoMerge = async (ids: string[]): Promise<string[]> => {
+    const latest = (await getSession(sessionId))!;
+    const stepStatus = new Map((latest.codingPlan ?? []).map((st) => [st.id, st.status]));
+    const merged: string[] = [];
+    for (const id of ids) {
+      if (autoTried.has(id)) continue;
+      autoTried.add(id);
+      const m = latest.codingTeam?.members.find((x) => x.id === id);
+      if (!m || autoMergeProblem(m, stepStatus, leftUncommitted.has(id)) !== null) continue;
+      try {
+        await mergeWorkstream({ id });
+      } catch {
+        continue;
+      }
+      merged.push(id);
+      await setStatus(id, 'merged', 'Merged without review: every step passed lint and tests, and its report flagged nothing.');
+      await appendTranscriptEntry(sessionId, 'coding', {
+        role: 'system',
+        text: `Merged ${m.title} (${m.branch}) into ${sessionBranch} without a review: every step passed lint and tests, its report flagged nothing, and it merged cleanly.`,
+      });
+    }
+    return merged;
+  };
 
   // A lead turn that errored (out of usage, no key) won't do better on the
   // next update, so the run stops handing him work and leaves it for the human.
@@ -470,12 +530,26 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     }
 
     if (!lead && !leadBroken && forLead.size > 0) {
+      const merged = await tryAutoMerge([...forLead]);
+      if (merged.length) {
+        for (const id of merged) forLead.delete(id);
+        autoMerged.push(...merged);
+        unreviewed.push(...merged);
+        // Its dependents can start, and the rest are looked at with fresh state.
+        continue;
+      }
+    }
+
+    if (!lead && !leadBroken && forLead.size > 0) {
       const ids = [...forLead];
       forLead.clear();
       const reminder = ids.every((id) => reminded.has(id))
         ? `You haven't merged, sent back or dropped ${ids.join(', ')} yet — decide now.\n\n`
         : '';
-      const message = reminder + leadReviewMessage(members, ids, sessionBranch, await commitsAhead(members));
+      const merged = autoMergedNote(members, unreviewed);
+      unreviewed = [];
+      const message =
+        reminder + leadReviewMessage(members, ids, sessionBranch, await commitsAhead(members)) + (merged ? `\n\n${merged}` : '');
       lead = (async () => {
         await leadTurn(message);
         const after = (await getSession(sessionId))!.codingTeam!.members;
@@ -520,7 +594,7 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
 
   // Everything merged: the lead checks the integrated branch as a whole.
   if (status === 'done' && !leadBroken && settled.some((m) => m.status === 'merged')) {
-    await leadTurn(leadWrapUpMessage(settled, sessionBranch));
+    await leadTurn(leadWrapUpMessage(settled, sessionBranch, autoMerged));
   }
 }
 

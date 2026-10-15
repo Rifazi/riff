@@ -67,6 +67,17 @@ export function rememberRead(deps: ReadMemoryDeps | null, filePath: string, read
   void recordRead(deps.sessionId, { view: deps.view, path: filePath, fileHash: read.fileHash, start, lines, reader: deps.reader });
 }
 
+/**
+ * Records a file the agent just wrote or edited, whole, as if read: it knows
+ * what it wrote, but after a context reset `recall` answered "Not in memory"
+ * for those files and the agent read every one of them again.
+ */
+export function rememberWrite(deps: ReadMemoryDeps | null, filePath: string, content: string): void {
+  if (!deps) return;
+  const fileHash = createHash('sha1').update(content).digest('hex');
+  void recordRead(deps.sessionId, { view: deps.view, path: filePath, fileHash, start: 1, lines: content.split('\n'), reader: deps.reader });
+}
+
 /** A paid read: remembered, and it cancels the saving of a recall it redoes. */
 export function notePaidRead(deps: ReadMemoryDeps | null, filePath: string, read: { text: string; fileHash: string }): void {
   if (!deps) return;

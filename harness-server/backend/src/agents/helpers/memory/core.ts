@@ -34,14 +34,14 @@ export const recallSchema = z.object({
 export type RecallInput = z.infer<typeof recallSchema>;
 
 export const recallDescription =
-  'Get the exact lines you need from files already read in this session, by you before a context reset or by a ' +
-  'teammate, without reading the file again. Returns the matching lines verbatim with path:line and whether the ' +
+  'Get the exact lines you need from files already read or written in this session (by you before a context ' +
+  'reset, by the plan agent, or by a teammate) without reading the file again. Returns the matching lines verbatim with path:line and whether the ' +
   'file has changed since it was read. Much cheaper than read_file for a file you have read before. If it says ' +
   'the lines are not in memory or the file changed, use read_file.';
 
 export const MEMORY_NOTE =
-  '\n\n# Read memory\n\nEvery file read in this session (by you, by earlier conversations of yours, and by your ' +
-  "teammates or engineers on their branches) is kept in memory. Before reading a file again, call `recall` with " +
+  '\n\n# Read memory\n\nEvery file read or written in this session (by you, by earlier conversations of yours, by ' +
+  "the plan agent, and by your teammates or engineers on their branches) is kept in memory. Before reading a file again, call `recall` with " +
   'what you need from it: it returns just those lines, verbatim. Use read_file for files nobody has read yet, and ' +
   'when recall says the lines are missing or changed.';
 

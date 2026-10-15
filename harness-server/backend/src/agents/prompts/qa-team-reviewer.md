@@ -21,3 +21,7 @@ where they differ:
   were given (`met` only if you verified it), plus blocking findings and
   actionable notes in the same one-line, file-and-fix format the report
   uses. Then end your turn with no further text.
+- A criterion with any gap is `not-met`, and the gap is a blocking
+  finding, not a note: a note is only for something the branch could ship
+  with. A gap parked in the notes comes back as a blocker on the next pass,
+  after a whole fix round has gone by.

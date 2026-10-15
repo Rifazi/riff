@@ -32,6 +32,8 @@ import {
   readQaResult,
 } from '../sessions/stage-actions.js';
 import { shouldKeepOnBranch } from '../sessions/shared-branch.js';
+import { loopStopReason, qaReportIsCurrent } from '../sessions/qa-loop.js';
+import { qaLoopFor } from '../sessions/qa-rounds.js';
 
 // Bridget, the coordinator, drives a session from requirements to a merge
 // request. Within a stage she keeps its agent going; once the stage's
@@ -183,9 +185,15 @@ async function tryShip(session: SessionRecord): Promise<Outcome> {
     return { kind: 'stop', reason: `Already delivered: ${session.delivery.detail}` };
   }
   if (session.qaStatus !== 'reviewed') {
-    if (!session.qaReportPath || session.qaRerunPending) return { kind: 'not-ready' };
+    // A report from an earlier pass says nothing about this one: the lead
+    // writes it up first (the wrap-up message below, for a team pass).
+    if (!qaReportIsCurrent(session)) return { kind: 'not-ready' };
     const result = await readQaResult(session);
-    if (result === 'fail') return { kind: 'stop', reason: 'QA failed the branch. Look at the report, then send it back for fixes or decide what to do.' };
+    if (result === 'fail') {
+      const loop = await qaLoopFor(session, (await getApp(session.appId)).repoRoot).catch(() => null);
+      if (loop?.looping) return { kind: 'stop', reason: loopStopReason(loop) };
+      return { kind: 'stop', reason: 'QA failed the branch. Look at the report, then send it back for fixes or decide what to do.' };
+    }
     if (result === 'pass-with-notes') {
       return { kind: 'stop', reason: 'QA passed with notes. Decide whether to send them back for fixes or ship as is.' };
     }

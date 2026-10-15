@@ -18,6 +18,8 @@ import { isTeamRunning, memberWorktree, wakeTeam } from '../team/team-state.js';
 import {
   dropProblem,
   isSettled,
+  mergeCommitMessage,
+  mergeFailureReason,
   mergeProblem,
   roundOutcome,
   sendBackProblem,
@@ -219,10 +221,10 @@ export function createMergeWorkstreamExecute(deps: TeamLeadDeps) {
       x.status = 'merging';
     });
     const merged = await withRepoLock(deps.repoRoot, () =>
-      mergeBranch(deps.repoRoot, m.branch, `chore: merge ${m.id} workstream — ${m.title}`, branch),
+      mergeBranch(deps.repoRoot, m.branch, mergeCommitMessage(m), branch),
     );
     if (!merged.ok) {
-      const reason = merged.error.split('\n')[0];
+      const reason = mergeFailureReason(merged.error);
       await setMember((x) => {
         x.status = m.status;
         x.note = `Merge failed: ${reason}`;

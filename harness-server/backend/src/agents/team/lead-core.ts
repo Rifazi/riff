@@ -65,6 +65,23 @@ export function mergeProblem(member: Member | undefined, id: string): string | n
   return null;
 }
 
+/**
+ * A workstream's merge commit message. The title goes in the body: a
+ * commit-msg hook (commitlint's 100-char header) refused a subject that
+ * carried it.
+ */
+export function mergeCommitMessage(member: Pick<Member, 'id' | 'title'>): string {
+  const subject = `merge ${member.id} workstream`;
+  return `chore: ${subject.length > 72 ? `${subject.slice(0, 71)}…` : subject}\n\n${member.title}`;
+}
+
+/** The line of a failed merge's output that says why: a hook's ✖ lines, else the first line. */
+export function mergeFailureReason(error: string): string {
+  const lines = error.split('\n').map((l) => l.trim()).filter(Boolean);
+  const marked = lines.filter((l) => /^(✖|error\b|fatal\b|CONFLICT\b)/i.test(l));
+  return (marked.length ? marked.slice(0, 3).join('; ') : (lines[0] ?? error)).slice(0, 300);
+}
+
 /** Why the lead can't send this member back now, or null. */
 export function sendBackProblem(member: Member | undefined, id: string): string | null {
   if (!member) return `There is no workstream "${id}" in this round.`;
@@ -99,6 +116,46 @@ export function dropProblem(members: Member[], ids: string[]): string | null {
     return `${orphans.map((m) => `"${m.id}"`).join(', ')} depend${orphans.length === 1 ? 's' : ''} on what you're dropping — drop ${orphans.length === 1 ? 'it' : 'them'} too.`;
   }
   return null;
+}
+
+// A checks line that doesn't plainly say lint and the tests passed.
+const WORRYING_CHECKS = /\b(fail|error|skip|couldn'?t|could not|cannot|can'?t|not run|unable|broken|flaky|todo|pending)/i;
+
+/**
+ * Why a finished workstream needs the lead's review instead of being merged
+ * straight away, or null when it can merge unreviewed: it finished every
+ * step through finish_step (so lint and the tests passed on its branch),
+ * filed a report that flags nothing and says the checks passed, was never
+ * sent back, and left nothing uncommitted. Jack's per-branch reviews were
+ * most of his turns (one ran 80 requests re-reviewing a branch), and his
+ * wrap-up still checks the merged whole.
+ */
+export function autoMergeProblem(member: Member, stepStatus: Map<string, string>, leftUncommitted: boolean): string | null {
+  if (member.status !== 'ready') return `it is ${member.status}`;
+  const r = member.report;
+  if (!r || r.fallback) return 'it filed no report';
+  if (member.sendBacks) return 'it was sent back, so the lead checks his feedback was done';
+  if (r.forLead.length) return 'its report flags something for the lead';
+  if (!r.checks.trim() || WORRYING_CHECKS.test(r.checks)) return "its report doesn't say lint and the tests passed";
+  const open = member.stepIds.filter((id) => stepStatus.get(id) !== 'done');
+  if (open.length) return `${open.join(', ')} ${open.length === 1 ? "wasn't" : "weren't"} finished with passing checks`;
+  if (leftUncommitted) return 'it left uncommitted changes that were committed for it';
+  return null;
+}
+
+/** The lead's note on workstreams merged without his review. */
+export function autoMergedNote(members: Member[], ids: string[]): string {
+  const merged = members.filter((m) => ids.includes(m.id));
+  if (!merged.length) return '';
+  const lines = merged.map((m) => {
+    const handover = workstreamHandover(m, { forDependent: true });
+    return `- ${m.id} (${m.title})${handover ? `\n${indent(handover)}` : ''}`;
+  });
+  return (
+    'Merged without your review, since each finished every step with lint and the tests passing, reported nothing ' +
+    'for you and merged cleanly:\n' +
+    lines.join('\n')
+  );
 }
 
 /** One line per member, for the lead's prompts and team_status. */
@@ -197,12 +254,14 @@ export function leadReviewMessage(members: Member[], ids: string[], sessionBranc
 }
 
 /** The message for the lead's turn after the whole team has merged. */
-export function leadWrapUpMessage(members: Member[], sessionBranch: string): string {
+export function leadWrapUpMessage(members: Member[], sessionBranch: string, autoMerged: string[] = []): string {
   const dropped = members.filter((m) => m.status === 'dropped');
+  const unreviewed = autoMergedNote(members, autoMerged);
   return [
     `[Team update] Every workstream is merged into ${sessionBranch} or dropped:`,
     teamStatusLines(members),
     '',
+    ...(unreviewed ? [unreviewed, 'Their code is on the branch now: your check of the merged whole covers it.', ''] : []),
     'As the lead, check the merged whole: run lint and the unit tests on the branch and get both passing, ' +
       'including any check an engineer could not run in their own checkout, fix anything the merges broke between ' +
       'workstreams, and keep the checklist accurate with write_coding_plan. Then read the notes for QA ' +

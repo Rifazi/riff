@@ -136,6 +136,10 @@ export interface CompactionOptions {
   // compaction only spends the requests it made.
   stepsPerHop?: number;
   maxHops?: number;
+  // True to hold the cut until the conversation reaches
+  // DEFER_CEILING_TOKENS (compaction.ts), e.g. compactionDeferral: a
+  // conversation cut before it made progress spends the next one re-reading.
+  defer?: () => boolean;
 }
 
 export interface RunAgentTurnParams {

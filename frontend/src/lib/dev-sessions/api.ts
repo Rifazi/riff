@@ -10,6 +10,7 @@ import type {
   CreateJiraTicketsResult,
   DeliveryPlan,
   Integration,
+  QaLoopAnalysis,
   JiraSettingsFields,
   AttachmentInput,
   MeetingSourceInput,
@@ -284,10 +285,13 @@ export const api = {
     }).then((r) => json<SessionRecord>(r)),
 
   getQaReport: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/qa/report`)).then((r) => json<{ markdown: string | null }>(r)),
+    fetch(apiUrl(`/api/sessions/${id}/qa/report`)).then((r) => json<{ markdown: string | null; current?: boolean }>(r)),
 
   getQaFindings: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/findings`)).then((r) => json<{ text: string | null }>(r)),
+
+  getQaLoop: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/loop`)).then((r) => json<{ loop: QaLoopAnalysis | null }>(r)),
 
   approveQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),

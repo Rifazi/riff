@@ -68,6 +68,9 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.codingTeamHistory ??= [];
   session.qaTeam ??= null;
   session.qaTeamHistory ??= [];
+  session.qaRounds ??= [];
+  session.fixScope ??= null;
+  session.qaPass ??= Math.max(1, session.qaTeamHistory.length + (session.qaTeam ? 1 : 0));
   session.codingContext ??= null;
   session.qaNotes ??= [];
   session.qaHandoffNotes ??= [];
@@ -175,6 +178,9 @@ export async function createSession(input: {
     codingTeamHistory: [],
     qaTeam: null,
     qaTeamHistory: [],
+    qaRounds: [],
+    qaPass: 1,
+    fixScope: null,
     codingContext: null,
     qaNotes: [],
     qaHandoffNotes: [],

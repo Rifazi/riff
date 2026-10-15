@@ -27,6 +27,8 @@ import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
+import { readMemoryDeps, rememberRead } from './helpers/memory/tool.js';
+import { SESSION_VIEW } from './helpers/memory/core.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffBaseFor } from '../sessions/shared-branch.js';
@@ -72,9 +74,21 @@ export async function runPlanAgentTurn(
 
   const app = await getApp(session.appId);
   const { provider, model } = await getRoleModelConfig('plan');
-  const { delegateModel } = await getRoleModelConfig('coding');
+  const { delegateModel, readMemory } = await getRoleModelConfig('coding');
   const helperContext = stageHelperContext(session.id, 'plan');
   const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext, app });
+  // The plan agent reads the code coding will change: file it in the session's
+  // read memory so the coding agent can `recall` it instead of reading it again.
+  const memoryDeps = readMemoryDeps({
+    enabled: readMemory !== false,
+    sessionId: session.id,
+    view: SESSION_VIEW,
+    repoRoot: app.repoRoot,
+    reader: 'plan',
+    context: helperContext,
+  });
+  const onRead = (filePath: string, read: { text: string; fileHash: string }) => rememberRead(memoryDeps, filePath, read);
+  if (researchDeps) researchDeps.onHelperRead = onRead;
   const classifierOn = await classifierToolEnabled();
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
@@ -163,7 +177,7 @@ export async function runPlanAgentTurn(
       appId: app.id,
       sessionId: session.id,
     });
-    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot });
+    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot, onRead });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -211,7 +225,7 @@ export async function runPlanAgentTurn(
     }
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
-    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot });
+    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot, onRead });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,

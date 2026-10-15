@@ -18,6 +18,7 @@ import type { HelperContext } from '../helpers/helper.js';
 import { compressMessages } from '../helpers/compress.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { createReviewTools } from '../qa-agent.js';
+import { previousPassRef } from '../../sessions/qa-rounds.js';
 import { classifierToolEnabled } from '../helpers/classifier/tool.js';
 import { createSubmitReviewTool } from '../tool-defs/qa-team-tools.js';
 import { qaHandoffSection } from '../tool-defs/qa-notes-tool.js';
@@ -99,6 +100,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     helperContext,
     focusPaths: member.focusPaths,
     classifier: await classifierToolEnabled(),
+    sinceRef: previousPassRef(session),
   });
   const submit = { sessionId: session.id, memberId: member.id };
 

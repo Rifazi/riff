@@ -79,7 +79,12 @@ function compactQaReport(markdown: string): string {
       ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}`
       : '\n\nNo blocking findings were listed.';
   if (notes.length > 0) {
-    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n) => `- ${n}`).join('\n')}`;
+    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`;
+  }
+  if (findings.length > 0 || notes.length > 0) {
+    text +=
+      '\n\nFor each blocking finding, fix it and add or change a test that fails without the fix. For each note, act on ' +
+      "it or call note_for_qa saying why you didn't: QA re-checks every note, and one skipped without a reason comes back.";
   }
   return text;
 }

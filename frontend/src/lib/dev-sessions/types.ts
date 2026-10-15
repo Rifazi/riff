@@ -471,6 +471,8 @@ export interface SessionRecord {
 
   coordinatorEnabled: boolean;
   qaFindingsPending: boolean;
+  // During a QA fix: the files QA named that the coder may write, and each widening (harness-server agents/fix-scope.ts).
+  fixScope?: { paths: string[]; widened: { paths: string[]; reason: string; at: string }[]; pass: number } | null;
   qaRerunPending: boolean;
 
   reopenedFromCoding: boolean;
@@ -687,4 +689,16 @@ export interface UsageReport {
     byStage: Record<UsageStage, number>;
     usage: TokenUsage;
   }[];
+}
+
+// harness-server sessions/qa-loop.ts: why the latest QA pass failed, compared with the earlier ones.
+export type QaBlockerKind = 'repeated' | 'was-note' | 'in-fix' | 'missed';
+
+export interface QaLoopAnalysis {
+  pass: number;
+  failedInARow: number;
+  blockers: { text: string; kind: QaBlockerKind; earlierPass: number | null }[];
+  looping: boolean;
+  reasons: string[];
+  smallFix: boolean;
 }

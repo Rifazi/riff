@@ -20,9 +20,10 @@ import { classifyTextToolsClaude } from '../helpers/classifier/tool-claude.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent, type CompactionOptions } from '../sdk-client.js';
 import { buildHandoff, ContextLog, entriesSince } from '../handoff.js';
 import { COMPACT_AT_TOKENS, hopLimits, loadApprovedDocsForCoding } from '../coding-agent.js';
+import { compactionDeferral } from '../compaction.js';
 import { DELEGATE_NOTE, delegateDeps as researchDeps, delegateToolEntry, noteDelegateRead } from '../helpers/research/tool.js';
 import { createDelegateToolClaude } from '../helpers/research/tool-claude.js';
-import { MEMORY_NOTE, notePaidRead, readMemoryDeps, recallToolEntry, rememberRead } from '../helpers/memory/tool.js';
+import { MEMORY_NOTE, notePaidRead, readMemoryDeps, recallToolEntry, rememberRead, rememberWrite } from '../helpers/memory/tool.js';
 import { createRecallToolClaude } from '../helpers/memory/tool-claude.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
@@ -41,7 +42,7 @@ import { createNoteForQaTool } from '../tool-defs/qa-notes-tool.js';
 import { createReportWorkstreamTool } from '../tool-defs/workstream-report-tool.js';
 import { createFinishStepTool, type FinishStepDeps } from '../tool-defs/finish-step-tool.js';
 import { createFinishStepToolClaude } from '../tool-defs-claude/finish-step-tool.js';
-import { createQaExecutors } from '../tool-defs/qa-tools.js';
+import { createQaExecutors, sessionCheckCache } from '../tool-defs/qa-tools.js';
 import { workstreamHandover } from './lead-core.js';
 import { createUpdateMyStepsTool } from '../tool-defs/team-steps-tool.js';
 import { createDocsSearchToolsClaude } from '../tool-defs-claude/docs-search-tool.js';
@@ -257,6 +258,7 @@ export async function runWorkstreamAgent({
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
     ...hopLimits(provider),
+    defer: () => compactionDeferral(contextLog.entries) !== null,
     handoff: async () => {
       const latest = await getSession(session.id);
       const handoff = await buildHandoff({
@@ -303,7 +305,8 @@ export async function runWorkstreamAgent({
   const steps = { sessionId: session.id, stepIds: member.stepIds };
   const qaNoteDeps = { sessionId: session.id, from: member.title };
   const reportDeps = { sessionId: session.id, memberId: member.id };
-  const { runCheckedCommandExecute } = createQaExecutors({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
+  const checkCache = sessionCheckCache(session.id);
+  const { runCheckedCommandExecute } = createQaExecutors({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext, checkCache, checkRunBy: `engineer ${member.id}` });
   const finishDeps: FinishStepDeps = {
     sessionId: session.id,
     repoRoot: worktreePath,
@@ -312,6 +315,7 @@ export async function runWorkstreamAgent({
     ownSteps: member.stepIds,
     helperContext,
     runCheck: (command) => runCheckedCommandExecute({ command }),
+    checkCache,
   };
   const architectureDeps = { app, repoRoot: worktreePath, scope: true, baseBranch: diffBaseFor(session, app), allowRegenerate: true, writablePaths: member.ownedPaths };
 
@@ -328,6 +332,7 @@ export async function runWorkstreamAgent({
         noteDelegateRead(delegateDeps, filePath);
         notePaidRead(memoryDeps, filePath, read);
       },
+      onWrite: (filePath, content) => rememberWrite(memoryDeps, filePath, content),
       readMemo,
     });
     const { gitCommitTool } = createGitToolsClaude({ ...scoped, onBranchCreated: noBranchCreation, helperContext });
@@ -335,6 +340,7 @@ export async function runWorkstreamAgent({
       repoRoot: worktreePath,
       checkCommands: app.checkCommands,
       helperContext,
+      checkCache,
     });
     const tools = [
       searchDocsToolClaude,
@@ -417,10 +423,11 @@ export async function runWorkstreamAgent({
       noteDelegateRead(delegateDeps, filePath);
       notePaidRead(memoryDeps, filePath, read);
     },
+    onWrite: (filePath, content) => rememberWrite(memoryDeps, filePath, content),
     readMemo,
   });
   const { gitCommitTool } = createGitTools({ ...scoped, onBranchCreated: noBranchCreation, helperContext });
-  const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext });
+  const { runCheckedCommandTool } = createQaTools({ repoRoot: worktreePath, checkCommands: app.checkCommands, helperContext, checkCache });
   const tools: ToolSet = {
     search_docs: searchDocsTool,
     read_doc: readDocTool,

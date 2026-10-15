@@ -4,7 +4,7 @@ import { DOMAIN_DOC } from '../architecture/architecture.js';
 import { auditWayfinding, branchScope } from '../architecture/wayfinding-audit.js';
 import { branchChanges, currentBranch } from '../repo/git.js';
 import type { SessionRecord } from '../sessions/session.js';
-import { createQaExecutors } from './tool-defs/qa-tools.js';
+import { createQaExecutors, sessionCheckCache } from './tool-defs/qa-tools.js';
 import { blockingAuditProblems, checkSucceeded, gateMessage, gateSummary, type GateCheck } from './pre-qa-gate-core.js';
 
 export type PreQaGateResult =
@@ -32,6 +32,9 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
     baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext: { sessionId: session.id, stage: 'coding', record: async () => {} },
+    checkCache: sessionCheckCache(session.id),
+    checkRunBy: 'the pre-QA checks',
+    reuseChecks: true,
   });
   // One after the other: they share the checkout's junit.xml.
   const checks: GateCheck[] = [];
