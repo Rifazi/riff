@@ -43,6 +43,7 @@ pub mod brand_migration;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod meeting_detector;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
@@ -663,6 +664,9 @@ pub fn run() {
                 log::error!("Failed to create system tray: {}", e);
             }
 
+            // Start/stop recording when an enabled meeting app is on a call
+            meeting_detector::spawn(_app.handle().clone());
+
             // Initialize notification system with proper defaults
             log::info!("Initializing notification system...");
             let app_for_notif = _app.handle().clone();
@@ -944,6 +948,7 @@ pub fn run() {
             summary::summary_engine::commands::builtin_ai_get_available_summary_model,
             summary::summary_engine::commands::builtin_ai_get_recommended_model,
             openrouter::get_openrouter_models,
+            meeting_detector::apps::list_auto_record_apps,
             audio::recording_preferences::get_recording_preferences,
             audio::recording_preferences::set_recording_preferences,
             audio::recording_preferences::get_default_recordings_folder_path,

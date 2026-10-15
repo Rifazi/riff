@@ -692,6 +692,14 @@ export interface UsageReport {
 }
 
 // harness-server sessions/qa-loop.ts: why the latest QA pass failed, compared with the earlier ones.
+/** One recorded QA pass, for the QA tab's report picker. */
+export interface QaPassSummary {
+  pass: number;
+  at: string;
+  result: string | null;
+  hasReport: boolean;
+}
+
 export type QaBlockerKind = 'repeated' | 'was-note' | 'in-fix' | 'missed';
 
 export interface QaLoopAnalysis {

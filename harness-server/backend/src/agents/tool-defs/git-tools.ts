@@ -8,7 +8,46 @@ import { assertWritable } from './file-tools.js';
 
 const COMMIT_TYPES = ['build', 'chore', 'ci', 'docs', 'feat', 'fix', 'perf', 'refactor', 'revert', 'style', 'test'];
 const COMMIT_PREFIX_RE = new RegExp(`^(${COMMIT_TYPES.join('|')})(\\([\\w./-]+\\))?: `);
-const MAX_SUBJECT_CHARS = 72;
+export const MAX_SUBJECT_CHARS = 72;
+// commitlint's body-max-line-length (config-conventional).
+const MAX_BODY_LINE_CHARS = 100;
+
+/**
+ * The message with an over-long subject cut at a word boundary and the
+ * full line moved into the body, plus a note saying so; an acceptable
+ * message comes back as it is. A rejected subject cost the agent a whole
+ * request to retype one word shorter (73 chars, max 72, in one session).
+ */
+export function normalizeCommitMessage(message: string): { message: string; note: string | null } {
+  const [firstLine, ...rest] = message.split('\n');
+  const prefix = COMMIT_PREFIX_RE.exec(firstLine);
+  if (!prefix) return { message, note: null };
+  const subject = firstLine.slice(prefix[0].length);
+  if (subject.length <= MAX_SUBJECT_CHARS) return { message, note: null };
+  let cut = subject.lastIndexOf(' ', MAX_SUBJECT_CHARS);
+  if (cut < MAX_SUBJECT_CHARS / 2) cut = MAX_SUBJECT_CHARS;
+  const short = subject.slice(0, cut).replace(/[\s,;:(\-\u2013\u2014]+$/, '');
+  if (!short.trim()) return { message, note: null };
+  const body = rest.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+  const full = wrapWords(firstLine, MAX_BODY_LINE_CHARS);
+  return {
+    message: `${prefix[0]}${short}\n\n${full}${body ? `\n\n${body}` : ''}`,
+    note: `the subject was ${subject.length} chars (max ${MAX_SUBJECT_CHARS}), so it was cut to "${short}" and the full line kept in the body`,
+  };
+}
+
+function wrapWords(text: string, width: number): string {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  return lines.join('\n');
+}
 
 // Why `message` isn't an acceptable conventional commit, or null if it is.
 // Says exactly what's wrong — a bare "not a conventional commit" had the
@@ -102,8 +141,9 @@ export function createGitExecutors(deps: GitToolDeps) {
     return `Created and checked out branch ${branchName}.`;
   };
 
-  const gitCommitExecute = async ({ branchName, message, files }: z.infer<typeof gitCommitSchema>): Promise<string> => {
+  const gitCommitExecute = async ({ branchName, message: given, files }: z.infer<typeof gitCommitSchema>): Promise<string> => {
     await deps.guard?.();
+    const { message, note } = normalizeCommitMessage(given);
     const problem = commitMessageProblem(message);
     if (problem) {
       throw new Error(`Not committed: ${problem}. Message was: "${message.split('\n')[0]}"`);
@@ -111,7 +151,7 @@ export function createGitExecutors(deps: GitToolDeps) {
     const formatted = await formatFiles(deps.repoRoot, formattable(deps.repoRoot, files, deps.writablePaths), deps.helperContext);
     if (!formatted.ok) return `Nothing committed: prettier failed (usually a syntax error).\n\n${formatted.output}`;
     const hash = await stageAndCommit(deps.repoRoot, branchName, message, files, deps.writablePaths);
-    return `Committed ${hash.slice(0, 8)}: ${message}`;
+    return `Committed ${hash.slice(0, 8)}: ${message.split('\n')[0]}${note ? ` (${note}.)` : ''}`;
   };
 
   return { gitCreateBranchExecute, gitCommitExecute };

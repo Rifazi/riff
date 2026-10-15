@@ -146,7 +146,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveCoding(sessionId),
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Land on QA with the session already in 'qa-in-progress', not the cached coding one.
+      await queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
       refresh();
       router.push(sessionHref(sessionId, 'qa'));
     },

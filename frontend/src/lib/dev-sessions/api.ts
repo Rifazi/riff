@@ -1,5 +1,6 @@
 import type { TeamKind } from './useTeamRun';
 import type {
+  QaPassSummary,
   AppConfig,
   AppPrompts,
   ArchitectureAudit,
@@ -284,8 +285,10 @@ export const api = {
       body: JSON.stringify({ note }),
     }).then((r) => json<SessionRecord>(r)),
 
-  getQaReport: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/qa/report`)).then((r) => json<{ markdown: string | null; current?: boolean }>(r)),
+  getQaReport: (id: string, pass?: number) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/report${pass === undefined ? '' : `?pass=${pass}`}`)).then((r) =>
+      json<{ markdown: string | null; current?: boolean; pass?: number; passes?: QaPassSummary[] }>(r),
+    ),
 
   getQaFindings: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/findings`)).then((r) => json<{ text: string | null }>(r)),

@@ -23,6 +23,9 @@ export interface QaRoundRecord {
   head: string | null;
   // Every acceptance criterion's verdict, when the report's checklist had them.
   criteria?: QaCriterionRecord[];
+  // This pass's copy of the report (harnessRoot-relative): the report file is
+  // rewritten every pass, and the QA tab lets the human open earlier ones.
+  reportPath?: string;
 }
 
 // repeated: an earlier pass blocked on the same thing, so the fix didn't hold.

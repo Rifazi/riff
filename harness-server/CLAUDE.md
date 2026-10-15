@@ -1660,6 +1660,49 @@ below) — never inside the target repo.
    folder passes through a node:test shim. Checked against session
    `7bdd0d9e`'s file. Not run with real agents yet.
 
+57. User asked what the latest logs showed and for more savings. The server
+   log itself was clean (no 4xx/5xx, no warnings); the errors were tool
+   results in the session transcripts. Session `7bdd0d9e` (Oct 13-14,
+   mostly before steps 54-56 were live): 11 coding turns hit the 80-request
+   cap, one with 1,441 output tokens in 3.2M, because every 55k cut came
+   right after the conversation's first write and the next one re-read the
+   same reference doc (18k chars, 10 times), `types.ts` (16 times) and
+   re-ran the same searches; 68 cuts in one stage. Jack ran one refused
+   merge 20 times (3 within 20 s, then after every cut), each answered with
+   commitlint's `⧗ input:` line, and dropped the workstream. 65 tool errors:
+   merges, `search_code` `context: 15` rejected by the schema, commit
+   subjects of 73 chars, bare tool names, invented step ids. `recall`: 95
+   calls, 49 followed by a `read_file` of the same file within 3 min (27
+   asked for the "full contents"); the research helper's cancelled runs were
+   42 of 166. The newest session (`6be60ec9`, on the current code) had 4
+   cuts in 229 entries and few repeats, so steps 54-56 hold; its plan turn
+   was 28 requests at ~68k context (1.9M, 92% cache reads) with no
+   compaction. Changed:
+   - **Merge retry guard** (`mergeRetryProblem` in lead-core.ts;
+     `CodingTeamMember.mergeFailure`): a merge that failed on the merge
+     itself records both heads and the reason; `merge_workstream` refuses
+     the same two commits without running git and says what to do instead.
+     A checkout failure (dirty, wrong branch; `mergeBranch` now returns
+     `stage`) isn't recorded, since it's fixed without a new commit.
+   - **`search_code` clamps `context`** to 0-3 (`clampContext`) instead of
+     refusing the call.
+   - **Commit subjects are shortened** (`normalizeCommitMessage` in
+     git-tools.ts, used by `git_commit` and `finish_step`): over 72 chars is
+     cut at a word, the full line goes first in the body (wrapped at 100 for
+     commitlint), and the reply says so. A wrong type is still refused.
+   - **`recall` returns small named files whole** (`wholeFileExcerpts`):
+     at most 3 named files whose remembered text fits 6k chars, or one
+     read_file page (16k) when the question asks for the full contents, go
+     back verbatim with no local model and "the whole file" in the label.
+   Not changed: the plan agent has no compaction (one growing conversation;
+   most of its cost is cache reads), QA reviewers' repeated `get_diff`
+   (step 52's memo covers identical repeats), and bare tool names (the SDK
+   rejects them before the server sees them). Tests:
+   `git-commit-message`, `code-search`, `read-memory-core`,
+   `coding-team-lead`; the folder (349) passes through a node:test shim.
+   Not run with real agents yet: count `recall` redos and merge retries in
+   the next session's transcript.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

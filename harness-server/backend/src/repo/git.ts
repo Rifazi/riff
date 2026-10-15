@@ -552,7 +552,7 @@ export async function mergeBranch(
   branch: string,
   message: string,
   into?: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; stage: 'checkout' | 'merge' }> {
   const git = client(repoRoot);
   // The main checkout is shared with the human and other sessions on this
   // app: never merge into whatever happens to be checked out, or on top of
@@ -560,10 +560,14 @@ export async function mergeBranch(
   if (into) {
     const current = await currentBranch(repoRoot);
     if (current !== into) {
-      return { ok: false, error: `${repoRoot} is on "${current}", not "${into}" — switch it back to ${into}, then resume the team.` };
+      return {
+        ok: false,
+        stage: 'checkout',
+        error: `${repoRoot} is on "${current}", not "${into}" — switch it back to ${into}, then resume the team.`,
+      };
     }
     if (await hasUncommittedChanges(repoRoot)) {
-      return { ok: false, error: `${into} has uncommitted changes in ${repoRoot} — commit or stash them, then resume the team.` };
+      return { ok: false, stage: 'checkout', error: `${into} has uncommitted changes in ${repoRoot} — commit or stash them, then resume the team.` };
     }
   }
   try {
@@ -571,6 +575,6 @@ export async function mergeBranch(
     return { ok: true };
   } catch (err) {
     await git.raw(['merge', '--abort']).catch(() => undefined);
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, stage: 'merge', error: err instanceof Error ? err.message : String(err) };
   }
 }

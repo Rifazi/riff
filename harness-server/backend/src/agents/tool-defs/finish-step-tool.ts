@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { mutateSession, getSession } from '../../sessions/session-store.js';
 import { GitPreconditionError, stageAndCommit, worktreeFingerprint } from '../../repo/git.js';
 import { assertWritable } from './file-tools.js';
-import { commitMessageProblem } from './git-tools.js';
+import { commitMessageProblem, normalizeCommitMessage } from './git-tools.js';
 import { formatFiles } from '../helpers/format/format.js';
 import type { HelperContext } from '../helpers/helper.js';
 import { checkSucceeded } from '../pre-qa-gate-core.js';
@@ -66,9 +66,10 @@ export function checksFailedReply(stepId: string, committed: string, check: 'lin
 }
 
 export function createFinishStepExecute(deps: FinishStepDeps) {
-  return async ({ stepId, message, files }: FinishStepInput): Promise<string> => {
+  return async ({ stepId, message: given, files }: FinishStepInput): Promise<string> => {
     await deps.guard?.();
     // Everything that can refuse the call is checked before anything changes.
+    const { message, note: subjectNote } = normalizeCommitMessage(given);
     const problem = commitMessageProblem(message);
     if (problem) throw new Error(`Nothing done: the commit message is invalid — ${problem}. Message was: "${message.split('\n')[0]}"`);
     if (deps.ownSteps && !deps.ownSteps.includes(stepId)) {
@@ -96,7 +97,7 @@ export function createFinishStepExecute(deps: FinishStepDeps) {
     try {
       const rel = absolute.map((f) => path.relative(deps.repoRoot, f));
       const hash = await stageAndCommit(deps.repoRoot, branch, message, rel, deps.writablePaths);
-      committed = `Committed ${hash.slice(0, 8)}: ${message.split('\n')[0]}`;
+      committed = `Committed ${hash.slice(0, 8)}: ${message.split('\n')[0]}${subjectNote ? ` (${subjectNote})` : ''}`;
     } catch (err) {
       if (!(err instanceof GitPreconditionError) || !/Nothing staged/.test(err.message)) throw err;
       committed = 'Nothing new to commit';

@@ -192,6 +192,18 @@ export interface CodingTeamMember extends Workstream {
   // The exported declarations its branch adds or changes, one line each
   // (agents/team/changed-exports.ts).
   changedExports?: string[];
+  // The last merge_workstream that failed on the merge itself: the commits
+  // it tried to merge and why. The same merge isn't run again until one of
+  // them changes (agents/team/lead-core.ts mergeRetryProblem).
+  mergeFailure?: MergeFailure | null;
+}
+
+export interface MergeFailure {
+  at: string;
+  // The workstream branch's head and the session branch's head, as rev-parsed.
+  head: string | null;
+  into: string | null;
+  reason: string;
 }
 
 // Something the coding agent (from = null) or a team engineer (from = its

@@ -23,6 +23,12 @@ pub struct RecordingPreferences {
     #[cfg(target_os = "macos")]
     #[serde(default)]
     pub system_audio_backend: Option<String>,
+    /// Start and stop recording by itself when an enabled meeting app is on a call.
+    #[serde(default)]
+    pub auto_record_meetings: bool,
+    /// Keys of the meeting apps (`meeting_detector::apps`) that trigger it.
+    #[serde(default)]
+    pub auto_record_apps: Vec<String>,
 }
 
 impl Default for RecordingPreferences {
@@ -35,8 +41,17 @@ impl Default for RecordingPreferences {
             preferred_system_device: None,
             #[cfg(target_os = "macos")]
             system_audio_backend: Some("coreaudio".to_string()),
+            auto_record_meetings: false,
+            auto_record_apps: Vec::new(),
         }
     }
+}
+
+/// Read the preferences without the logging and backend sync of
+/// `load_recording_preferences`, for callers that poll.
+pub fn peek_recording_preferences<R: Runtime>(app: &AppHandle<R>) -> Option<RecordingPreferences> {
+    let store = app.store("recording_preferences.json").ok()?;
+    serde_json::from_value(store.get("preferences")?).ok()
 }
 
 /// Get the default recordings folder based on platform

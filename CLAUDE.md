@@ -468,6 +468,15 @@ Every meeting flows recording → AI summary → journals. Auto-summary is on by
 - **Ask**: no embeddings. Candidates are filed notes plus transcript passages around each note's time range, keyword/IDF-ranked when over budget; the model cites `[n]` and only cited sources are returned (meeting date, estimated wall-clock start = save time − recording length, offset).
 - **UI**: `frontend/src/app/journal/` (shelf with "Needs your input", `notebook?id=`), `components/Journal/` (`ReviewCard`/`ReviewInbox` answer the organizer's questions), `components/MeetingDetails/MeetingJournalStrip.tsx` (where a meeting's parts went, inline review), sidebar journal dots + review badge, `lib/journal/` (React Query; `JournalEventsBridge` in the root layout).
 
+## Auto-record meetings
+
+`frontend/src-tauri/src/meeting_detector/` starts and stops recording by itself when a meeting app is on a call. Off by default; Settings → Recordings has a master toggle and one switch per app (`RecordingPreferences.auto_record_meetings` / `auto_record_apps`, in the Rust store, so the watcher can read them).
+
+- **Signal**: `coreaudio_macos.rs` lists audio processes running *input* (`ca::System::processes()` + `is_running_input`, macOS 14.2+) and `apps.rs` maps their bundle IDs (dotted children match, since a helper often holds the mic) to the app table, which also feeds the Settings list (`list_auto_record_apps`). The per-process flag is used because the device-level one is always true while Riff records.
+- **Decisions**: `core.rs` is a pure state machine with a fake-clock test suite. Start after the app holds the mic 3s, stop after 20s without it. It never starts over, or stops, a recording the user started, and a manual stop mid-call isn't undone until the next call. Turning the toggle off mid-call leaves the recording running as if it were manual.
+- **Start/stop** go through `crate::start_recording` / `crate::stop_recording` (tray, notifications, model validation), then emit `recording-stop-complete` like the tray does, so the frontend saves, summarises and files the meeting with the window hidden. Needs Riff running; there is no launch-at-login yet.
+- Teams, Zoom and the other native apps are matched by bundle ID; verify the IDs against a real call before relying on a new entry.
+
 ## Key Files Reference
 
 **Core Coordination**:

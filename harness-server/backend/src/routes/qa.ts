@@ -92,16 +92,34 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     return { running: isQaTeamRunning(session.id) };
   });
 
-  app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/report', async (request, reply) => {
+  // The report on file, or with ?pass= an earlier pass's copy (qa-rounds.ts
+  // keepPassReport). `passes` lists every recorded pass for the QA tab's picker.
+  app.get<{ Params: { id: string }; Querystring: { pass?: string } }>('/api/sessions/:id/qa/report', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.qaReportPath) return { markdown: null };
-    try {
-      const markdown = await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8');
-      return { markdown, current: qaReportIsCurrent(session) };
-    } catch {
-      return { markdown: null };
+    const current = qaReportIsCurrent(session);
+    const passes = session.qaRounds.map((r) => ({
+      pass: r.pass,
+      at: r.at,
+      result: r.result,
+      hasReport: Boolean(r.reportPath) || (current && r.pass === session.qaPass),
+    }));
+    const read = async (rel: string | null | undefined) => {
+      if (!rel) return null;
+      try {
+        return await fs.readFile(path.join(config.harnessRoot, rel), 'utf8');
+      } catch {
+        return null;
+      }
+    };
+    const wanted = Number(request.query.pass);
+    if (request.query.pass !== undefined && Number.isInteger(wanted)) {
+      const round = session.qaRounds.find((r) => r.pass === wanted);
+      const fallback = current && wanted === session.qaPass ? session.qaReportPath : null;
+      const markdown = (await read(round?.reportPath)) ?? (await read(fallback));
+      return { markdown, current: current && wanted === session.qaPass, pass: wanted, passes };
     }
+    return { markdown: await read(session.qaReportPath), current, pass: session.qaPass, passes };
   });
 
   // What the coding agent gets when QA sends a branch back: only the things

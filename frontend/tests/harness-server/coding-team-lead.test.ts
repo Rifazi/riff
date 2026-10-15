@@ -11,6 +11,7 @@ import {
   MAX_SEND_BACKS,
   mergeCommitMessage,
   mergeFailureReason,
+  mergeRetryProblem,
   mergeProblem,
   roundOutcome,
   sendBackProblem,
@@ -209,5 +210,23 @@ describe('merge commit message', () => {
     expect(mergeFailureReason(err)).toContain('header must not be longer than 100');
     expect(mergeFailureReason('Automatic merge failed\nCONFLICT (content): Merge conflict in a.ts')).toBe('CONFLICT (content): Merge conflict in a.ts');
     expect(mergeFailureReason('something odd')).toBe('something odd');
+  });
+});
+
+// A merge that failed on the same two commits isn't run again.
+describe('mergeRetryProblem', () => {
+  const failure = { at: '2026-10-14T14:49:36Z', head: 'aaa', into: 'bbb', reason: 'header must not be longer than 72 characters' };
+  const now = Date.parse('2026-10-14T14:52:36Z');
+
+  test('refuses the same merge while nothing changed', () => {
+    const problem = mergeRetryProblem(failure, { head: 'aaa', into: 'bbb' }, now);
+    expect(problem).toContain('3 min ago');
+    expect(problem).toContain(failure.reason);
+  });
+
+  test('allows it once either branch moved, and without a recorded failure', () => {
+    expect(mergeRetryProblem(failure, { head: 'ccc', into: 'bbb' }, now)).toBeNull();
+    expect(mergeRetryProblem(failure, { head: 'aaa', into: 'ddd' }, now)).toBeNull();
+    expect(mergeRetryProblem(null, { head: 'aaa', into: 'bbb' }, now)).toBeNull();
   });
 });

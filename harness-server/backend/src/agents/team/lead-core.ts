@@ -1,4 +1,4 @@
-import type { CodingTeamMember, TeamMemberStatus, WorkstreamReport } from '../../sessions/session.js';
+import type { CodingTeamMember, MergeFailure, TeamMemberStatus, WorkstreamReport } from '../../sessions/session.js';
 
 // Pure rules for a coding team whose lead (Jack) reviews and merges every
 // workstream's branch himself: when a member can start, what the lead is
@@ -73,6 +73,26 @@ export function mergeProblem(member: Member | undefined, id: string): string | n
 export function mergeCommitMessage(member: Pick<Member, 'id' | 'title'>): string {
   const subject = `merge ${member.id} workstream`;
   return `chore: ${subject.length > 72 ? `${subject.slice(0, 71)}…` : subject}\n\n${member.title}`;
+}
+
+/**
+ * Why the same merge shouldn't be run again, or null: it failed on these
+ * same two commits already, so it would fail the same way. The lead ran one
+ * refused merge 20 times in a round, three times within 20 seconds and
+ * again after every context reset.
+ */
+export function mergeRetryProblem(
+  failure: MergeFailure | null | undefined,
+  heads: { head: string | null; into: string | null },
+  now = Date.now(),
+): string | null {
+  if (!failure || failure.head !== heads.head || failure.into !== heads.into) return null;
+  const minutes = Math.max(1, Math.round((now - Date.parse(failure.at)) / 60_000));
+  return (
+    `merging it failed ${minutes} min ago and neither its branch nor the session branch has changed since, so it ` +
+    `would fail the same way: ${failure.reason}. Don't retry as is — send it back with what to fix, change the ` +
+    'session branch, or drop it.'
+  );
 }
 
 /** The line of a failed merge's output that says why: a hook's ✖ lines, else the first line. */

@@ -16,6 +16,24 @@ async function readReport(session: SessionRecord): Promise<string | null> {
   }
 }
 
+/** Where a pass's copy of the report is kept, harnessRoot-relative. */
+export function passReportPath(sessionKey: string, pass: number): string {
+  return path.relative(config.harnessRoot, path.join(config.qaReportsDir, 'passes', sessionKey, `pass-${pass}.md`));
+}
+
+/** Copies the report on file as this pass's; a rewrite in the same pass replaces it. */
+async function keepPassReport(session: SessionRecord, raw: string): Promise<string | undefined> {
+  const rel = passReportPath(session.sessionKey, session.qaPass);
+  try {
+    const abs = path.join(config.harnessRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, raw);
+    return rel;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Files the current QA report as this pass's round, replacing the pass's
  * earlier record if the lead rewrote the report. Called after every QA turn.
@@ -23,6 +41,7 @@ async function readReport(session: SessionRecord): Promise<string | null> {
 export async function recordQaRound(session: SessionRecord, repoRoot: string): Promise<SessionRecord> {
   const raw = await readReport(session);
   if (!raw || !session.branch) return session;
+  const reportPath = await keepPassReport(session, raw);
   const report = parseQaReport(raw);
   const last = session.qaRounds[session.qaRounds.length - 1];
   const head = await revParse(repoRoot, session.branch);
@@ -35,11 +54,13 @@ export async function recordQaRound(session: SessionRecord, repoRoot: string): P
     notes: report.notes,
     head,
     criteria: withCriterionFiles(report.criteria, session.qaTeam, previous),
+    reportPath,
   };
   const unchanged =
     last?.pass === round.pass &&
     last.result === round.result &&
     last.head === round.head &&
+    last.reportPath === round.reportPath &&
     JSON.stringify([last.blocking, last.notes, last.criteria]) === JSON.stringify([round.blocking, round.notes, round.criteria]);
   if (unchanged) return session;
   const qaRounds = last?.pass === round.pass ? [...session.qaRounds.slice(0, -1), round] : [...session.qaRounds, round];

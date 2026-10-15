@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Loader2, Repeat, TriangleAlert, Wrench, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/dev-sessions/api';
-import type { AttachmentInput, QaBlockerKind, SessionRecord } from '@/lib/dev-sessions/types';
+import type { AttachmentInput, QaBlockerKind, QaPassSummary, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
 import { AGENT_PERSONAS, QA_LEAD_PERSONA } from '@/lib/dev-sessions/agents';
 import { teamStatusKey, useTeamBoard } from '@/lib/dev-sessions/useTeamBoard';
@@ -18,6 +18,7 @@ import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun'
 import { CoordinatorControl } from '../CoordinatorControl';
 import { DocumentCard } from '../DocumentCard';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ErrorText, Notice } from '../PageShell';
 import { QaNotes } from '../QaNotes';
 import { StageLayout } from './StageLayout';
@@ -138,6 +139,32 @@ function QaLoopNotice({ sessionId, version }: { sessionId: string; version: stri
   );
 }
 
+const RESULT_LABEL: Record<string, string> = { pass: 'passed', 'pass-with-notes': 'passed with notes', fail: 'failed' };
+
+function passLabel(p: QaPassSummary): string {
+  const when = new Date(p.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `Pass ${p.pass} · ${p.result ? (RESULT_LABEL[p.result] ?? p.result) : 'no result'} · ${when}`;
+}
+
+// The report pane shows only this pass's report; earlier passes are one pick away.
+function PassPicker({ passes, value, onChange }: { passes: QaPassSummary[]; value: number | null; onChange: (pass: number | null) => void }) {
+  return (
+    <Select value={value === null ? 'current' : String(value)} onValueChange={(v) => onChange(v === 'current' ? null : Number(v))}>
+      <SelectTrigger className="h-8 w-auto gap-2 text-xs" aria-label="QA pass">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end">
+        <SelectItem value="current">This pass</SelectItem>
+        {passes.map((p) => (
+          <SelectItem key={p.pass} value={String(p.pass)}>
+            {passLabel(p)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function QaStage({ session }: { session: SessionRecord }) {
   const sessionId = session.id;
   const queryClient = useQueryClient();
@@ -146,6 +173,16 @@ export function QaStage({ session }: { session: SessionRecord }) {
     queryKey: ['qa-report', sessionId, session.qaReportPath],
     queryFn: () => api.getQaReport(sessionId),
   });
+
+  // An earlier pass picked in the report pane; null = this pass.
+  const [viewPass, setViewPass] = useState<number | null>(null);
+  const { data: pastReport } = useQuery({
+    queryKey: ['qa-report', sessionId, 'pass', viewPass],
+    queryFn: () => api.getQaReport(sessionId, viewPass!),
+    enabled: viewPass !== null,
+  });
+  // A new pass starting goes back to its own (empty) report.
+  useEffect(() => setViewPass(null), [report?.pass]);
 
   const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
 
@@ -188,7 +225,13 @@ export function QaStage({ session }: { session: SessionRecord }) {
 
   const handleSend = (message: string, attachments?: AttachmentInput[]) =>
     send(`/api/sessions/${sessionId}/qa/message`, message, refresh, (event) => {
-      if (event.type === 'tool_result') queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] });
+      // The session only refetches when the turn ends, but a tool can change it
+      // mid-turn (assign_qa_team adds the team board), so refresh on each result.
+      if (event.type === 'tool_result') {
+        queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+        queryClient.invalidateQueries({ queryKey: teamStatusKey('qa', sessionId) });
+      }
     }, attachments);
 
   useEffect(() => {
@@ -225,10 +268,15 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // Once merged or an MR is open, fixes on the branch no longer reach anything.
   // A part kept on its branch for the next one can still be sent back.
   const delivered = Boolean(session.delivery && session.delivery.kind !== 'pushed' && session.delivery.kind !== 'kept');
-  const markdown = report?.markdown ?? null;
-  // The report on file is an earlier pass's until this pass writes its own (harness-server qaReportIsCurrent).
-  const staleReport = Boolean(markdown) && report?.current === false;
-  const qaResult = markdown && !staleReport ? parseFrontmatterField(markdown, 'result') : null;
+  // The report on file is an earlier pass's until this pass writes its own
+  // (harness-server qaReportIsCurrent), so it isn't shown as this pass's.
+  const staleReport = Boolean(report?.markdown) && report?.current === false;
+  const markdown = staleReport ? null : (report?.markdown ?? null);
+  const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
+  const earlierPasses = (report?.passes ?? [])
+    .filter((p) => p.hasReport && !(report?.current && p.pass === report.pass))
+    .reverse();
+  const viewed = viewPass === null ? null : earlierPasses.find((p) => p.pass === viewPass) ?? null;
 
   const busy = streaming || teamActive;
   const canStartTeam =
@@ -289,69 +337,85 @@ export function QaStage({ session }: { session: SessionRecord }) {
       document={
         <DocumentCard
           title="QA report"
-          subtitle={markdown ? session.qaReportPath : null}
-          markdown={markdown}
-          emptyText={teamActive ? 'Not written yet — the reviewers are still checking…' : 'Not written yet — QA is running…'}
-          badge={reviewed ? <Badge variant="success">Reviewed</Badge> : null}
+          subtitle={viewed ? null : markdown ? session.qaReportPath : null}
+          markdown={viewed ? (pastReport?.markdown ?? null) : markdown}
+          emptyText={
+            viewed
+              ? 'Loading…'
+              : teamActive
+                ? 'Not written yet — the reviewers are still checking…'
+                : staleReport || busy
+                  ? `Not written yet — ${AGENT.name} is reviewing this pass…`
+                  : 'Not written yet — QA is running…'
+          }
+          badge={
+            <>
+              {earlierPasses.length > 0 && <PassPicker passes={earlierPasses} value={viewed ? viewPass : null} onChange={setViewPass} />}
+              {reviewed && !viewed && <Badge variant="success">Reviewed</Badge>}
+            </>
+          }
           scrollFooter
           notices={
-            markdown && (
+            viewed ? (
               <div className="space-y-2">
-                {staleReport ? (
-                  <Notice tone="neutral">
-                    This is the last pass’s report. {AGENT.name} hasn’t written this pass’s yet, so it can’t be marked
-                    reviewed or sent back as findings.
-                  </Notice>
-                ) : (
-                  <>
-                    <QaVerdict markdown={markdown} />
-                    <QaLoopNotice sessionId={sessionId} version={session.updatedAt} />
-                  </>
-                )}
+                <Notice tone="neutral">
+                  An earlier pass, for reference.{' '}
+                  <button type="button" className="underline" onClick={() => setViewPass(null)}>
+                    Back to this pass
+                  </button>
+                </Notice>
+                {pastReport?.markdown && <QaVerdict markdown={pastReport.markdown} />}
               </div>
+            ) : (
+              markdown && (
+                <div className="space-y-2">
+                  <QaVerdict markdown={markdown} />
+                  <QaLoopNotice sessionId={sessionId} version={session.updatedAt} />
+                </div>
+              )
             )
           }
           footer={
-            <>
-              <ApprovalBar
-                approveLabel={reviewed ? 'Reviewed' : 'Mark reviewed'}
-                onApprove={() => approveMutation.mutate()}
-                approveDisabled={reviewed || !session.qaReportPath || staleReport || busy}
-                approveDisabledReason={
-                  !session.qaReportPath ? 'No QA report yet' : staleReport ? 'This pass hasn’t written its report yet' : undefined
-                }
-                busy={approveMutation.isPending}
-                onReject={() => rejectMutation.mutate()}
-                rejectDisabled={reviewed || busy}
-                rejectBusy={rejectMutation.isPending}
-                secondaryActions={
-                  // Nothing to fix on a clean pass.
-                  !delivered &&
-                  qaResult !== 'pass' && (
-                    <Button
-                      variant="outline"
-                      onClick={() => sendBackMutation.mutate()}
-                      disabled={busy || sendBackMutation.isPending}
-                      title={
-                        reviewed
-                          ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+            !viewed && (
+              <>
+                <ApprovalBar
+                  approveLabel={reviewed ? 'Reviewed' : 'Mark reviewed'}
+                  onApprove={() => approveMutation.mutate()}
+                  approveDisabled={reviewed || !markdown || busy}
+                  approveDisabledReason={!markdown ? 'This pass hasn’t written its report yet' : undefined}
+                  busy={approveMutation.isPending}
+                  onReject={() => rejectMutation.mutate()}
+                  rejectDisabled={reviewed || busy}
+                  rejectBusy={rejectMutation.isPending}
+                  secondaryActions={
+                    // Nothing to fix on a clean pass.
+                    !delivered &&
+                    qaResult !== 'pass' && (
+                      <Button
+                        variant="outline"
+                        onClick={() => sendBackMutation.mutate()}
+                        disabled={busy || sendBackMutation.isPending}
+                        title={
+                          reviewed
+                            ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+                            : session.qaReportPath
+                              ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
+                              : `Reopen Coding without a QA report — e.g. if ${AGENT.name} was interrupted before reviewing anything.`
+                        }
+                      >
+                        {sendBackMutation.isPending ? <Loader2 className="animate-spin" /> : <Wrench />}
+                        {sendBackMutation.isPending
+                          ? 'Sending back…'
                           : session.qaReportPath
-                            ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
-                            : `Reopen Coding without a QA report — e.g. if ${AGENT.name} was interrupted before reviewing anything.`
-                      }
-                    >
-                      {sendBackMutation.isPending ? <Loader2 className="animate-spin" /> : <Wrench />}
-                      {sendBackMutation.isPending
-                        ? 'Sending back…'
-                        : session.qaReportPath
-                          ? 'Send back for fixes'
-                          : 'Reopen coding'}
-                    </Button>
-                  )
-                }
-              />
-              {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}
-            </>
+                            ? 'Send back for fixes'
+                            : 'Reopen coding'}
+                      </Button>
+                    )
+                  }
+                />
+                {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}
+              </>
+            )
           }
         />
       }

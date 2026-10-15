@@ -25,6 +25,7 @@ import {
   recallDescription,
   recallSavedTokens,
   recallSchema,
+  wholeFileExcerpts,
   windows,
   type Candidate,
   type Excerpt,
@@ -125,17 +126,23 @@ async function currentFile(repoRoot: string, filePath: string): Promise<{ conten
   }
 }
 
+// A remembered file as it is on disk now: its hash (null = gone) and line count.
+interface CurrentFile {
+  hash: string | null;
+  lines: number;
+}
+
 /**
  * Replaces each remembered file the asker has changed since reading it with
  * the file as it is now. Recalling the old copy told the agent to read it
  * again, which it did about half the time: the agent edits the files it read.
  * Returns each file's current hash, null when it's gone.
  */
-async function refreshChanged(deps: ReadMemoryDeps, entries: Map<string, MemoryEntry>): Promise<Map<string, string | null>> {
-  const hashes = new Map<string, string | null>();
+async function refreshChanged(deps: ReadMemoryDeps, entries: Map<string, MemoryEntry>): Promise<Map<string, CurrentFile>> {
+  const hashes = new Map<string, CurrentFile>();
   for (const [key, entry] of entries) {
     const file = await currentFile(deps.repoRoot, entry.path);
-    hashes.set(entry.path, file?.hash ?? null);
+    hashes.set(entry.path, { hash: file?.hash ?? null, lines: file ? file.content.replace(/\n$/, '').split('\n').length : 0 });
     if (!file || file.hash === entry.fileHash || entry.view !== deps.view) continue;
     const read = { view: entry.view, path: entry.path, fileHash: file.hash, start: 1, lines: file.content.split('\n'), reader: deps.reader };
     entries.set(key, mergeRead(undefined, { ...read, at: new Date().toISOString() }));
@@ -156,21 +163,25 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
       return NOT_IN_MEMORY;
     }
 
-    const candidates = packCandidates(await rankedCandidates(deps, question, entries), entries);
-    if (candidates.length === 0) {
-      await reportHelperRun(deps.context, { helper: 'memory', model: 'none', tasks: 1, useful: 0, savedTokens: 0 }, NOT_IN_MEMORY);
-      return NOT_IN_MEMORY;
-    }
+    // A few small named files go back whole: no picking, nothing left to read.
+    const whole = wholeFileExcerpts(question, entries, scope.length > 0);
+    let excerpts: Excerpt[] | null = whole;
+    let model = whole ? 'none' : 'builtin';
+    if (!whole) {
+      const candidates = packCandidates(await rankedCandidates(deps, question, entries), entries);
+      if (candidates.length === 0) {
+        await reportHelperRun(deps.context, { helper: 'memory', model: 'none', tasks: 1, useful: 0, savedTokens: 0 }, NOT_IN_MEMORY);
+        return NOT_IN_MEMORY;
+      }
 
-    // The local model only picks lines; without it, the best-ranked windows go back as they are.
-    let excerpts: Excerpt[] | null;
-    let model = 'builtin';
-    try {
-      const answer = await generateLocal({ system: PICK_SYSTEM, prompt: pickPrompt(question, candidates, entries), maxTokens: PICK_TOKENS });
-      excerpts = /\bNONE\b/.test(answer) && !/\d/.test(answer) ? null : groundPicks(answer, candidates, entries);
-    } catch {
-      model = 'none';
-      excerpts = candidates.slice(0, 3).map((c) => ({ ...c }));
+      // The local model only picks lines; without it, the best-ranked windows go back as they are.
+      try {
+        const answer = await generateLocal({ system: PICK_SYSTEM, prompt: pickPrompt(question, candidates, entries), maxTokens: PICK_TOKENS });
+        excerpts = /\bNONE\b/.test(answer) && !/\d/.test(answer) ? null : groundPicks(answer, candidates, entries);
+      } catch {
+        model = 'none';
+        excerpts = candidates.slice(0, 3).map((c) => ({ ...c }));
+      }
     }
     if (!excerpts) {
       await reportHelperRun(deps.context, { helper: 'memory', model, tasks: 1, useful: 0, savedTokens: 0 }, NOT_IN_MEMORY);
@@ -180,10 +191,12 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
     const shown: { excerpt: Excerpt; lines: [number, string][]; label: string }[] = [];
     for (const excerpt of excerpts) {
       const entry = entries.get(excerpt.key)!;
-      const label = freshnessLabel(freshness(entry, deps.view, hashes.get(entry.path) ?? null), `${excerpt.path}:${excerpt.start}-${excerpt.end}`);
+      const current = hashes.get(entry.path);
+      let label = freshnessLabel(freshness(entry, deps.view, current?.hash ?? null), `${excerpt.path}:${excerpt.start}-${excerpt.end}`);
+      if (whole && excerpt.start === 1 && current && excerpt.end >= current.lines) label += ', the whole file';
       shown.push({ excerpt, lines: linesIn(entry, excerpt.start, excerpt.end), label });
     }
-    const text = formatRecall(shown);
+    const text = formatRecall(shown, whole ? Number.POSITIVE_INFINITY : undefined);
     const keys = [...new Set(excerpts.map((e) => e.key))];
     const recalled = [...new Set(excerpts.map((e) => e.path))];
     const saved = recallSavedTokens(keys.map((k) => entryChars(entries.get(k)!)), text.length);
@@ -192,7 +205,7 @@ export function createRecallExecute(deps: ReadMemoryDeps) {
     await reportHelperRun(
       deps.context,
       { helper: 'memory', model, tasks: 1, useful: 1, returnedChars: text.length, savedTokens: saved },
-      `Read memory: recalled ${recalled.join(', ')} · saved ≈${saved} paid tokens`,
+      `Read memory: ${whole ? 'returned' : 'recalled'} ${recalled.join(', ')}${whole ? ' whole' : ''} · saved ≈${saved} paid tokens`,
     );
     return text;
   };
