@@ -17,12 +17,17 @@ export const searchCodeSchema = z.object({
     ),
   context: z
     .number()
-    .int()
-    .min(0)
-    .max(3)
     .optional()
-    .describe('Lines of surrounding code to show around each match (0-3, default 0) — enough to see a call site without reading the file'),
+    .describe('Lines of surrounding code to show around each match (0-3, default 0; more is clamped to 3) — enough to see a call site without reading the file'),
 });
+
+const MAX_CONTEXT = 3;
+
+/** `context` within 0-3: a value outside it is clamped, not refused (a rejected call cost the agent a whole request). */
+export function clampContext(context: number | undefined): number | undefined {
+  if (context === undefined || Number.isNaN(context)) return undefined;
+  return Math.min(MAX_CONTEXT, Math.max(0, Math.round(context)));
+}
 export const searchCodeDescription =
   'Search the repo\'s files (committed or not, .gitignore aside) for a keyword or pattern (git grep, case-insensitive, extended regex so `a|b` ' +
   'works; a pattern that isn\'t valid regex is searched literally; lockfiles, snapshots and build output are skipped). ' +
@@ -115,8 +120,9 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
     return `A pattern that matches every line only lists files. ${files.length} under "${glob ?? '.'}":\n${files.slice(0, PLAIN_LIST_LIMIT).join('\n')}${more}`;
   };
 
-  return async ({ query, glob, context }: z.infer<typeof searchCodeSchema>): Promise<string> => {
+  return async ({ query, glob, context: rawContext }: z.infer<typeof searchCodeSchema>): Promise<string> => {
     if (isListAllQuery(query)) return listFiles(glob);
+    const context = clampContext(rawContext);
     let note = '';
     if (!glob && deps.focus) {
       const focus = await deps.focus().catch(() => null);

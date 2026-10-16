@@ -1414,6 +1414,295 @@ below) — never inside the target repo.
    node:test shim. The git path (checking out the shared branch, diff from
    `branchBase`) was checked on a scratch repo. Not run with real agents yet.
 
+52. User asked whether the Oct 12-13 optimizations saved tokens. Across
+   `state/usage-log.jsonl` (Oct 5-13), coding cost per plan step roughly
+   halved (0.45-0.66M → 0.23-0.34M input-equivalent units; input + 1.25×
+   cache write + 0.1× cache read + 5× output). QA didn't fall, and now
+   costs about as much as coding. Fixed from what the transcripts showed:
+   - **Scoped QA diff**: the lead and every reviewer each pulled the full
+     ~27k-char diff. A reviewer's no-path `get_diff` now returns the whole
+     stat but only its focus paths' diffs (`QaExecutorDeps.focusPaths`, set
+     by `createReviewTools`). `path` still fetches any file. `get_diff`
+     answers an unchanged repeat in the same tool set with a `ReadMemo` note.
+   - **Reference sections in plan steps**: one 10-part reference doc was
+     read 46 times across stages. The plan prompt and `write_plan_doc` ask
+     each step to name the exact `read_doc` sections it needs, since the
+     coding agent sees only its current step.
+   - **`recall`**: half its answers were redone, nearly all after a result
+     labelled "changed since it was read: read_file … before relying on it"
+     (the agent had edited the file). `refreshChanged` now re-reads a
+     changed file in the asker's own view from disk before ranking, so the
+     answer is current. `RedoLedger.record` takes the recalled line ranges,
+     and only a read that overlaps one counts as a redo.
+   - **Research helper**: its coding useful rate fell from 91% to 30%
+     because turned-away "full contents" tasks were counted. They no longer
+     count as tasks. Its description and `DELEGATE_NOTE` say helpers can't
+     run git or shell commands, or count a long list exactly (agents kept
+     asking for both).
+   - **`classify_text` is opt-in** (`classification.agentTool`, Settings →
+     Dev Agents → Classifier helper; unset = off). No agent called it in 580
+     logged turns, and its ~2.8k-char schema went out with every request.
+     `classifyTextToolEntry` keeps a refusing stub for AI-SDK histories with
+     old calls. `write_plan_doc` still sizes steps with the classifier.
+   - **Usage log**: each line now has `agent` (the stage, or a team
+     member's id), `requests` (model requests in the turn) and, for coding,
+     `planSteps`, so cost per agent, per request and per step can be read
+     straight off the log.
+   The formatter's saving is still counted, not estimated (see
+   `helpers/format/format.ts`). `outline_file` repeats were across
+   agents, not within a conversation, so its own memo already covers what
+   a per-conversation memo can. Tests: `qa-scoped-diff.test.ts` (temp
+   repo), `research-core.test.ts` (ranged redo, refused tasks); the whole
+   folder (264) passes through a node:test shim. Not run with real agents
+   yet: compare full `get_diff` calls per QA round, `recall` redos and
+   coding cost per step on the next session.
+
+53. User asked whether agents made unnecessary reads, and whether they'd use
+   the local helpers when they only needed part of a file. In the EDI Viewer
+   sessions (`2ec615c4`, `7bdd0d9e`) the coding stage read files 144 times
+   (46 distinct files): one file 14 times, mostly after the 55k context
+   resets. Ranged reads were already the norm; the waste came from memory
+   and the helpers missing what the agent needed. Fixed:
+   - **Writes are in read memory**: `FileToolDeps.onWrite` gets the whole
+     file after `write_file`/`edit_file`, and `rememberWrite` files it as
+     read (coding agent and engineers). `recall` had answered "Not in
+     memory" for files the agent had just written, and after a reset it
+     re-read all seven of its new code-list files. The handoff's "Files you
+     changed" points at `recall` when it's on.
+   - **Plan reads are in read memory** (reader `plan`, the session view), so
+     coding can `recall` what the plan agent read: 35 plan reads were read
+     again in coding. The plan prompt's general nav block no longer says to
+     read every candidate "in full" (outline, then the range). The
+     customer-edi legacy archive still says it; seeded overrides weren't
+     touched.
+   - **`delegate`**: a listing that asks what each file is
+     (`isDescribeFilesTask`) is answered with each file's line count and
+     exports (`describeFiles`, moved from handoff.ts to
+     `agents/describe-files.ts`; 60 files max) instead of bare names. The
+     plan agent asked that three times in one session and then read the
+     files itself. A turned-away full-contents task now comes back with the
+     outline of the files it names (≤3 files, 6k chars), so the agent's
+     next call is a ranged read, not outline_file. Neither runs a helper.
+   Not addressed: the 55k compaction still fires every few minutes in a
+   step, each followed by re-orientation reads, and repeated match-all
+   `search_code "."` calls. Tests: `file-tools-write.test.ts`,
+   `research-core.test.ts` (tasks from those sessions); the whole folder
+   (270) passes through a node:test shim. Smoke-checked `delegate` on the
+   EDI Viewer repo and a write landing in read memory. Not run with real
+   agents yet.
+
+54. User asked for shortcuts that skip coding-agent steps without changing
+   the result. Measured across 46 sessions since Oct 1 (8,431 coding tool
+   calls): cost tracks requests, and ~5 reads/searches came per edit. 150 of
+   217 conversation resets were the 55k mid-step cut; after one, the agent
+   made a median of 15 calls before its next write, 23% of cut
+   conversations wrote nothing before being cut again (up to 4 in a row),
+   and Jack's 80-request review turn in `7bdd0d9e` re-ran `review_workstream`
+   on one branch five times across cuts. Changes:
+   - **Deferred cuts** (`compaction.ts` `compactionDeferral`,
+     `CompactionOptions.defer`): no cut until the conversation has made
+     progress (a write, commit, finish_step, team decision or verdict), nor
+     between Jack's `review_workstream` and his merge/send-back/drop. Past
+     `DEFER_CEILING_TOKENS` (90k) it's cut anyway.
+   - **Working set in the handoff** (`agents/working-set.ts`): the ranges
+     the conversation last read or edited (last 15 events, merged per file,
+     ±5 lines around edits), re-read from disk, ≤12k chars, plus its last
+     match-all `search_code` listing. `ContextLog` now keeps `toolCallId`.
+     A compacted solo conversation's handoff says build_solo was already
+     called (it was called again 7 times).
+   - **`edit_file`** replies with 3 lines either side of each change (new
+     text elided), and a missed `oldText` comes back with the file's current
+     text where its first matching line is (`surroundingText`,
+     `nearestText`). 227 reads came right before a further edit of a file
+     just edited.
+   - **`read_file({ symbol })`** (`tool-defs/symbol-range.ts`): a function,
+     class, method, type, const, object key, describe/it name
+     (`Class.method` to pick one) or markdown heading, in one call. A miss
+     throws with the outline. There were 1,617 outline-then-read pairs.
+   - **`finish_step` skips passed checks** (`CheckCache` in qa-tools.ts,
+     `worktreeFingerprint` in git.ts: the working tree as a tree hash in a
+     scratch index, junit.xml and coverage/ left out): lint/test that passed
+     on the same code before formatting aren't run again (9 of 32 finishes
+     had just run them). `checkPassed` now reads the status line after
+     install notes (it read line 1, so a passing check that installed
+     dependencies was reported failed).
+   - **Kickoff** (`team/split-hint.ts`): Jack decides from each step's
+     backticked files (22.7k-char plan → 2.3k map) instead of reading the
+     whole plan, and a plan with one step, or whose every step names a file
+     the previous step names, is built solo without asking (system chat
+     entry; no `teamDecisionPending`). Conservative on purpose: 1 of 31
+     existing plans qualifies.
+   - **Auto-merge** (`autoMergeProblem` in lead-core.ts, `tryAutoMerge` in
+     coding-team.ts): a `ready` branch whose every step finished through
+     finish_step, with a filed report that flags nothing and whose checks
+     line has no worrying words, never sent back and with nothing the runner
+     had to commit or discard, is merged through `merge_workstream`'s own
+     code without a lead turn. A conflict or dirty checkout leaves it to
+     Jack. His next review turn and the wrap-up list what merged unreviewed
+     (`autoMergedNote`), and the wrap-up still checks the merged whole.
+     **Partly supersedes step 34's "nothing is merged automatically".**
+   - Prompts mention `symbol` in the find-code passages.
+   Tests: `working-set.test.ts`, `symbol-read.test.ts`, `split-hint.test.ts`,
+   and additions to `context-cut`, `file-tools-write`, `finish-step`
+   (temp repo) and `coding-team-lead`; the whole folder (305) passes
+   through a node:test shim. Smoke-checked the working set and a symbol read
+   on the EDI Viewer repo against session `7bdd0d9e`. Not run with real
+   agents yet: compare requests per plan step, calls between a cut and the
+   next write, and Jack's turns per round in `state/usage-log.jsonl`.
+
+55. User asked whether step 54 worked. Its first 14 minutes live (session
+   `7bdd0d9e`, QA-fix round 2) were dominated by an older bug: team
+   worktrees have only tracked files, so the target repo's git-ignored
+   `.env` (its `generate-paths.js` needs `COUNTRY`) was missing and
+   `test:ci` failed in every engineer worktree, round 1 included. QA passed
+   because it runs in the main checkout. One engineer used up its 80
+   requests; the other called `finish_step` on one step three times, each
+   refused with "Nothing new to commit… still in progress", and step 54's
+   deferral counted that as progress, so it was cut right after each and
+   re-read everything. Fixed:
+   - `copyLocalEnvFiles` (git.ts) copies the repo's ignored `.env*` files
+     (`ls-files -oi --directory`, so not inside ignored folders) into a
+     member's worktree next to the `node_modules` symlink, on resume too,
+     never over an existing file.
+   - `compactionDeferral` counts a progress tool only if its result wasn't
+     an error and doesn't start with "Nothing" (pairs results by
+     `toolCallId`).
+   Seen but not changed: the working set's last-15-events window held the
+   test files read last, not the source files being fixed; `read_file({
+   symbol })` was used once in 78 reads; most logged `recall`s were redone
+   within seconds; an engineer run stopped by the human was logged with
+   requests but 0 tokens. Tests: `coding-team-git.test.ts`,
+   `context-cut.test.ts`; the folder (307) passes through a node:test shim.
+
+56. User asked for the system to notice when QA keeps sending a branch back
+   and not get stuck in a loop. Session `7bdd0d9e` (EDI Viewer 856) went
+   back to coding three times. The transcripts showed two things: QA notes
+   skipped by the fix became blockers the next pass ("Previous QA filed
+   this; unfixed"), and a fix without a test broke the line it fixed. Worse,
+   the report on disk was pass 1's: Bridget read it after every team round,
+   stopped on "QA failed" before sending Tess the wrap-up, and the human's
+   send-back relayed pass 1's findings three times.
+   - **Rounds** (`sessions/qa-rounds.ts`): every QA pass that writes a
+     report is recorded in `session.qaRounds` (pass, result, blocking, notes,
+     the branch commit reviewed); `session.qaPass` is the pass under way.
+     Older sessions' passes are rebuilt from the QA teams' reviewer findings
+     (the report on disk is attached to the last pass that finished before
+     it was written) and the commit before each pass's time.
+   - **Loop analysis** (`sessions/qa-loop.ts`, pure): each of the latest
+     failing pass's blockers is `repeated` (an earlier pass blocked on it),
+     `was-note` (an earlier pass's note the fix skipped), `in-fix` (new, in
+     a file the fix changed) or `missed`. Findings match by main file plus
+     word overlap (`SAME_FINDING` 0.7, calibrated on that session: the same
+     issue scored 0.75-1, different bugs in one function up to 0.61). It's a
+     loop after 3 failing passes, or 2 with a repeated/was-note/in-fix
+     blocker.
+   - **Stale report**: `qaReportIsCurrent` is false while a re-review is
+     pending, a QA team's findings haven't been written up, or the last
+     recorded round is an earlier pass's. Then Bridget's `tryShip` is
+     not-ready (so she sends the wrap-up message), `/qa/send-back` reopens
+     coding with nothing relayed, `/qa/findings` is empty, `approveQa`
+     refuses, and the QA tab says the report is the last pass's.
+   - **Re-review**: a QA rerun's first-turn system prompt carries every
+     earlier pass's blockers and notes, the files changed since the last
+     pass reviewed the branch, and how to re-review (check each fix with a
+     test, read the fix in full, don't re-review untouched met criteria,
+     grade once: a note never becomes a blocker unless it breaks a
+     criterion; ≤ 8 changed files = review alone). The QA prompts and
+     `write_qa_report`'s schema say to grade a criterion failure blocking
+     the first time.
+   - **Fix pass**: the send-back numbers the notes and asks for a test per
+     blocker and a `note_for_qa` reason per skipped note; when the branch is
+     looping it opens with `loopBrief` (each blocker with its kind, change
+     nothing else). A fix with ≤ 2 blockers and ≤ 5 items is built solo
+     without the team question (`qaFixSoloReason`).
+   - **Bridget** stops with `loopStopReason` (why, and that what's left is
+     small enough for one solo fix, or that the requirements/plan may be
+     wrong); the QA tab shows the same (`QaLoopNotice`, `GET /qa/loop`).
+   Then the user asked for QA not to re-test what hasn't changed, and for
+   the coder to work only on the files QA named instead of redoing
+   everything:
+   - **Criteria per pass**: a round also records every checklist criterion
+     (`reportCriteria`: `- [x] <criterion> — <where>` lines) with the files
+     its line, the reviewer's note on it, or the previous pass's record
+     named. `carryForward(previous, fixFiles)`: a criterion met last pass
+     whose files the fix didn't touch is carried; the brief lists them to
+     write as `[x] … — carried forward from pass N` and not review, and the
+     rest as re-check. On session `7bdd0d9e` a DataSections-only fix
+     carries 11 of 12.
+   - **Solo re-review** (`soloRereview`): the fix changed ≤ 8 files, or ≤ 3
+     criteria are left to re-check → `assign_qa_team` isn't registered and
+     the team note is left out.
+   - **Diff since the last pass**: `QaExecutorDeps.sinceRef`
+     (`previousPassRef(session)`: the last recorded round's head) makes the
+     lead's and reviewers' `get_diff` default to the fix since that commit
+     (new `scope: "fix" | "branch"` argument; `path` too).
+   - **Checks reused**: `CheckCache` is per session (`sessionCheckCache`)
+     and keeps each pass's report and who ran it; with `reuseChecks` (QA
+     lead, the QA team's checks, the pre-QA gate) a check that passed on the
+     same `worktreeFingerprint` is answered from that run with a note
+     (`reusedCheck`), `force: true` runs it anyway. The coder, engineers and
+     gate record into the same cache, so QA re-runs nothing the coder just
+     ran on identical content.
+   - **Fix scope** (`agents/fix-scope.ts`): on a QA-fix turn the findings'
+     file references (`findingRefs`: `path:61`, `:220-230`, `(~line 33-65)`;
+     bare names resolved against `listRepoFiles` when unique) become
+     `session.fixScope` when every blocker names a file. `FileToolDeps.fixScope`
+     makes `write_file`/`edit_file`/`delete_file` refuse paths outside it
+     (`inFixScope`: the file, anything under a named folder, tests/fixtures
+     next to it) until `widen_fix_scope({ paths, reason })` adds them, which
+     also leaves a QA note with the reason. Not applied while a team builds
+     the fix (owned paths instead); cleared by `approveCoding`. The fix
+     message opens with `fixContext`: the lines each finding points at, read
+     from disk (±8 lines, ≤ 8k chars), so the coder starts by editing.
+   Tests: `qa-loop.test.ts` (loop, carry-forward, checklist parsing, on that
+   session's findings), `fix-scope.test.ts` (refs, fence, context on a temp
+   repo), `qa-scoped-diff.test.ts` (since-pass diff, check reuse); the
+   folder passes through a node:test shim. Checked against session
+   `7bdd0d9e`'s file. Not run with real agents yet.
+
+57. User asked what the latest logs showed and for more savings. The server
+   log itself was clean (no 4xx/5xx, no warnings); the errors were tool
+   results in the session transcripts. Session `7bdd0d9e` (Oct 13-14,
+   mostly before steps 54-56 were live): 11 coding turns hit the 80-request
+   cap, one with 1,441 output tokens in 3.2M, because every 55k cut came
+   right after the conversation's first write and the next one re-read the
+   same reference doc (18k chars, 10 times), `types.ts` (16 times) and
+   re-ran the same searches; 68 cuts in one stage. Jack ran one refused
+   merge 20 times (3 within 20 s, then after every cut), each answered with
+   commitlint's `⧗ input:` line, and dropped the workstream. 65 tool errors:
+   merges, `search_code` `context: 15` rejected by the schema, commit
+   subjects of 73 chars, bare tool names, invented step ids. `recall`: 95
+   calls, 49 followed by a `read_file` of the same file within 3 min (27
+   asked for the "full contents"); the research helper's cancelled runs were
+   42 of 166. The newest session (`6be60ec9`, on the current code) had 4
+   cuts in 229 entries and few repeats, so steps 54-56 hold; its plan turn
+   was 28 requests at ~68k context (1.9M, 92% cache reads) with no
+   compaction. Changed:
+   - **Merge retry guard** (`mergeRetryProblem` in lead-core.ts;
+     `CodingTeamMember.mergeFailure`): a merge that failed on the merge
+     itself records both heads and the reason; `merge_workstream` refuses
+     the same two commits without running git and says what to do instead.
+     A checkout failure (dirty, wrong branch; `mergeBranch` now returns
+     `stage`) isn't recorded, since it's fixed without a new commit.
+   - **`search_code` clamps `context`** to 0-3 (`clampContext`) instead of
+     refusing the call.
+   - **Commit subjects are shortened** (`normalizeCommitMessage` in
+     git-tools.ts, used by `git_commit` and `finish_step`): over 72 chars is
+     cut at a word, the full line goes first in the body (wrapped at 100 for
+     commitlint), and the reply says so. A wrong type is still refused.
+   - **`recall` returns small named files whole** (`wholeFileExcerpts`):
+     at most 3 named files whose remembered text fits 6k chars, or one
+     read_file page (16k) when the question asks for the full contents, go
+     back verbatim with no local model and "the whole file" in the label.
+   Not changed: the plan agent has no compaction (one growing conversation;
+   most of its cost is cache reads), QA reviewers' repeated `get_diff`
+   (step 52's memo covers identical repeats), and bare tool names (the SDK
+   rejects them before the server sees them). Tests:
+   `git-commit-message`, `code-search`, `read-memory-core`,
+   `coding-team-lead`; the folder (349) passes through a node:test shim.
+   Not run with real agents yet: count `recall` redos and merge retries in
+   the next session's transcript.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent
@@ -1446,7 +1735,7 @@ backend/src/
     prompts/customer-edi-legacy/*.md — verbatim archive of the original Customer-EDI-specific prompt content, seeded as that app's prompt overrides (see prompts-store.ts above)
     helpers/                  — local helpers: work an agent hands to a model on this machine instead of its paid context (step 29). helper.ts is the shared contract (HelperContext, reportHelperRun → one usage-log line + one chat entry per run, stageHelperContext). Each helper folder: core.ts (pure, tested from frontend/tests/harness-server/), the runtime, tool.ts (AI SDK) + tool-claude.ts (Claude engine)
     helpers/research/         — `delegate` (step 28): core.ts (schema, answer cleanup, formatting, savings, runDelegation), tool.ts (Ollama helper loops, delegateDeps, delegateToolEntry)
-    helpers/classifier/       — `classify_text`: classifier.ts is on-device zero-shot classification (all four roles + team members), a transformers.js pipeline over a small ONNX NLI model. It's one in-process singleton, hot-swapped when Settings → Dev Agents picks another of the three curated models, with weights cached under state/classification-models/ (not transformers.js's own OS cache). It also has the cache status/clear helpers routes/settings.ts exposes. It is deliberately NOT local-llm.ts's Qwen/llama.cpp stack, which is a causal chat model on a different runtime (see docs/classification-tool.md in the Riff repo). cache.ts is the on-disk half: recursive size walk, per-model cache status, clear-all; it takes the cache dir as an argument so it's tested against a temp dir. pipeline-cache.ts is the in-memory half: a single slot keyed by model id with an injected loader. core.ts holds the pure normalization/ranking/selection, and schema.ts the zod schema + description, importable by tests without `ai`. Optional tool params are `.optional()`, never zod `.default()`: a default makes the argument required on the Claude/MCP path
+    helpers/classifier/       — `classify_text`: classifier.ts is on-device zero-shot classification (all four roles + team members when Settings turns the tool on; `write_plan_doc` sizes steps with it regardless), a transformers.js pipeline over a small ONNX NLI model. It's one in-process singleton, hot-swapped when Settings → Dev Agents picks another of the three curated models, with weights cached under state/classification-models/ (not transformers.js's own OS cache). It also has the cache status/clear helpers routes/settings.ts exposes. It is deliberately NOT local-llm.ts's Qwen/llama.cpp stack, which is a causal chat model on a different runtime (see docs/classification-tool.md in the Riff repo). cache.ts is the on-disk half: recursive size walk, per-model cache status, clear-all; it takes the cache dir as an argument so it's tested against a temp dir. pipeline-cache.ts is the in-memory half: a single slot keyed by model id with an injected loader. core.ts holds the pure normalization/ranking/selection, and schema.ts the zod schema + description, importable by tests without `ai`. Optional tool params are `.optional()`, never zod `.default()`: a default makes the argument required on the Claude/MCP path
     tool-defs/*.ts            — one file per tool group (the local helpers' tools live in helpers/ instead); each exports schema + description + a factory (createXExecute(s)/createXTool(s)) that closes over a repoRoot/appId, built fresh per turn by the *-agent.ts files
     tool-defs-claude/*.ts     — same tool groups, Claude-Agent-SDK tool() wrappers around the SAME factory-produced execute functions from tool-defs/ via wrap.ts's wrapForClaudeSdk() — no logic duplicated, only the SDK-format glue
   repo/

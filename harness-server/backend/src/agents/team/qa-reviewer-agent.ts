@@ -18,6 +18,8 @@ import type { HelperContext } from '../helpers/helper.js';
 import { compressMessages } from '../helpers/compress.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
 import { createReviewTools } from '../qa-agent.js';
+import { previousPassRef } from '../../sessions/qa-rounds.js';
+import { classifierToolEnabled } from '../helpers/classifier/tool.js';
 import { createSubmitReviewTool } from '../tool-defs/qa-team-tools.js';
 import { qaHandoffSection } from '../tool-defs/qa-notes-tool.js';
 import { createSubmitReviewToolClaude } from '../tool-defs-claude/qa-team-tools.js';
@@ -96,6 +98,9 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     baseBranch: diffBaseFor(session, app),
     checkCommands: app.checkCommands,
     helperContext,
+    focusPaths: member.focusPaths,
+    classifier: await classifierToolEnabled(),
+    sinceRef: previousPassRef(session),
   });
   const submit = { sessionId: session.id, memberId: member.id };
 
@@ -143,7 +148,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
 }
 
 async function persistEvent(sessionId: string, memberId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'qa', event, memberId);
   const append = (entry: Parameters<typeof appendTeamTranscriptEntry>[2]) => appendTeamTranscriptEntry(sessionId, memberId, entry, 'qa');
   if (event.type === 'assistant_text') {
     await append({ role: 'assistant', text: event.text });

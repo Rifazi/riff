@@ -16,6 +16,15 @@ export interface RecordingPreferences {
   file_format: string;
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
+  auto_record_meetings: boolean;
+  auto_record_apps: string[];
+}
+
+interface AutoRecordApp {
+  key: string;
+  name: string;
+  installed: boolean;
+  default_enabled: boolean;
 }
 
 interface RecordingSettingsProps {
@@ -29,7 +38,10 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     file_format: 'mp4',
     preferred_mic_device: null,
     preferred_system_device: null,
+    auto_record_meetings: false,
+    auto_record_apps: [],
   });
+  const [autoRecordApps, setAutoRecordApps] = useState<AutoRecordApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showRecordingNotification, setShowRecordingNotification] = useState(true);
@@ -59,6 +71,12 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     loadPreferences();
   }, []);
 
+  useEffect(() => {
+    invoke<AutoRecordApp[]>('list_auto_record_apps')
+      .then(setAutoRecordApps)
+      .catch((error) => console.error('Failed to list auto-record apps:', error));
+  }, []);
+
   // Load recording notification preference
   useEffect(() => {
     const loadNotificationPref = async () => {
@@ -83,6 +101,27 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     await Analytics.track('auto_save_recording_toggled', {
       enabled: enabled.toString(),
     });
+  };
+
+  const handleAutoRecordToggle = async (enabled: boolean) => {
+    // The first time it is turned on, start from the apps most people mean.
+    const apps =
+      enabled && preferences.auto_record_apps.length === 0
+        ? autoRecordApps.filter((a) => a.default_enabled).map((a) => a.key)
+        : preferences.auto_record_apps;
+    const newPreferences = { ...preferences, auto_record_meetings: enabled, auto_record_apps: apps };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences, 'Auto-record setting saved');
+    await Analytics.track('auto_record_meetings_toggled', { enabled: enabled.toString() });
+  };
+
+  const handleAutoRecordAppToggle = async (key: string, enabled: boolean) => {
+    const apps = enabled
+      ? [...preferences.auto_record_apps, key]
+      : preferences.auto_record_apps.filter((k) => k !== key);
+    const newPreferences = { ...preferences, auto_record_apps: apps };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences, 'Auto-record apps saved');
   };
 
   const handleDeviceChange = async (devices: SelectedDevices) => {
@@ -132,21 +171,25 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     }
   };
 
-  const savePreferences = async (prefs: RecordingPreferences) => {
+  const savePreferences = async (prefs: RecordingPreferences, successMessage?: string) => {
     setSaving(true);
     try {
       await invoke('set_recording_preferences', { preferences: prefs });
       onSave?.(prefs);
 
-      // Show success toast with device details
-      const micDevice = prefs.preferred_mic_device || 'Default';
-      const systemDevice = prefs.preferred_system_device || 'Default';
-      toast.success('Device preferences saved', {
-        description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`,
-      });
+      if (successMessage) {
+        toast.success(successMessage);
+      } else {
+        // Show success toast with device details
+        const micDevice = prefs.preferred_mic_device || 'Default';
+        const systemDevice = prefs.preferred_system_device || 'Default';
+        toast.success('Device preferences saved', {
+          description: `Microphone: ${micDevice}, System Audio: ${systemDevice}`,
+        });
+      }
     } catch (error) {
       console.error('Failed to save recording preferences:', error);
-      toast.error('Failed to save device preferences', {
+      toast.error('Failed to save recording preferences', {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -224,6 +267,48 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
           </div>
         </div>
         <Switch checked={showRecordingNotification} onCheckedChange={handleNotificationToggle} />
+      </div>
+
+      {/* Auto-record meetings */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between p-4 border rounded-lg">
+          <div className="flex-1 pr-4">
+            <div className="font-medium">Record meetings automatically</div>
+            <div className="text-sm text-muted-foreground">
+              Start recording when one of the apps below is on a call, and stop when the call ends. Riff has to be
+              running (it can stay in the menu bar). Recordings it starts show the usual notification and menu bar
+              indicator, but nobody on the call is told, so make sure everyone has agreed to be recorded.
+            </div>
+          </div>
+          <Switch
+            checked={preferences.auto_record_meetings}
+            onCheckedChange={handleAutoRecordToggle}
+            disabled={saving || autoRecordApps.length === 0}
+          />
+        </div>
+
+        {preferences.auto_record_meetings && (
+          <div className="border rounded-lg divide-y">
+            {autoRecordApps.map((app) => (
+              <div key={app.key} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium">{app.name}</div>
+                  {!app.installed && <div className="text-xs text-muted-foreground">Not found on this Mac</div>}
+                </div>
+                <Switch
+                  checked={preferences.auto_record_apps.includes(app.key)}
+                  onCheckedChange={(enabled) => handleAutoRecordAppToggle(app.key, enabled)}
+                  disabled={saving}
+                  aria-label={`Auto-record ${app.name} calls`}
+                />
+              </div>
+            ))}
+            <div className="px-4 py-3 text-xs text-muted-foreground">
+              Needs macOS 14.2 or later. A browser counts whenever any tab uses the microphone, so leave it off unless
+              you mostly take calls on the web.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Device Preferences */}

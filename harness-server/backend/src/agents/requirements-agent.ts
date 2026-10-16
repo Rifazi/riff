@@ -38,8 +38,8 @@ import { createAuditThemeToolClaude } from './tool-defs-claude/theme-audit-tool.
 import { architectureToolEntry } from './tool-defs/architecture-audit-tool.js';
 import { architectureToolNames, architectureToolsClaude } from './tool-defs-claude/architecture-audit-tool.js';
 import { architectureContextForTurn, promptForArchitecture } from '../architecture/architecture-context.js';
-import { createClassifyTextTool } from './helpers/classifier/tool.js';
-import { createClassifyTextToolClaude } from './helpers/classifier/tool-claude.js';
+import { classifierToolEnabled, classifyTextToolEntry } from './helpers/classifier/tool.js';
+import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { delegateDeps, delegateToolEntry, DELEGATE_NOTE } from './helpers/research/tool.js';
 import { createDelegateToolClaude } from './helpers/research/tool-claude.js';
 import { stageHelperContext } from './helpers/helper.js';
@@ -57,7 +57,6 @@ const TOOL_NAMES = [
   'propose_split',
   'propose_theme',
   'audit_theme',
-  'classify_text',
   'fetch_url',
 ];
 
@@ -79,6 +78,7 @@ export async function runRequirementsAgentTurn(
   const { delegateModel } = await getRoleModelConfig('coding');
   const helperContext = stageHelperContext(session.id, 'requirements');
   const researchDeps = delegateDeps({ model: delegateModel, repoRoot: app.repoRoot, appId: app.id, context: helperContext, app });
+  const classifierOn = await classifierToolEnabled();
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'requirements');
@@ -168,6 +168,7 @@ export async function runRequirementsAgentTurn(
         name: 'harness-tools',
         version: '1.0.0',
         tools: [
+          ...classifyTextToolsClaude(classifierOn, stageHelperContext(session.id, 'requirements')),
           searchDocsToolClaude,
           readDocToolClaude,
           createWriteRequirementsToolClaude({ sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id }),
@@ -176,7 +177,6 @@ export async function runRequirementsAgentTurn(
           createProposeSplitToolClaude({ sessionId: session.id, sessionKey: session.sessionKey }),
           createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
-          createClassifyTextToolClaude(stageHelperContext(session.id, 'requirements')),
           createFetchUrlToolClaude({ enabled: webAccess }),
           ...architectureToolsClaude(architectureDeps),
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
@@ -186,7 +186,7 @@ export async function runRequirementsAgentTurn(
     const { sdkSessionId } = await runClaudeAgentTurn({
       systemPrompt,
       createMcpServer,
-      toolNames: [...TOOL_NAMES, ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
+      toolNames: [...TOOL_NAMES, ...(classifierOn ? ['classify_text'] : []), ...architectureToolNames(architectureDeps), ...(researchDeps ? ['delegate'] : [])],
       model,
       resumeSessionId: session.claudeSessionIds.requirements,
       prompt,
@@ -214,7 +214,7 @@ export async function runRequirementsAgentTurn(
       propose_split: createProposeSplitTool({ sessionId: session.id, sessionKey: session.sessionKey }),
       propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
-      classify_text: createClassifyTextTool(stageHelperContext(session.id, 'requirements')),
+      ...classifyTextToolEntry(classifierOn, stageHelperContext(session.id, 'requirements'), session.histories.requirements),
       fetch_url: createFetchUrlTool({ enabled: webAccess }),
       ...architectureToolEntry(architectureDeps, session.histories.requirements),
       ...delegateToolEntry(researchDeps, session.histories.requirements),
@@ -266,7 +266,7 @@ export async function runRequirementsAgentTurn(
 }
 
 async function persistEvent(sessionId: string, event: AgentEvent, resultToolName?: string): Promise<void> {
-  if (event.type === 'usage') return addStageUsage(sessionId, 'requirements', event.usage, event.toolOutput);
+  if (event.type === 'usage') return addStageUsage(sessionId, 'requirements', event);
   if (event.type === 'assistant_text') {
     await appendTranscriptEntry(sessionId, 'requirements', { role: 'assistant', text: event.text });
   } else if (event.type === 'tool_call') {

@@ -16,7 +16,9 @@ export const writeQaReportSchema = z.object({
     .describe(
       'One entry per thing the coding agent must fix: unmet acceptance criteria, failing checks, skipped ' +
         '"Docs to update". Each a single line naming the file (and line if known) and the fix. Empty if none. ' +
-        'This list — not the report body — is what gets sent back to the coding agent.'
+        'This list — not the report body — is what gets sent back to the coding agent. Anything that breaks an ' +
+        'acceptance criterion or a check goes here now, however small: a later pass won\'t promote a note to a ' +
+        'blocker unless it breaks a criterion.'
     ),
   actionableNotes: z
     .array(z.string())

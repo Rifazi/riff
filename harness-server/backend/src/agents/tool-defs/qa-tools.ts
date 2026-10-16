@@ -5,10 +5,12 @@ import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import { tool } from 'ai';
 import { z } from 'zod';
-import { diffAgainstBase, diffStatAgainstBase } from '../../repo/git.js';
+import { diffAgainstBase, diffStatAgainstBase, worktreeFingerprint } from '../../repo/git.js';
 import { ensureDependencies } from '../../repo/dependencies.js';
 import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
 import { reportHelperRun, type HelperContext } from '../helpers/helper.js';
+import { checkSucceeded } from '../pre-qa-gate-core.js';
+import { ReadMemo } from './read-memo.js';
 import { generateLocal } from '../local-llm.js';
 import {
   RUNNER_INPUT_CHARS,
@@ -111,14 +113,25 @@ async function readJunitSummary(repoRoot: string, startedAt: number): Promise<st
   }
 }
 
-export const runCheckedCommandSchema = z.object({ command: z.enum(['lint', 'test', 'test:integration']) });
+export const runCheckedCommandSchema = z.object({
+  command: z.enum(['lint', 'test', 'test:integration']),
+  force: z.boolean().optional().describe('Run it even if it already passed on this exact working tree'),
+});
 export const runCheckedCommandDescription =
   'Run one of the repo\'s checks via its configured npm script: "lint", "test" (unit suite, pass/fail summary), ' +
-  'or "test:integration" (slow, may need credentials — only when the diff touches integration-sensitive code).';
+  'or "test:integration" (slow, may need credentials — only when the diff touches integration-sensitive code). ' +
+  'A check that already passed on this exact working tree is answered from that run, not run again.';
 
 export const getDiffSchema = z.object({
   branchName: z.string(),
   path: z.string().optional().describe('Repo-relative file path — return only this file\'s diff'),
+  scope: z
+    .enum(['fix', 'branch'])
+    .optional()
+    .describe(
+      'On a re-review: "fix" (the default) diffs from the commit the last QA pass reviewed, so you see only what ' +
+        'the fix changed; "branch" diffs the whole branch against its base, as the first pass saw it.'
+    ),
 });
 export const getDiffDescription =
   'Get the stat summary and diff between the app\'s base branch and this session\'s branch — the actual change set to ' +
@@ -133,8 +146,101 @@ export const getDiffDescription =
  * about, not a tool-execution error, so this always returns normally
  * (pass/fail is embedded in the text) rather than throwing.
  */
-export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
-  const runCheckedCommandExecute = async ({ command }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
+/**
+ * Which checks passed on which working-tree content (worktreeFingerprint),
+ * so finish_step needn't run them again on code that hasn't changed: in 9
+ * of 32 step finishes the agent had just run lint and the tests itself.
+ */
+export interface PassedCheck {
+  fingerprint: string;
+  report: string;
+  at: string;
+  by: string;
+}
+
+export class CheckCache {
+  private passed = new Map<string, PassedCheck>();
+
+  record(command: CheckCommand, fingerprint: string, passed: boolean, report = '', by = 'the coding agent'): void {
+    if (passed) this.passed.set(command, { fingerprint, report, at: new Date().toISOString(), by });
+    else this.passed.delete(command);
+  }
+
+  passedOn(command: CheckCommand, fingerprint: string): boolean {
+    return this.passed.get(command)?.fingerprint === fingerprint;
+  }
+
+  /** The pass recorded for this exact working-tree content, if any. */
+  passedCheck(command: CheckCommand, fingerprint: string): PassedCheck | null {
+    const p = this.passed.get(command);
+    return p && p.fingerprint === fingerprint ? p : null;
+  }
+}
+
+// One cache per session, shared by everything that runs the checks on it:
+// the coding agent's finish_step, the engineers, the pre-QA gate and QA. The
+// fingerprint is the working tree's content, so a pass counts wherever the
+// same tree was checked, and QA needn't re-run lint and the tests the coder
+// (or the gate) just ran on the very code it's reviewing.
+const sessionCaches = new Map<string, CheckCache>();
+
+export function sessionCheckCache(sessionId: string): CheckCache {
+  let cache = sessionCaches.get(sessionId);
+  if (!cache) {
+    cache = new CheckCache();
+    sessionCaches.set(sessionId, cache);
+  }
+  return cache;
+}
+
+/** How a reused pass is reported: the original result, then where it came from. */
+export function reusedCheck(command: CheckCommand, passed: PassedCheck): string {
+  const when = new Date(passed.at).toISOString().replace('T', ' ').slice(0, 16);
+  return `${passed.report}\n\n(${command} passed on this exact working tree at ${when} UTC, run by ${passed.by}; it wasn't run again. Pass force: true to run it anyway.)`;
+}
+
+export interface QaExecutorDeps {
+  repoRoot: string;
+  baseBranch?: string;
+  checkCommands?: Partial<Record<CheckCommand, string>>;
+  helperContext?: HelperContext;
+  /**
+   * A QA-team reviewer's focus paths. Its no-path get_diff then returns the
+   * whole stat but only these paths' diffs: the lead and every reviewer each
+   * pulling the full ~25k-char diff was half of QA's tool output.
+   */
+  focusPaths?: string[];
+  // Told of every check's result and the code it ran on (coding agent and engineers).
+  checkCache?: CheckCache;
+  // Who this runner is, in a reused pass's note ("run by …").
+  checkRunBy?: string;
+  // Answer a check from the cache when it passed on this very working tree
+  // (QA, its reviewers' checks and the pre-QA gate): identical content gives
+  // the same result, and the coder ran them a minute ago.
+  reuseChecks?: boolean;
+  /**
+   * On a re-review: the commit the last QA pass reviewed. get_diff then
+   * defaults to what the fix changed since it, not the whole branch.
+   */
+  sinceRef?: { ref: string; pass: number };
+}
+
+export function createQaExecutors(deps: QaExecutorDeps) {
+  // A repeat of an unchanged diff gets a note instead of the text — see ReadMemo.
+  const diffMemo = new ReadMemo();
+
+  const runCheckedCommandExecute = async ({ command, force }: z.infer<typeof runCheckedCommandSchema>): Promise<string> => {
+    const fingerprint = deps.checkCache ? await worktreeFingerprint(deps.repoRoot).catch(() => null) : null;
+    if (fingerprint && deps.reuseChecks && !force) {
+      const passed = deps.checkCache!.passedCheck(command, fingerprint);
+      if (passed) return reusedCheck(command, passed);
+    }
+    const report = await runCheck(command);
+    if (fingerprint) deps.checkCache!.record(command, fingerprint, checkSucceeded(report), report, deps.checkRunBy);
+    return report;
+  };
+
+  const runCheck = async (command: CheckCommand): Promise<string> => {
     const script = deps.checkCommands?.[command] ?? DEFAULT_SCRIPTS[command];
     const timeoutMs = TIMEOUTS_MS[command];
     // A fresh worktree or a just-scaffolded package has nothing installed,
@@ -201,21 +307,44 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
     }
   };
 
-  const getDiffExecute = async ({ branchName, path: filePath }: z.infer<typeof getDiffSchema>): Promise<string> => {
-    if (filePath) {
-      const diff = compactDiff(await diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, [filePath]));
-      return diff.trim() ? diff.slice(0, 60_000) : `No changes to ${filePath} on this branch.`;
+  const getDiffExecute = async (args: z.infer<typeof getDiffSchema>): Promise<string> => {
+    const result = await diffText(args);
+    if (diffMemo.isRepeat(`diff\u0000${args.branchName}\u0000${args.path ?? ''}\u0000${args.scope ?? ''}`, result)) {
+      return `[This diff${args.path ? ` of ${args.path}` : ''} is unchanged since you last fetched it — use that copy. Call again to get the text.]`;
     }
+    return result;
+  };
+
+  const diffText = async ({ branchName, path: filePath, scope: scopeArg }: z.infer<typeof getDiffSchema>): Promise<string> => {
+    // A re-review sees the fix, not the branch the last pass already reviewed.
+    const since = deps.sinceRef && scopeArg !== 'branch' ? deps.sinceRef : null;
+    const base = since ? since.ref : deps.baseBranch;
+    const sinceNote = since
+      ? `[Diff since QA pass ${since.pass} reviewed the branch (${since.ref.slice(0, 8)}): what the fix changed. ` +
+        'Pass scope: "branch" for the whole branch.]\n\n'
+      : '';
+    if (filePath) {
+      const diff = compactDiff(await diffAgainstBase(deps.repoRoot, branchName, base, [filePath]));
+      return diff.trim() ? `${sinceNote}${diff.slice(0, 60_000)}` : `No changes to ${filePath} ${since ? `since pass ${since.pass}` : 'on this branch'}.`;
+    }
+    const focus = deps.focusPaths?.length ? deps.focusPaths : null;
     // One line of context instead of git's three in the overview; `path`
     // returns a file's diff with full context.
     const [rawDiff, stat] = await Promise.all([
-      diffAgainstBase(deps.repoRoot, branchName, deps.baseBranch, DIFF_NOISE_EXCLUDES, OVERVIEW_CONTEXT_LINES),
-      diffStatAgainstBase(deps.repoRoot, branchName, deps.baseBranch),
+      diffAgainstBase(deps.repoRoot, branchName, base, [...(focus ?? []), ...DIFF_NOISE_EXCLUDES], OVERVIEW_CONTEXT_LINES),
+      diffStatAgainstBase(deps.repoRoot, branchName, base),
     ]);
     const diff = compactDiff(rawDiff);
-    if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${diff}`;
+    if (since && !diff.trim()) return `${sinceNote}Nothing changed since pass ${since.pass}.`;
+    const scope =
+      sinceNote +
+      (focus
+        ? `[Diff below covers only your focus paths (${focus.join(', ')}). The stat above lists every changed file — ` +
+          'call get_diff with `path` for any other one your criteria need.]\n\n'
+        : '');
+    if (diff.length <= DIFF_CHAR_LIMIT) return `${stat}\n\n${scope}${diff}`;
     return (
-      `${stat}\n\n${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +
+      `${stat}\n\n${scope}${diff.slice(0, DIFF_CHAR_LIMIT)}\n\n[diff truncated at ${DIFF_CHAR_LIMIT} of ${diff.length} chars — ` +
       'call get_diff again with `path` for any file in the stat above that was cut off]'
     );
   };
@@ -223,7 +352,7 @@ export function createQaExecutors(deps: { repoRoot: string; baseBranch?: string;
   return { runCheckedCommandExecute, getDiffExecute };
 }
 
-export function createQaTools(deps: { repoRoot: string; baseBranch?: string; checkCommands?: Partial<Record<CheckCommand, string>>; helperContext?: HelperContext }) {
+export function createQaTools(deps: QaExecutorDeps) {
   const { runCheckedCommandExecute, getDiffExecute } = createQaExecutors(deps);
   return {
     runCheckedCommandTool: tool({

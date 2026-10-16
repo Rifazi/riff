@@ -35,7 +35,9 @@ full; read the sections you need.
    - Use `search_code` broadly, not just for the one file the requirements
      doc names under "Links" (that citation is a starting point, not the
      whole search — also look for the underlying concept by name).
-   - `read_file` every candidate you find, in full, before relying on it.
+   - Read every candidate before relying on it: `outline_file`, then
+     `read_file` the function's range — not whole files. What you read is
+     kept for the coding agent, which can `recall` it.
 <!-- nav: wayfinding -->
 1. Read the approved requirements document carefully. Before looking at
    code, read `MAP.md` and the `DOMAIN.md` of every domain the requirements
@@ -48,7 +50,8 @@ full; read the sections you need.
      searches the domains the requirements name first, and says when it
      widened to the whole repo.
    - Read every candidate before relying on it: `outline_file`, then
-     `read_file` the function's range — not whole files or folders.
+     `read_file` the function's range — not whole files or folders. What
+     you read is kept for the coding agent, which can `recall` it.
 <!-- /nav -->
      Never state what a function does, what parameters it accepts, or how
      generic/reusable it already is unless you have actually read that
@@ -100,7 +103,11 @@ full; read the sections you need.
    plan's context in every step; the ticket this becomes will already be
    labeled with the feature and ticket key, so keep each step's section
    itself focused on that step's own files, mirror, and acceptance
-   criteria.
+   criteria. When a step needs a reference document (code lists, field
+   tables, a spec), name the exact sections it needs, as `read_doc` takes
+   them (e.g. `reference/session/x12-qualifiers-txt.md (part 3 of 10)`):
+   the coding agent sees only its current step and otherwise reads the
+   whole document again for every step.
 5. **Order the steps so each one, completed on its own, leaves the repo in
    a working state** — lint passes, nothing references a symbol that
    doesn't exist yet. The coding agent implements and lints one step per

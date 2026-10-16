@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  autoMergedNote,
+  autoMergeProblem,
   dropProblem,
   fallbackReport,
   FALLBACK_REPORT_CHARS,
   leadReviewMessage,
   leadWrapUpMessage,
   MAX_SEND_BACKS,
+  mergeCommitMessage,
+  mergeFailureReason,
+  mergeRetryProblem,
   mergeProblem,
   roundOutcome,
   sendBackProblem,
@@ -149,5 +154,79 @@ describe('what the lead is told', () => {
     const text = leadWrapUpMessage([m('api', 'merged'), m('ui', 'dropped')], 'feat');
     expect(text).toContain('You took back ui-step');
     expect(text).toContain('run lint and the unit tests');
+  });
+});
+
+// A finished branch that passed its checks and flagged nothing merges
+// without Jack's review; he hears about it and checks the merged whole.
+describe('autoMergeProblem', () => {
+  const report = { summary: 'Adds b.', steps: [], interfaces: ['src/b.ts — b(): number'], checks: 'lint and test:ci passed', forLead: [] };
+  const done = new Map([['a-step', 'done']]);
+
+  test('a clean, finished branch merges unreviewed', () => {
+    expect(autoMergeProblem(m('a', 'ready', [], { report }), done, false)).toBeNull();
+  });
+
+  test('anything the lead should see keeps it for him', () => {
+    expect(autoMergeProblem(m('a', 'failed', [], { report }), done, false)).toBe('it is failed');
+    expect(autoMergeProblem(m('a', 'ready'), done, false)).toBe('it filed no report');
+    expect(autoMergeProblem(m('a', 'ready', [], { report: { ...report, fallback: true } }), done, false)).toBe('it filed no report');
+    expect(autoMergeProblem(m('a', 'ready', [], { report, sendBacks: 1 }), done, false)).toContain('sent back');
+    expect(autoMergeProblem(m('a', 'ready', [], { report: { ...report, forLead: ['check the cache'] } }), done, false)).toContain('flags');
+    expect(autoMergeProblem(m('a', 'ready', [], { report: { ...report, checks: 'lint passed, tests could not run' } }), done, false)).toContain(
+      "doesn't say"
+    );
+    expect(autoMergeProblem(m('a', 'ready', [], { report }), new Map([['a-step', 'in_progress']]), false)).toBe(
+      "a-step wasn't finished with passing checks"
+    );
+    expect(autoMergeProblem(m('a', 'ready', [], { report }), done, true)).toContain('uncommitted');
+  });
+
+  test('the lead is told what merged without him', () => {
+    const members = [m('a', 'merged', [], { report }), m('b', 'ready')];
+    const note = autoMergedNote(members, ['a']);
+    expect(note).toStartWith('Merged without your review');
+    expect(note).toContain('- a (a work)\n  Summary: Adds b.\n  Interfaces:\n  - src/b.ts — b(): number');
+    expect(autoMergedNote(members, [])).toBe('');
+    expect(leadWrapUpMessage(members, 'feat', ['a'])).toContain('your check of the merged whole covers it');
+    expect(leadWrapUpMessage(members, 'feat')).not.toContain('Merged without your review');
+  });
+});
+
+// commitlint refused the old one-line subject carrying the title (130 chars).
+describe('merge commit message', () => {
+  test('short subject, title in the body', () => {
+    const title = '856 dictionary file split, display fixes, and UI/sections file split';
+    const msg = mergeCommitMessage({ id: 'dictionary-and-ui-structure', title });
+    const [subject, blank, body] = msg.split('\n');
+    expect(subject).toBe('chore: merge dictionary-and-ui-structure workstream');
+    expect(blank).toBe('');
+    expect(body).toBe(title);
+    expect(mergeCommitMessage({ id: 'x'.repeat(90), title: 't' }).split('\n')[0].length).toBeLessThanOrEqual(80);
+  });
+
+  test('failure reason is the hook\'s ✖ lines', () => {
+    const err = '⧗   input: chore: merge a — long\n✖   header must not be longer than 100 characters, current length is 130 [header-max-length]\n\n✖   found 1 problems, 0 warnings';
+    expect(mergeFailureReason(err)).toContain('header must not be longer than 100');
+    expect(mergeFailureReason('Automatic merge failed\nCONFLICT (content): Merge conflict in a.ts')).toBe('CONFLICT (content): Merge conflict in a.ts');
+    expect(mergeFailureReason('something odd')).toBe('something odd');
+  });
+});
+
+// A merge that failed on the same two commits isn't run again.
+describe('mergeRetryProblem', () => {
+  const failure = { at: '2026-10-14T14:49:36Z', head: 'aaa', into: 'bbb', reason: 'header must not be longer than 72 characters' };
+  const now = Date.parse('2026-10-14T14:52:36Z');
+
+  test('refuses the same merge while nothing changed', () => {
+    const problem = mergeRetryProblem(failure, { head: 'aaa', into: 'bbb' }, now);
+    expect(problem).toContain('3 min ago');
+    expect(problem).toContain(failure.reason);
+  });
+
+  test('allows it once either branch moved, and without a recorded failure', () => {
+    expect(mergeRetryProblem(failure, { head: 'ccc', into: 'bbb' }, now)).toBeNull();
+    expect(mergeRetryProblem(failure, { head: 'aaa', into: 'ddd' }, now)).toBeNull();
+    expect(mergeRetryProblem(null, { head: 'aaa', into: 'bbb' }, now)).toBeNull();
   });
 });

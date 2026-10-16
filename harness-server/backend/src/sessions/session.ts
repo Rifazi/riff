@@ -1,3 +1,4 @@
+import type { QaRoundRecord } from './qa-loop.js';
 import type { ModelMessage } from 'ai';
 import type { TokenUsage } from '../agents/sdk-client.js';
 import type { ThemeDefinition } from '../themes/presets.js';
@@ -191,6 +192,18 @@ export interface CodingTeamMember extends Workstream {
   // The exported declarations its branch adds or changes, one line each
   // (agents/team/changed-exports.ts).
   changedExports?: string[];
+  // The last merge_workstream that failed on the merge itself: the commits
+  // it tried to merge and why. The same merge isn't run again until one of
+  // them changes (agents/team/lead-core.ts mergeRetryProblem).
+  mergeFailure?: MergeFailure | null;
+}
+
+export interface MergeFailure {
+  at: string;
+  // The workstream branch's head and the session branch's head, as rev-parsed.
+  head: string | null;
+  into: string | null;
+  reason: string;
 }
 
 // Something the coding agent (from = null) or a team engineer (from = its
@@ -200,6 +213,12 @@ export interface QaNote {
   from: string | null;
   text: string;
   at: string;
+}
+
+export interface FixScope {
+  paths: string[];
+  widened: { paths: string[]; reason: string; at: string }[];
+  pass: number;
 }
 
 export interface CodingContext {
@@ -361,6 +380,17 @@ export interface SessionRecord {
   qaTeam: QaTeamState | null;
   // Earlier QA rounds, oldest first — a rerun after fixes retires the last one.
   qaTeamHistory: QaTeamState[];
+  // Every QA pass's findings and the commit it reviewed (sessions/qa-rounds.ts),
+  // so a branch that keeps coming back from QA can be told apart from one that
+  // just needs another fix (qa-loop.ts). Older sessions have none; their
+  // passes are rebuilt from qaTeamHistory when needed.
+  qaRounds: QaRoundRecord[];
+  // Which QA pass is running: 1 for the first review, +1 per re-review.
+  qaPass: number;
+  // During a QA fix: the files QA's findings named, which the coder's write
+  // tools are fenced to (agents/fix-scope.ts), and every widening with its
+  // reason. Set on the fix turn, cleared when coding is approved again.
+  fixScope: FixScope | null;
   // How the reviewed branch was shipped (repo/delivery.ts): merged into the
   // base branch for a local-only repo, or pushed with an MR/PR opened.
   // 'kept' = a split part left on its branch for the next part to continue

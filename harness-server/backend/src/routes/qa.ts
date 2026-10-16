@@ -8,6 +8,10 @@ import { runQaAgentTurn } from '../agents/qa-agent.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { compactQaFindings } from '../sessions/qa-findings.js';
+import { qaLoopFor } from '../sessions/qa-rounds.js';
+import { qaReportIsCurrent } from '../sessions/qa-loop.js';
+import type { SessionRecord } from '../sessions/session.js';
+import { getApp } from '../apps/apps-store.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
@@ -88,16 +92,34 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     return { running: isQaTeamRunning(session.id) };
   });
 
-  app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/report', async (request, reply) => {
+  // The report on file, or with ?pass= an earlier pass's copy (qa-rounds.ts
+  // keepPassReport). `passes` lists every recorded pass for the QA tab's picker.
+  app.get<{ Params: { id: string }; Querystring: { pass?: string } }>('/api/sessions/:id/qa/report', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.qaReportPath) return { markdown: null };
-    try {
-      const markdown = await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8');
-      return { markdown };
-    } catch {
-      return { markdown: null };
+    const current = qaReportIsCurrent(session);
+    const passes = session.qaRounds.map((r) => ({
+      pass: r.pass,
+      at: r.at,
+      result: r.result,
+      hasReport: Boolean(r.reportPath) || (current && r.pass === session.qaPass),
+    }));
+    const read = async (rel: string | null | undefined) => {
+      if (!rel) return null;
+      try {
+        return await fs.readFile(path.join(config.harnessRoot, rel), 'utf8');
+      } catch {
+        return null;
+      }
+    };
+    const wanted = Number(request.query.pass);
+    if (request.query.pass !== undefined && Number.isInteger(wanted)) {
+      const round = session.qaRounds.find((r) => r.pass === wanted);
+      const fallback = current && wanted === session.qaPass ? session.qaReportPath : null;
+      const markdown = (await read(round?.reportPath)) ?? (await read(fallback));
+      return { markdown, current: current && wanted === session.qaPass, pass: wanted, passes };
     }
+    return { markdown: await read(session.qaReportPath), current, pass: session.qaPass, passes };
   });
 
   // What the coding agent gets when QA sends a branch back: only the things
@@ -106,12 +128,23 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/findings', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!session.qaReportPath) return { text: null };
+    if (!session.qaReportPath || !qaReportIsCurrent(session)) return { text: null };
+    let raw: string;
     try {
-      return { text: compactQaFindings(await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8')) };
+      raw = await fs.readFile(path.join(config.harnessRoot, session.qaReportPath), 'utf8');
     } catch {
       return { text: null };
     }
+    const loop = await loopFor(session);
+    return { text: compactQaFindings(raw, loop) };
+  });
+
+  // Why the latest QA pass failed compared with the earlier ones (sessions/qa-loop.ts),
+  // or null when it didn't fail. The QA tab shows it when the branch is looping.
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/qa/loop', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    return { loop: await loopFor(session) };
   });
 
   // The human, or the coordinator when the report fails. Sends the QA findings back to Coding for fixes instead of
@@ -152,7 +185,9 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       // A part kept on its branch for the next part is back in progress.
       ...(session.delivery?.kind === 'kept' && { delivery: null }),
       stage: 'coding-review',
-      qaFindingsPending: Boolean(session.qaReportPath),
+      // A report from an earlier pass would send the coder findings it may
+      // already have fixed: then coding reopens with nothing relayed.
+      qaFindingsPending: qaReportIsCurrent(session),
       qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
       ...(retireTeam && {
         codingTeam: null,
@@ -219,4 +254,13 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
     if (!session) return reply.code(404).send({ error: 'session not found' });
     return updateSession(session.id, { stage: 'abandoned' });
   });
+}
+
+async function loopFor(session: SessionRecord) {
+  if (!qaReportIsCurrent(session)) return null;
+  try {
+    return await qaLoopFor(session, (await getApp(session.appId)).repoRoot);
+  } catch {
+    return null;
+  }
 }

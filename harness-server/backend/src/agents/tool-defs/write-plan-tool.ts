@@ -36,7 +36,7 @@ export const writePlanSchema = z.object({
 });
 export const writePlanDescription =
   'Write (or overwrite) the plan document for this session. Pass the full markdown BODY (rationale, and for ' +
-  'each step: what it does, which files/layers it touches) plus the same steps as a minimal structured list ' +
+  'each step: what it does, which files/layers it touches, and the exact reference-doc sections it needs, if any) plus the same steps as a minimal structured list ' +
   '(id + title only — one per affected layer, not one per file, sized so each is completable in roughly a ' +
   "dozen tool calls; split a layer into multiple steps if it'd need more than that). Call this once you and " +
   'the human have converged; it can be called again to revise. The document always starts in draft status; ' +

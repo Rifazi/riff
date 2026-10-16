@@ -471,6 +471,8 @@ export interface SessionRecord {
 
   coordinatorEnabled: boolean;
   qaFindingsPending: boolean;
+  // During a QA fix: the files QA named that the coder may write, and each widening (harness-server agents/fix-scope.ts).
+  fixScope?: { paths: string[]; widened: { paths: string[]; reason: string; at: string }[]; pass: number } | null;
   qaRerunPending: boolean;
 
   reopenedFromCoding: boolean;
@@ -590,7 +592,7 @@ export interface SettingsResponse {
   localModel: { available: boolean; model: string | null; reason: string | null };
   ollamaEndpoint: string;
   jira: RedactedJiraSettings;
-  classification: { model: string };
+  classification: { model: string; agentTool?: boolean };
   classificationModels: ClassificationModelOption[];
 }
 
@@ -687,4 +689,24 @@ export interface UsageReport {
     byStage: Record<UsageStage, number>;
     usage: TokenUsage;
   }[];
+}
+
+// harness-server sessions/qa-loop.ts: why the latest QA pass failed, compared with the earlier ones.
+/** One recorded QA pass, for the QA tab's report picker. */
+export interface QaPassSummary {
+  pass: number;
+  at: string;
+  result: string | null;
+  hasReport: boolean;
+}
+
+export type QaBlockerKind = 'repeated' | 'was-note' | 'in-fix' | 'missed';
+
+export interface QaLoopAnalysis {
+  pass: number;
+  failedInARow: number;
+  blockers: { text: string; kind: QaBlockerKind; earlierPass: number | null }[];
+  looping: boolean;
+  reasons: string[];
+  smallFix: boolean;
 }

@@ -5,6 +5,7 @@ import {
   delegateSchema,
   excerptFile,
   formatResults,
+  isDescribeFilesTask,
   isFullContentsTask,
   isListFilesTask,
   listingPaths,
@@ -260,6 +261,14 @@ describe('RedoLedger', () => {
     expect(ledger.noteRead('src/a.ts')).toEqual([]);
   });
 
+  // A recall returns line ranges; reading another part of the same file isn't redoing it.
+  test('with ranges, only a read that overlaps one is a redo', () => {
+    const ledger = new RedoLedger();
+    ledger.record(['src/a.ts'], 1, 400, [{ path: 'src/a.ts', start: 429, end: 457 }]);
+    expect(ledger.noteRead('src/a.ts', { start: 753, end: 843 })).toEqual([]);
+    expect(ledger.noteRead('src/a.ts', { start: 440, end: 470 })).toEqual([{ useful: 1, savedTokens: 400 }]);
+  });
+
   test('runDelegation reports the files every successful task read', async () => {
     const runs: HelperRun[] = [
       { text: 'src/a.ts:3 does it', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 900, paths: ['src/a.ts'] },
@@ -322,6 +331,8 @@ describe('tasks that are not a helper\'s job', () => {
     expect(text).toContain('[3] client/src/pages/x.tsx:12');
     expect(text).toContain('Not delegated: 2 (a file\'s full contents');
     expect(report.useful).toBe(2);
+    // The turned-away task never reached a helper, so it isn't counted against them.
+    expect(report.tasks).toBe(2);
   });
 
   test('a single full-contents task costs one line', async () => {
@@ -338,5 +349,77 @@ describe('tasks that are not a helper\'s job', () => {
       return { text: 'a', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 0 };
     });
     expect(asked).toHaveLength(1);
+  });
+});
+
+// Tasks the EDI Viewer sessions (2ec615c4, 7bdd0d9e) sent: the plan agent asked
+// three times for "every file with a one-line description" and got bare names
+// back each time; the coding agent asked for whole files four times.
+describe('describing files and turning away full contents', () => {
+  const DESCRIBE =
+    'List all files under client/src/features/edi-viewer/lib/ and client/src/features/edi-viewer/lib/dictionary/ with a one-line description of what each file does.';
+  const DESCRIBE_EXPORTS =
+    'List all files under client/src/features/edi-viewer/lib/dictionary/ with a one-line description of what each exports';
+  const FULL = 'Show the full contents of client/src/features/edi-viewer/lib/parser852.ts (the parse852Segments function).';
+
+  test('a listing that asks what each file is', () => {
+    expect(isDescribeFilesTask(DESCRIBE)).toBe(true);
+    expect(isDescribeFilesTask(DESCRIBE_EXPORTS)).toBe(true);
+    expect(isDescribeFilesTask('List all files under client/src/ (recursively, every file path).')).toBe(false);
+    expect(isDescribeFilesTask('Describe how the validator dispatches per transaction set')).toBe(false);
+  });
+
+  test('the lister is told to describe', async () => {
+    const calls: [string[], boolean][] = [];
+    const { text } = await runDelegation(
+      { tasks: [{ task: DESCRIBE, paths: ['client/src/features/edi-viewer/lib'] }, { task: 'List all files under client/src/' }] },
+      async () => {
+        throw new Error('should not run');
+      },
+      2,
+      async (paths, describe) => {
+        calls.push([paths, describe]);
+        return describe ? '- client/src/a.ts (12 lines): parseA' : '- client/src/a.ts';
+      },
+    );
+    expect(calls).toEqual([
+      [['client/src/features/edi-viewer/lib'], true],
+      [['client/src'], false],
+    ]);
+    expect(text).toContain('[1] - client/src/a.ts (12 lines): parseA');
+  });
+
+  test('a full-contents task gets the outline of the file it names', async () => {
+    const outlined: string[][] = [];
+    const { text, report } = await runDelegation(
+      { tasks: [{ task: FULL }] },
+      async () => {
+        throw new Error('should not run');
+      },
+      2,
+      async () => '',
+      async (paths) => {
+        outlined.push(paths);
+        return 'client/src/features/edi-viewer/lib/parser852.ts: 310 lines\nfunction parse852Segments 12-180';
+      },
+    );
+    expect(outlined).toEqual([['client/src/features/edi-viewer/lib/parser852.ts']]);
+    expect(text).toStartWith("Not delegated (a file's full contents");
+    expect(text).toContain('function parse852Segments 12-180');
+    expect(report.tasks).toBe(0);
+    expect(report.useful).toBe(0);
+  });
+
+  test('among several tasks, the outline is numbered', async () => {
+    const { text } = await runDelegation(
+      { tasks: [{ task: FULL }, { task: 'Who calls parse852Segments?' }] },
+      async () => ({ text: 'lib/explainedEnvelope.ts:40', error: null, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, readChars: 100 }),
+      2,
+      async () => '',
+      async () => 'parser852.ts: 310 lines',
+    );
+    expect(text).toContain('Not delegated: 1');
+    expect(text).toContain('[1] parser852.ts: 310 lines');
+    expect(text).toContain('[2] lib/explainedEnvelope.ts:40');
   });
 });

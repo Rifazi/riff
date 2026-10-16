@@ -1,6 +1,11 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { simpleGit, type SimpleGit } from 'simple-git';
+
+const execFileAsync = promisify(execFile);
 
 // The base branch for apps created before base branches were per-app (see
 // AppConfig.baseBranch), and for brand-new repos setupGitRepo() initializes.
@@ -385,6 +390,27 @@ export async function addWorktree(repoRoot: string, worktreePath: string, branch
   }
 }
 
+/**
+ * Copies the repo's git-ignored `.env*` files into a worktree that lacks
+ * them: a checkout only has tracked files, so a build step that reads one
+ * (e.g. a script needing COUNTRY) failed in every team worktree. Existing
+ * files in the worktree are left alone. Returns the paths copied.
+ */
+export async function copyLocalEnvFiles(repoRoot: string, worktreePath: string): Promise<string[]> {
+  // --directory lists an ignored folder (node_modules/) as one entry instead
+  // of every file in it.
+  const out = await client(repoRoot).raw(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory']);
+  const copied: string[] = [];
+  for (const rel of out.split('\n')) {
+    if (!rel || rel.endsWith('/') || !path.basename(rel).startsWith('.env')) continue;
+    const target = path.join(worktreePath, rel);
+    if (existsSync(target) || !existsSync(path.dirname(target))) continue;
+    copyFileSync(path.join(repoRoot, rel), target);
+    copied.push(rel);
+  }
+  return copied;
+}
+
 export async function removeWorktree(repoRoot: string, worktreePath: string): Promise<void> {
   const git = client(repoRoot);
   try {
@@ -446,6 +472,28 @@ export async function shortStatus(repoRoot: string): Promise<string> {
   return client(repoRoot).raw(['status', '--short', '-uall', '--', '.', ':(exclude)node_modules']);
 }
 
+/**
+ * The content of the working tree, uncommitted and untracked files
+ * included (.gitignore and node_modules aside), as a tree hash: the same
+ * files give the same hash whatever has been committed. Staged in a copy of
+ * the index, so the real one is untouched.
+ */
+export async function worktreeFingerprint(repoRoot: string): Promise<string> {
+  const index = path.resolve(repoRoot, (await client(repoRoot).raw(['rev-parse', '--git-path', 'index'])).trim());
+  const scratch = path.join(os.tmpdir(), `riff-fingerprint-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // execFile, not simple-git: simple-git refuses an env that carries GIT_EDITOR and the like.
+  const git = (args: string[]) =>
+    execFileAsync('git', args, { cwd: repoRoot, env: { ...process.env, GIT_INDEX_FILE: scratch }, maxBuffer: 10_000_000 });
+  try {
+    if (existsSync(index)) copyFileSync(index, scratch);
+    // Check output (junit.xml, coverage/) changes with every run, not the code.
+    await git(['add', '-A', '--', '.', ':(exclude)node_modules', ':(exclude,glob)**/junit.xml', ':(exclude,glob)**/coverage/**']);
+    return (await git(['write-tree'])).stdout.trim();
+  } finally {
+    rmSync(scratch, { force: true });
+  }
+}
+
 /** Commits everything (node_modules aside), or with `scope` only what's inside it. */
 export async function commitAll(repoRoot: string, message: string, scope?: string[]): Promise<string | null> {
   const git = client(repoRoot);
@@ -460,6 +508,39 @@ export async function commitCount(repoRoot: string, from: string, to: string): P
   return Number(out.trim()) || 0;
 }
 
+/** Every tracked and untracked (not ignored) file, repo-relative. */
+export async function listRepoFiles(repoRoot: string): Promise<string[]> {
+  const out = await client(repoRoot).raw(['ls-files', '-co', '--exclude-standard']);
+  return out.split('\n').map((f) => f.trim()).filter(Boolean);
+}
+
+export async function revParse(repoRoot: string, ref: string): Promise<string | null> {
+  try {
+    return (await client(repoRoot).raw(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The last commit on `ref` made before `iso`, or null. */
+export async function commitBefore(repoRoot: string, ref: string, iso: string): Promise<string | null> {
+  try {
+    return (await client(repoRoot).raw(['rev-list', '-1', `--before=${iso}`, ref])).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Files that differ between two commits, or null when either can't be read. */
+export async function changedFilesBetween(repoRoot: string, from: string, to: string): Promise<string[] | null> {
+  try {
+    const out = await client(repoRoot).raw(['diff', '--name-only', from, to, '--', '.', ':(exclude)node_modules']);
+    return out.split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Merges `branch` into whatever the main checkout at repoRoot has checked
  * out (the session branch), as its own merge commit so the history shows
@@ -471,7 +552,7 @@ export async function mergeBranch(
   branch: string,
   message: string,
   into?: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; stage: 'checkout' | 'merge' }> {
   const git = client(repoRoot);
   // The main checkout is shared with the human and other sessions on this
   // app: never merge into whatever happens to be checked out, or on top of
@@ -479,10 +560,14 @@ export async function mergeBranch(
   if (into) {
     const current = await currentBranch(repoRoot);
     if (current !== into) {
-      return { ok: false, error: `${repoRoot} is on "${current}", not "${into}" — switch it back to ${into}, then resume the team.` };
+      return {
+        ok: false,
+        stage: 'checkout',
+        error: `${repoRoot} is on "${current}", not "${into}" — switch it back to ${into}, then resume the team.`,
+      };
     }
     if (await hasUncommittedChanges(repoRoot)) {
-      return { ok: false, error: `${into} has uncommitted changes in ${repoRoot} — commit or stash them, then resume the team.` };
+      return { ok: false, stage: 'checkout', error: `${into} has uncommitted changes in ${repoRoot} — commit or stash them, then resume the team.` };
     }
   }
   try {
@@ -490,6 +575,6 @@ export async function mergeBranch(
     return { ok: true };
   } catch (err) {
     await git.raw(['merge', '--abort']).catch(() => undefined);
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, stage: 'merge', error: err instanceof Error ? err.message : String(err) };
   }
 }

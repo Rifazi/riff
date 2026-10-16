@@ -49,11 +49,13 @@ export const delegateDescription =
   'They search and read the repo themselves; only the answer enters your context, not the files they read. ' +
   'Use for exploration: where something is defined, who calls a function, does a pattern already exist, ' +
   'which files a change touches, whether a file or directory exists. ' +
-  'A task that only lists the files under a path is answered straight from the repo (in an app that follows an ' +
-  "architecture, from the domains' generated Files sections), without a helper. " +
-  "Don't use for a file's full contents (answers are cut at 2,400 characters, so such a task is turned away: " +
-  "outline_file it and read_file the range you need), for text you're about to edit (edit_file needs it verbatim — " +
-  'read that range yourself), or for anything that needs judgment about the plan. ' +
+  'A task that lists the files under a path, or describes each one, is answered straight from the repo with each ' +
+  "file's line count and exports (in an app that follows an architecture, from the domains' generated Files " +
+  'sections), without a helper. ' +
+  "Don't use for a file's full contents (answers are cut at 2,400 characters, so such a task only gets the file's " +
+  "outline back: call outline_file yourself and read_file the range you need), for text you're about to edit (edit_file needs it verbatim — " +
+  'read that range yourself), or for anything that needs judgment about the plan. Helpers only search and read ' +
+  "files: they can't run git or shell commands, see history or uncommitted diffs, or count a long list exactly. " +
   'Ask each task as a precise question: ask for a path:line, a complete list, or a yes/no with the path — ' +
   'whatever the question actually needs. A task that finds nothing comes back as one line. ' +
   'Verify a surprising answer with ranged read_file before acting.';
@@ -216,9 +218,11 @@ export const DELEGATE_NOTE =
   'change touch.\n\n' +
   '**Batch independent questions into one call** — they run in parallel and the combined cost is one tool result ' +
   'instead of many. Group unrelated lookups that can happen at the same time.\n\n' +
-  "**Don't delegate** a file's full contents (turned away: outline_file it and read_file the range you need), " +
+  "**Don't delegate** a file's full contents (it only returns the file's outline: call outline_file yourself and " +
+  'read_file the range you need), ' +
   'text you are about to edit (you need it verbatim for edit_file — read that range yourself), ' +
-  'facts you already have in the conversation, or questions that need judgment about the plan.\n\n' +
+  'facts you already have in the conversation, questions that need judgment about the plan, or anything that needs ' +
+  'git, a shell command or an exact count of a long list (helpers only search and read files).\n\n' +
   'A task that finds nothing comes back as one short line. Check a surprising answer with a ranged read_file ' +
   'before acting on it — the helpers are smaller models.';
 
@@ -228,10 +232,16 @@ export const DELEGATE_NOTE =
 const LIST_FILES_RE =
   /\b(list|show|give|enumerate)\s+(me\s+)?(all|every|the)?\s*(\w+\s+)?(files?|file\s+(tree|paths?)|folders?|subfolders?|directories)\b(?!\s+(that|which|where|whose|using|importing|referencing|calling|containing|with|mentioning))/i;
 const FULL_CONTENTS_RE = /\b(full|entire|whole|complete)\s+(contents?|source|text|file)\b/i;
+// A listing that also asks what each file is: answered with each file's exports, not bare names.
+const DESCRIBE_RE = /\b(descri(be|bes|bing|ptions?)|what (each|it|they|every \w+) (does|do|exports?|is for|are for)|purpose|exports?|summar(y|ies|ise|ize))\b/i;
 const TASK_PATH_RE = /(?:^|[\s(`'"])((?:\.\/)?[\w@.-]+(?:\/[\w@.*-]+)+\/?)/g;
 
 export function isListFilesTask(task: string): boolean {
   return LIST_FILES_RE.test(task) && !FULL_CONTENTS_RE.test(task);
+}
+
+export function isDescribeFilesTask(task: string): boolean {
+  return isListFilesTask(task) && DESCRIBE_RE.test(task);
 }
 
 export function isFullContentsTask(task: string): boolean {
@@ -325,6 +335,8 @@ export interface DelegateTaskResult {
   localTokens: number;
   // Turned away without a helper (a full file's contents).
   refused?: boolean;
+  // A turned-away full-contents task: the outline of the files it named, so the agent can read just a range.
+  outline?: string | null;
 }
 
 /**
@@ -338,18 +350,21 @@ export function formatResults(results: DelegateTaskResult[]): string {
   const empty = numbered.filter((r) => !r.answer && !r.error && !r.refused);
   const failed = numbered.filter((r) => !r.answer && r.error);
   const refused = numbered.filter((r) => r.refused);
+  const outlined = refused.some((r) => r.outline);
   const refusedLine = (ns: number[]) =>
     `Not delegated${results.length > 1 ? `: ${ns.join(', ')}` : ''} (a file's full contents: answers are cut at ` +
-    `${MAX_ANSWER_CHARS.toLocaleString('en-US')} characters. outline_file it and read_file only the range you need).`;
+    `${MAX_ANSWER_CHARS.toLocaleString('en-US')} characters. ` +
+    `${outlined ? 'Its outline is below: read_file' : 'outline_file it and read_file'} only the range you need).`;
 
-  if (results.length === 1 && refused.length) return refusedLine([1]);
+  const outlines = refused.filter((r) => r.outline).map((r) => (results.length > 1 ? `[${r.n}] ${r.outline}` : r.outline!));
+  if (results.length === 1 && refused.length) return [refusedLine([1]), ...outlines].join('\n\n');
   if (useful.length === 0 && failed.length === 0 && !refused.length) return 'Nothing found. Look yourself, or ask a narrower question.';
   if (results.length === 1) {
     return useful.length ? useful[0].answer! : `Helper failed (${failed[0].error}). Do this one yourself.`;
   }
   const parts = useful.map((r) => `[${r.n}] ${r.answer}`);
   if (empty.length) parts.push(`Nothing found: ${empty.map((r) => r.n).join(', ')}.`);
-  if (refused.length) parts.push(refusedLine(refused.map((r) => r.n)));
+  if (refused.length) parts.push(refusedLine(refused.map((r) => r.n)), ...outlines);
   if (failed.length) {
     const reasons = [...new Set(failed.map((r) => r.error))].join('; ');
     parts.push(`Failed, do yourself: ${failed.map((r) => r.n).join(', ')} (${reasons}).`);
@@ -419,13 +434,22 @@ export async function runDelegation(
   input: DelegateInput,
   runHelper: (prompt: string) => Promise<HelperRun>,
   parallel = DELEGATE_PARALLEL,
-  // Answers a listing task from the repo (exact and free); without it, a helper does.
-  listFiles?: (paths: string[]) => Promise<string>,
+  // Answers a listing task from the repo (exact and free), with each file's exports when the task asks
+  // what the files are; without it, a helper does.
+  listFiles?: (paths: string[], describe: boolean) => Promise<string>,
+  // Outlines the files a turned-away full-contents task names, so its answer says where to read.
+  outlineFiles?: (paths: string[]) => Promise<string | null>,
 ): Promise<{ text: string; report: DelegateReport }> {
   const tasks = normalizeTasks(input);
   const kinds = tasks.map((t) => (isFullContentsTask(t.task) ? 'refused' : listFiles && isListFilesTask(t.task) ? 'listing' : 'helper'));
   const direct = await Promise.all(
-    tasks.map((t, i) => (kinds[i] === 'listing' ? listFiles!(listingPaths(t)).catch(() => null) : Promise.resolve(null))),
+    tasks.map((t, i) =>
+      kinds[i] === 'listing'
+        ? listFiles!(listingPaths(t), isDescribeFilesTask(t.task)).catch(() => null)
+        : kinds[i] === 'refused' && outlineFiles
+          ? outlineFiles(listingPaths(t)).catch(() => null)
+          : Promise.resolve(null),
+    ),
   );
   // A listing that failed goes to a helper after all.
   const toHelper = tasks.map((_, i) => kinds[i] === 'helper' || (kinds[i] === 'listing' && direct[i] === null));
@@ -441,7 +465,9 @@ export async function runDelegation(
   const runs: HelperRun[] = tasks.map((_, i) => (toHelper[i] ? helperRuns[next++] : { text: '', error: null, usage: NO_USAGE, readChars: 0 }));
   const results: DelegateTaskResult[] = runs.map((run, i) =>
     !toHelper[i]
-      ? { answer: direct[i], error: null, readChars: 0, localTokens: 0, refused: kinds[i] === 'refused' }
+      ? kinds[i] === 'refused'
+        ? { answer: null, error: null, readChars: 0, localTokens: 0, refused: true, outline: direct[i] }
+        : { answer: direct[i], error: null, readChars: 0, localTokens: 0 }
       : {
           answer: run.error ? null : cleanAnswer(run.text),
           error: run.error ? shortError(run.error) : null,
@@ -462,7 +488,8 @@ export async function runDelegation(
   return {
     text,
     report: {
-      tasks: tasks.length,
+      // A turned-away task never reached a helper, so it doesn't count against them.
+      tasks: kinds.filter((k) => k !== 'refused').length,
       useful: results.filter((r) => r.answer).length,
       usage,
       savedTokens: savedTokens(results, text),
@@ -484,21 +511,32 @@ const normalizePath = (p: string) => p.replace(/^\.\//, '');
  * cancels them.
  */
 export class RedoLedger {
-  private open: { paths: Set<string>; useful: number; savedTokens: number }[] = [];
+  private open: { paths: Set<string>; ranges: LineRange[] | null; useful: number; savedTokens: number }[] = [];
 
-  record(paths: string[], useful: number, savedTokens: number): void {
+  /** `ranges`: the lines a recall returned. A later read redoes it only if it overlaps one; without, any read of the path does. */
+  record(paths: string[], useful: number, savedTokens: number, ranges?: LineRange[]): void {
     if (useful <= 0 || paths.length === 0) return;
-    this.open.push({ paths: new Set(paths.map(normalizePath)), useful, savedTokens });
+    const normalized = ranges?.map((r) => ({ ...r, path: normalizePath(r.path) })) ?? null;
+    this.open.push({ paths: new Set(paths.map(normalizePath)), ranges: normalized, useful, savedTokens });
   }
 
-  /** Delegations the paid agent just redid by reading `filePath`; each is returned at most once. */
-  noteRead(filePath: string): { useful: number; savedTokens: number }[] {
+  /** Delegations the paid agent just redid by reading `filePath` (`lines` of it); each is returned at most once. */
+  noteRead(filePath: string, lines?: { start: number; end: number }): { useful: number; savedTokens: number }[] {
     const p = normalizePath(filePath);
-    const redone = this.open.filter((d) => d.paths.has(p));
+    const redoes = (d: (typeof this.open)[number]) =>
+      d.paths.has(p) &&
+      (!d.ranges || !lines || d.ranges.some((r) => r.path === p && r.start <= lines.end && lines.start <= r.end));
+    const redone = this.open.filter(redoes);
     if (redone.length === 0) return [];
-    this.open = this.open.filter((d) => !d.paths.has(p));
+    this.open = this.open.filter((d) => !redoes(d));
     return redone.map(({ useful, savedTokens }) => ({ useful, savedTokens }));
   }
+}
+
+export interface LineRange {
+  path: string;
+  start: number;
+  end: number;
 }
 
 const approxTokens = (chars: number) => {

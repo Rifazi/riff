@@ -23,7 +23,8 @@ import { createDocsSearchTools } from '../../tool-defs/docs-search-tool.js';
 import { createSearchCodeExecute, createSearchCodeTool, type SearchListing } from '../../tool-defs/code-search-tool.js';
 import type { AppConfig } from '../../../apps/apps.js';
 import { domainListing } from '../../../architecture/focus.js';
-import { createOutlineFileTool } from '../../tool-defs/outline-tool.js';
+import { createOutlineFileExecute, createOutlineFileTool } from '../../tool-defs/outline-tool.js';
+import { describeFiles } from '../../describe-files.js';
 import { createFileExecutors, readFileDescription, readFileSchema, type FileToolDeps } from '../../tool-defs/file-tools.js';
 import { createQaExecutors, runCheckedCommandSchema, runCheckedCommandDescription, type CheckCommand } from '../../tool-defs/qa-tools.js';
 import { generateLocal } from '../../local-llm.js';
@@ -91,6 +92,25 @@ export function delegateDeps(params: {
   };
 }
 
+const MAX_DESCRIBED_FILES = 60;
+const MAX_OUTLINE_CHARS = 6_000;
+
+async function repoFiles(repoRoot: string, glob: string | undefined): Promise<string[]> {
+  const { stdout } = await execFileAsync('git', ['ls-files', '-z', '-co', '--exclude-standard', '--', glob ?? '.'], {
+    cwd: repoRoot,
+    maxBuffer: 20_000_000,
+  });
+  return stdout.split('\0').filter(Boolean);
+}
+
+async function isFile(repoRoot: string, filePath: string): Promise<boolean> {
+  try {
+    return (await stat(path.join(repoRoot, filePath))).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function createDelegateExecute(deps: DelegateDeps) {
   const runHelper =
     deps.runHelper ??
@@ -100,12 +120,28 @@ export function createDelegateExecute(deps: DelegateDeps) {
   // A listing task is answered by search_code's listing: the domains' Files
   // sections in a Wayfinding app, else the tracked paths.
   const searchCode = createSearchCodeExecute({ repoRoot: deps.repoRoot, listing: deps.listing });
-  const listFiles = async (paths: string[]) => {
-    const lists = await Promise.all((paths.length ? paths : [undefined]).map((glob) => searchCode({ query: '.', glob })));
+  // A task that asks what each file is gets each file's line count and exports
+  // instead (a Wayfinding listing already carries them).
+  const listFiles = async (paths: string[], describe: boolean) => {
+    const globs = paths.length ? paths : [undefined];
+    if (describe && !deps.listing) {
+      const lists = await Promise.all(globs.map((glob) => repoFiles(deps.repoRoot, glob)));
+      return describeFiles(deps.repoRoot, [...new Set(lists.flat())], MAX_DESCRIBED_FILES).join('\n');
+    }
+    const lists = await Promise.all(globs.map((glob) => searchCode({ query: '.', glob })));
     return lists.join('\n\n');
   };
+  // A full-contents task is turned away with the outline of the files it names.
+  const outline = createOutlineFileExecute({ repoRoot: deps.repoRoot });
+  const outlineFiles = async (paths: string[]) => {
+    const files = (await Promise.all(paths.map(async (p) => ((await isFile(deps.repoRoot, p)) ? p : null)))).filter((p): p is string => !!p);
+    if (files.length === 0) return null;
+    const outlines = await Promise.all(files.slice(0, 3).map((file) => outline({ path: file }).catch(() => null)));
+    const text = outlines.filter(Boolean).join('\n\n');
+    return text ? text.slice(0, MAX_OUTLINE_CHARS) : null;
+  };
   return async (input: DelegateInput): Promise<string> => {
-    const { text, report } = await runDelegation(input, runHelper, undefined, listFiles);
+    const { text, report } = await runDelegation(input, runHelper, undefined, listFiles, outlineFiles);
     const { usage, paths, ...rest } = report;
     const stats = { helper: 'research' as const, model: deps.model, ...rest, localTokens: usage.input + usage.output };
     await reportHelperRun(deps.context, stats, delegateStatsLine(stats), usage);

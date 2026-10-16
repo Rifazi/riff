@@ -1,11 +1,35 @@
 import matter from 'gray-matter';
+import { findingFiles, loopBrief, type QaCriterionRecord, type QaLoopAnalysis } from './qa-loop.js';
 
-/**
- * The part of a QA report that needs acting on: result, failing checks, the
- * blocking findings and the non-blocking notes QA still wants acted on. Used for the send-back relay to the coding agent
- * and to brief a fresh QA pass on what it flagged last time.
- */
-export function compactQaFindings(raw: string): string {
+export interface ParsedQaReport {
+  result: string | null;
+  failedChecks: string[];
+  blocking: string[];
+  notes: string[];
+  // The acceptance-criteria checklist: `- [x] <criterion> — <where>` lines.
+  criteria: QaCriterionRecord[];
+}
+
+const CHECK_LINE = /^- \[( |x|X)\]\s*(.+)$/;
+
+/** The report body's acceptance-criteria checklist, one record per line. */
+export function reportCriteria(body: string): QaCriterionRecord[] {
+  const out: QaCriterionRecord[] = [];
+  for (const raw of body.split('\n')) {
+    const m = CHECK_LINE.exec(raw.trim());
+    if (!m) continue;
+    const rest = m[2].trim();
+    // Blocking/note findings use the same bullet shape in older reports.
+    if (/^\[(blocking|note|nit)\]/i.test(rest)) continue;
+    const text = rest.split(/\s+[—–-]\s+/)[0].trim();
+    if (!text) continue;
+    out.push({ text, verdict: m[1] === ' ' ? 'not-met' : 'met', files: findingFiles(rest) });
+  }
+  return out;
+}
+
+/** The parts of a QA report that need acting on: result, failing checks, blocking findings and notes. */
+export function parseQaReport(raw: string): ParsedQaReport {
   const parsed = matter(raw);
   const d = parsed.data as Record<string, unknown>;
   const failedChecks = (
@@ -21,7 +45,7 @@ export function compactQaFindings(raw: string): string {
   // Reports written before blocking-findings existed: fall back to the
   // unchecked criteria and [blocking] lines the prompt's template produces.
   const listed = Array.isArray(d['blocking-findings']) ? (d['blocking-findings'] as unknown[]).map(String) : null;
-  const findings =
+  const blocking =
     listed ??
     parsed.content
       .split('\n')
@@ -39,11 +63,37 @@ export function compactQaFindings(raw: string): string {
         .filter((l) => /^- \[(note|nit)\]/i.test(l))
         .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''));
 
-  let text = `QA result: ${d.result ?? '?'}`;
+  return {
+    result: typeof d.result === 'string' ? d.result : null,
+    failedChecks,
+    blocking,
+    notes,
+    criteria: reportCriteria(parsed.content),
+  };
+}
+
+/**
+ * The part of a QA report that needs acting on: result, failing checks, the
+ * blocking findings and the non-blocking notes QA still wants acted on. Used for the send-back relay to the coding agent.
+ * With `loop`, it opens with how this branch has been going back and forth.
+ */
+export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = null): string {
+  const { result, failedChecks, blocking, notes } = parseQaReport(raw);
+
+  let text = `QA result: ${result ?? '?'}`;
   if (failedChecks.length > 0) text += ` — failing checks: ${failedChecks.join(', ')}`;
-  text += findings.length > 0 ? `\n\nFix:\n${findings.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  if (loop?.looping) text += `\n\n${loopBrief(loop)}`;
+  text += blocking.length > 0 ? `\n\nFix:\n${blocking.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
   if (notes.length > 0) {
-    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n) => `- ${n}`).join('\n')}`;
+    text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`;
   }
+  if (blocking.length > 0 || notes.length > 0) text += `\n\n${FIX_RULES}`;
   return text;
 }
+
+// Two things sent branches back more than once: fixes nothing tested (one
+// broke the line it fixed), and notes skipped without a word that the next
+// pass made blocking.
+export const FIX_RULES =
+  'For each blocking finding, fix it and add or change a test that fails without the fix. For each note, act on ' +
+  "it or call note_for_qa saying why you didn't: QA re-checks every note, and one skipped without a reason comes back.";

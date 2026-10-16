@@ -121,6 +121,9 @@ export function isClassificationModel(value: string): boolean {
 
 export interface ClassificationSettings {
   model: string;
+  // Whether agents get the classify_text tool. Off unless turned on: no agent
+  // called it in 580 logged turns, and its schema rode along on every request.
+  agentTool?: boolean;
 }
 
 export const DEFAULT_CLASSIFICATION_SETTINGS: ClassificationSettings = {

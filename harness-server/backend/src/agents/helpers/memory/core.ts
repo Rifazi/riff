@@ -22,6 +22,41 @@ const CHARS_PER_TOKEN = 4;
 
 export const NOT_IN_MEMORY = "Not in memory: nothing read in this session answers that. Read the file.";
 
+// A recall of a few named files that fit in this many chars comes back
+// whole, with no local model: half of all recalls were followed by a
+// read_file of the same file, for the rest of it. Asked for the full
+// contents, up to one read_file page is handed back.
+export const WHOLE_FILES_CHARS = 6_000;
+const WHOLE_FILE_QUESTION_RE =
+  /\b(full|entire|whole|complete)\s+(contents?|source|text|file|definition|body)s?\b|\bverbatim\b|\ball (of )?(the )?(lines|contents?)\b/i;
+
+/** Whether the question asks for a file as a whole rather than a part of it. */
+export function asksForWholeFile(question: string): boolean {
+  return WHOLE_FILE_QUESTION_RE.test(question);
+}
+
+/**
+ * The remembered files themselves, one excerpt per contiguous run, when the
+ * recall names at most 3 files (`scoped`) and what's remembered of them fits
+ * WHOLE_FILES_CHARS, or READ_PAGE_CHARS for a question that asks for the
+ * whole file; else null and the local model picks lines as usual.
+ */
+export function wholeFileExcerpts(question: string, entries: Map<string, MemoryEntry>, scoped: boolean): Excerpt[] | null {
+  if (!scoped || entries.size === 0 || entries.size > 3) return null;
+  const limit = asksForWholeFile(question) ? READ_PAGE_CHARS : WHOLE_FILES_CHARS;
+  let total = 0;
+  const out: Excerpt[] = [];
+  for (const [key, entry] of entries) {
+    if (entry.lines.length === 0) return null;
+    total += entryChars(entry);
+    if (total > limit) return null;
+    for (const run of contiguousRuns(entry.lines)) {
+      out.push({ key, path: entry.path, view: entry.view, start: run[0][0], end: run.at(-1)![0] });
+    }
+  }
+  return out;
+}
+
 export const recallSchema = z.object({
   question: z
     .string()
@@ -34,14 +69,14 @@ export const recallSchema = z.object({
 export type RecallInput = z.infer<typeof recallSchema>;
 
 export const recallDescription =
-  'Get the exact lines you need from files already read in this session, by you before a context reset or by a ' +
-  'teammate, without reading the file again. Returns the matching lines verbatim with path:line and whether the ' +
+  'Get the exact lines you need from files already read or written in this session (by you before a context ' +
+  'reset, by the plan agent, or by a teammate) without reading the file again. Returns the matching lines verbatim with path:line and whether the ' +
   'file has changed since it was read. Much cheaper than read_file for a file you have read before. If it says ' +
   'the lines are not in memory or the file changed, use read_file.';
 
 export const MEMORY_NOTE =
-  '\n\n# Read memory\n\nEvery file read in this session (by you, by earlier conversations of yours, and by your ' +
-  "teammates or engineers on their branches) is kept in memory. Before reading a file again, call `recall` with " +
+  '\n\n# Read memory\n\nEvery file read or written in this session (by you, by earlier conversations of yours, by ' +
+  "the plan agent, and by your teammates or engineers on their branches) is kept in memory. Before reading a file again, call `recall` with " +
   'what you need from it: it returns just those lines, verbatim. Use read_file for files nobody has read yet, and ' +
   'when recall says the lines are missing or changed.';
 

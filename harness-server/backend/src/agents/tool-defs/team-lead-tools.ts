@@ -11,6 +11,7 @@ import {
   diffStatAgainstBase,
   mergeBranch,
   removeWorktree,
+  revParse,
   shortStatus,
   withRepoLock,
 } from '../../repo/git.js';
@@ -18,7 +19,10 @@ import { isTeamRunning, memberWorktree, wakeTeam } from '../team/team-state.js';
 import {
   dropProblem,
   isSettled,
+  mergeCommitMessage,
+  mergeFailureReason,
   mergeProblem,
+  mergeRetryProblem,
   roundOutcome,
   sendBackProblem,
   STALE_CHECKOUT_NOTE,
@@ -208,6 +212,9 @@ export function createMergeWorkstreamExecute(deps: TeamLeadDeps) {
     const problem = mergeProblem(member, id);
     if (problem) throw new Error(problem);
     const m = member!;
+    const heads = { head: await revParse(deps.repoRoot, m.branch), into: await revParse(deps.repoRoot, branch) };
+    const retry = mergeRetryProblem(m.mergeFailure, heads);
+    if (retry) throw new Error(`Not merged — ${retry}`);
 
     const setMember = (fn: (x: CodingTeamMember) => void) =>
       mutateSession(deps.sessionId, (s) => {
@@ -219,13 +226,15 @@ export function createMergeWorkstreamExecute(deps: TeamLeadDeps) {
       x.status = 'merging';
     });
     const merged = await withRepoLock(deps.repoRoot, () =>
-      mergeBranch(deps.repoRoot, m.branch, `chore: merge ${m.id} workstream — ${m.title}`, branch),
+      mergeBranch(deps.repoRoot, m.branch, mergeCommitMessage(m), branch),
     );
     if (!merged.ok) {
-      const reason = merged.error.split('\n')[0];
+      const reason = mergeFailureReason(merged.error);
       await setMember((x) => {
         x.status = m.status;
         x.note = `Merge failed: ${reason}`;
+        // A checkout problem (dirty, wrong branch) is fixed without a new commit, so only the merge itself is remembered.
+        if (merged.stage === 'merge') x.mergeFailure = { at: new Date().toISOString(), ...heads, reason };
       });
       throw new Error(
         `Not merged — ${reason}. If it's a conflict, send it back with what to reconcile, or fix the session branch and try again.`,
@@ -240,6 +249,7 @@ export function createMergeWorkstreamExecute(deps: TeamLeadDeps) {
       if (!x) return;
       x.status = 'merged';
       x.note = null;
+      x.mergeFailure = null;
       x.finishedAt = new Date().toISOString();
       for (const step of s.codingPlan ?? []) if (x.stepIds.includes(step.id)) step.status = 'done';
     });

@@ -75,6 +75,20 @@ function helperFailed(helper: HelperName, resultEntry: TranscriptEntry | undefin
 }
 
 // Live runs and failed ones open by default; older successful ones stay collapsed.
+// A tool input's `paths` as stored: models sometimes send the array as a
+// JSON-encoded string, or a single path.
+function pathList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((p): p is string => typeof p === 'string');
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.filter((p): p is string => typeof p === 'string');
+  } catch {
+    // a plain path
+  }
+  return [value];
+}
+
 const opensOnLoad = (callEntry: TranscriptEntry, failed: boolean) => failed || callEntry.id.startsWith('overlay-');
 
 const approxTokens = (chars: number) => {
@@ -131,7 +145,7 @@ function ResearchDialog({
   resultEntry?: TranscriptEntry;
   stats: HelperRunStats | null;
 }) {
-  const input = callEntry.toolInput as { tasks?: { task?: string; paths?: string[] }[] } | undefined;
+  const input = callEntry.toolInput as { tasks?: { task?: string; paths?: unknown }[] } | undefined;
   const tasks = input?.tasks ?? [];
   const savedBadge = stats?.savedTokens ? ` · saved ≈${approxTokens((stats.savedTokens ?? 0) * 4)}` : '';
   const isError = helperFailed('research', resultEntry);
@@ -148,8 +162,8 @@ function ResearchDialog({
           {tasks.map((t, i) => (
             <li key={i}>
               <span>{t.task}</span>
-              {t.paths?.length ? (
-                <span className="font-mono opacity-50 ml-1">— {t.paths.join(', ')}</span>
+              {pathList(t.paths).length ? (
+                <span className="font-mono opacity-50 ml-1">— {pathList(t.paths).join(', ')}</span>
               ) : null}
             </li>
           ))}
@@ -308,7 +322,8 @@ function MemoryDialog({
   resultEntry?: TranscriptEntry;
   stats: HelperRunStats | null;
 }) {
-  const input = callEntry.toolInput as { question?: string; paths?: string[] } | undefined;
+  const input = callEntry.toolInput as { question?: string; paths?: unknown } | undefined;
+  const paths = pathList(input?.paths);
   const result = resultEntry ? toolResultText(resultEntry.toolResult) : '';
   const found = Boolean(stats?.useful);
   const failed = helperFailed('memory', resultEntry);
@@ -322,7 +337,7 @@ function MemoryDialog({
       startOpen={opensOnLoad(callEntry, failed)}
     >
       <div className="space-y-2 text-xs">
-        {input?.paths?.length ? <div className="font-mono text-muted-foreground opacity-60">in {input.paths.join(', ')}</div> : null}
+        {paths.length ? <div className="font-mono text-muted-foreground opacity-60">in {paths.join(', ')}</div> : null}
         {resultEntry && (
           <div className="whitespace-pre-wrap break-all text-muted-foreground font-mono">{result}</div>
         )}

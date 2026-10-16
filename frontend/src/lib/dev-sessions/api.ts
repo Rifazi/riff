@@ -1,5 +1,6 @@
 import type { TeamKind } from './useTeamRun';
 import type {
+  QaPassSummary,
   AppConfig,
   AppPrompts,
   ArchitectureAudit,
@@ -10,6 +11,7 @@ import type {
   CreateJiraTicketsResult,
   DeliveryPlan,
   Integration,
+  QaLoopAnalysis,
   JiraSettingsFields,
   AttachmentInput,
   MeetingSourceInput,
@@ -283,11 +285,16 @@ export const api = {
       body: JSON.stringify({ note }),
     }).then((r) => json<SessionRecord>(r)),
 
-  getQaReport: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/qa/report`)).then((r) => json<{ markdown: string | null }>(r)),
+  getQaReport: (id: string, pass?: number) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/report${pass === undefined ? '' : `?pass=${pass}`}`)).then((r) =>
+      json<{ markdown: string | null; current?: boolean; pass?: number; passes?: QaPassSummary[] }>(r),
+    ),
 
   getQaFindings: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/findings`)).then((r) => json<{ text: string | null }>(r)),
+
+  getQaLoop: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/loop`)).then((r) => json<{ loop: QaLoopAnalysis | null }>(r)),
 
   approveQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
@@ -307,7 +314,7 @@ export const api = {
     models?: Partial<Record<Role, RoleModelConfig>>;
     ollamaEndpoint?: string;
     jira?: Partial<JiraSettingsFields> & { apiToken?: string | null };
-    classification?: { model?: string };
+    classification?: { model?: string; agentTool?: boolean };
   }) =>
     fetch(apiUrl('/api/settings'), {
       method: 'POST',

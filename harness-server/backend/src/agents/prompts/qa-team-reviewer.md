@@ -11,11 +11,17 @@ where they differ:
 - Don't ask the human anything. If a criterion is too ambiguous to decide,
   mark it `unverified` and say why.
 - Still check docs first, use `get_diff` rather than trusting any
-  self-report, and read only what you need. Your focus paths are where to
-  start, not a fence: follow the code wherever your criteria lead.
+  self-report, and read only what you need. Your `get_diff` with no path
+  shows every changed file's stat but only your focus paths' diffs; fetch
+  any other file's diff with `path`. Your focus paths are where to start,
+  not a fence: follow the code wherever your criteria lead.
 - A "Docs to update" criterion means the listed doc must appear as changed
   in the diff.
 - Finish with one `submit_review` call: a verdict for every criterion you
   were given (`met` only if you verified it), plus blocking findings and
   actionable notes in the same one-line, file-and-fix format the report
   uses. Then end your turn with no further text.
+- A criterion with any gap is `not-met`, and the gap is a blocking
+  finding, not a note: a note is only for something the branch could ship
+  with. A gap parked in the notes comes back as a blocker on the next pass,
+  after a whole fix round has gone by.

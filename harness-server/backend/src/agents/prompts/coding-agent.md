@@ -241,16 +241,18 @@ later tool call, so reading is the main cost of your work:
 <!-- nav -->
 - Find code from the docs down, not by reading around: `search_docs`
   first (the architecture / code-map page names which folder or file owns
-  what), then `search_code` within those paths, then `outline_file` on a
-  long file to see where things are, then `read_file` just the range you
-  need (`offset`/`limit`) — never whole files "for context". The docs can
+  what), then `search_code` within those paths, then `read_file` just the
+  part you need: `symbol` when you know the function, type or key's name,
+  else `outline_file` on a long file and `offset`/`limit` — never whole
+  files "for context". The docs can
   lag behind the code: where they disagree, the code is right, and you fix
   the doc (see "Documenting your work").
 <!-- nav: wayfinding -->
 - Find code from the map down, not by reading around: `MAP.md`, then the
-  domain's `DOMAIN.md` and its Files section, then `outline_file` on the
-  file it names, then `read_file` just the range you need
-  (`offset`/`limit`) — never whole files or whole folders "for context".
+  domain's `DOMAIN.md` and its Files section, then `read_file` just the
+  part you need of the file it names (`symbol` for a named export, else
+  `outline_file` and `offset`/`limit`) — never whole files or whole folders
+  "for context".
   "Finding code" under "Architecture: Wayfinding" below has the details.
 <!-- /nav -->
 - Don't re-read a file you just wrote or edited to check it: `write_file`

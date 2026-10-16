@@ -12,6 +12,7 @@ import { updateSession } from './session-store.js';
 import { loadSplitRoadmap } from './split-roadmap-load.js';
 import { isShipped, keepOnBranch, recordSharedBranchShipped } from './shared-branch.js';
 import type { SessionRecord } from './session.js';
+import { qaReportIsCurrent } from './qa-loop.js';
 
 // The approval gates, shared by the stage tabs' buttons (routes/*.ts) and
 // Bridget, the coordinator, who approves on the human's behalf when nothing
@@ -113,6 +114,7 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
     qaNotes: [],
     qaHandoffNotes: session.qaNotes,
     qaRerunPending: session.transcripts.qa.length > 0,
+    fixScope: null,
   });
 }
 
@@ -132,6 +134,7 @@ export async function readQaResult(session: SessionRecord): Promise<QaResult | n
 /** Marks QA reviewed. Reaching "done" never pushes, merges or opens an MR by itself — that's deliverSession. */
 export async function approveQa(session: SessionRecord): Promise<SessionRecord> {
   if (!session.qaReportPath) throw new StageActionError('no QA report has been written yet');
+  if (!qaReportIsCurrent(session)) throw new StageActionError("this QA pass hasn't written its report yet; the one on file is from the last pass");
   const raw = await readDoc(session.qaReportPath);
   await fs.writeFile(path.join(config.harnessRoot, session.qaReportPath), raw.replace(/^status:\s*\S+/m, 'status: reviewed'), 'utf8');
   return updateSession(session.id, { qaStatus: 'reviewed', stage: 'done' });

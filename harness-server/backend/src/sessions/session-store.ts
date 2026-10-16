@@ -68,6 +68,9 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.codingTeamHistory ??= [];
   session.qaTeam ??= null;
   session.qaTeamHistory ??= [];
+  session.qaRounds ??= [];
+  session.fixScope ??= null;
+  session.qaPass ??= Math.max(1, session.qaTeamHistory.length + (session.qaTeam ? 1 : 0));
   session.codingContext ??= null;
   session.qaNotes ??= [];
   session.qaHandoffNotes ??= [];
@@ -175,6 +178,9 @@ export async function createSession(input: {
     codingTeamHistory: [],
     qaTeam: null,
     qaTeamHistory: [],
+    qaRounds: [],
+    qaPass: 1,
+    fixScope: null,
     codingContext: null,
     qaNotes: [],
     qaHandoffNotes: [],
@@ -254,11 +260,28 @@ export async function setClaudeSessionId(id: string, stage: StageKey, sdkSession
   });
 }
 
-export async function addStageUsage(id: string, stage: StageKey, usage: TokenUsage, toolOutput?: ToolOutputStats): Promise<void> {
+export async function addStageUsage(
+  id: string,
+  stage: StageKey,
+  event: { usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number },
+  agent: string = stage,
+): Promise<void> {
+  const { usage, toolOutput, requests } = event;
+  let planSteps: number | undefined;
   await mutateSession(id, (session) => {
     session.usage[stage] = addUsage(session.usage[stage], usage);
+    if (stage === 'coding') planSteps = session.codingPlan?.length;
   });
-  await appendUsageLog({ at: new Date().toISOString(), sessionId: id, stage, usage, ...(toolOutput ? { toolOutput } : {}) });
+  await appendUsageLog({
+    at: new Date().toISOString(),
+    sessionId: id,
+    stage,
+    usage,
+    ...(toolOutput ? { toolOutput } : {}),
+    agent,
+    ...(requests !== undefined ? { requests } : {}),
+    ...(planSteps !== undefined ? { planSteps } : {}),
+  });
   const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
   console.log(
     `[usage] session ${id} ${stage}: ${total} tokens (input ${usage.input}, output ${usage.output}, ` +
