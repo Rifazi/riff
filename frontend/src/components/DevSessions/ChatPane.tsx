@@ -817,7 +817,7 @@ export function ChatPane({
               ))}
             </div>
           )}
-          <div className="flex gap-2 items-end">
+          <div className="flex gap-2 items-center">
             <input
               ref={fileInputRef}
               type="file"
@@ -855,8 +855,8 @@ export function ChatPane({
                   : (placeholder ?? 'Type a message…')
               }
               disabled={disabled}
-              rows={2}
-              className="flex-1 min-h-0 shadow-sm resize-none disabled:bg-muted"
+              rows={1}
+              className="flex-1 h-9 min-h-0 py-2 leading-5 shadow-sm resize-none disabled:bg-muted"
             />
             <Button onClick={send} disabled={!canSend}>
               <Send />

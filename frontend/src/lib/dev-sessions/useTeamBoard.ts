@@ -41,6 +41,9 @@ export function useTeamBoard<M extends { id: string; transcript: TranscriptEntry
     queryKey: teamStatusKey(kind, sessionId),
     queryFn: () => api.getTeamStatus(sessionId, kind),
     enabled: Boolean(team),
+    // A run can start server-side without this tab (auto-drive starts one when
+    // the tab is busy), so a cached "not running" must not outlive the round.
+    refetchInterval: team && ['assigned', 'running', 'interrupted'].includes(team.status) ? 3000 : false,
   });
   const active = run.running || (team?.status === 'running' && server?.running !== false);
   const status =

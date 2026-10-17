@@ -170,7 +170,15 @@ export function QaStage({ session }: { session: SessionRecord }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { data: report } = useQuery({
-    queryKey: ['qa-report', sessionId, session.qaReportPath],
+    queryKey: [
+      'qa-report',
+      sessionId,
+      session.qaReportPath,
+      session.qaPass,
+      session.qaRerunPending,
+      session.qaRounds?.length ?? 0,
+      session.qaTeam?.relayed ?? null,
+    ],
     queryFn: () => api.getQaReport(sessionId),
   });
 
@@ -184,15 +192,16 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // A new pass starting goes back to its own (empty) report.
   useEffect(() => setViewPass(null), [report?.pass]);
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['qa-loop', sessionId] });
-    queryClient.invalidateQueries({ queryKey: teamStatusKey('qa', sessionId) });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['qa-report', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['qa-loop', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: teamStatusKey('qa', sessionId) }),
+    ]);
 
   // Team mode: the QA lead (Tess) split the review across reviewers who
   // check the branch in parallel (see harness-server agents/team/qa-team.ts).
@@ -263,7 +272,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qaTeam?.status, qaTeam?.relayed, qaTeam?.round, streaming, teamActive]);
 
-  const entries = streaming ? [...session.transcripts.qa, ...overlay] : session.transcripts.qa;
+  const entries = withOverlay(session.transcripts.qa);
   const reviewed = session.qaStatus === 'reviewed';
   // Once merged or an MR is open, fixes on the branch no longer reach anything.
   // A part kept on its branch for the next one can still be sent back.

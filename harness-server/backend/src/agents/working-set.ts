@@ -9,6 +9,8 @@ import { isListAllQuery } from './tool-defs/code-search-tool.js';
 // Oct 2026 sessions), and 23% of the cut conversations were cut again
 // before writing at all.
 
+type Kind = 'read' | 'edit';
+
 interface Entry {
   role: string;
   toolName?: string;
@@ -22,10 +24,15 @@ export interface WorkingRange {
   start: number;
   // Inclusive; may run past the end of the file.
   end: number;
+  kind?: Kind;
 }
 
 // The most recent reads and edits that make up the working set.
 const RECENT_EVENTS = 15;
+// An edit stays in it for this many events: the file being fixed is the one
+// to show, and in session a4933a48 the last 15 events were all reads of other
+// files, so the 844 validator being edited was re-read after every cut.
+const EDIT_WINDOW = 45;
 // read_file's default page.
 const READ_PAGE_LINES = 300;
 // Lines shown around an edit, so the next edit's oldText is in view.
@@ -94,7 +101,7 @@ export function workingSetRanges(entries: Entry[]): WorkingRange[] {
       for (const [i, file] of files.entries()) {
         const body = sections[i * 2 + 2] ?? '';
         const range = readRange(file, body.replace(/^\n/, ''));
-        if (typeof file.path === 'string' && range) events.push({ path: file.path, ...range });
+        if (typeof file.path === 'string' && range) events.push({ path: file.path, ...range, kind: 'read' });
       }
       continue;
     }
@@ -102,21 +109,23 @@ export function workingSetRanges(entries: Entry[]): WorkingRange[] {
     if (!p || call.isError || call.result === null) continue;
     if (call.name === 'read_file') {
       const range = readRange(call.input, call.result);
-      if (range) events.push({ path: p, ...range });
+      if (range) events.push({ path: p, ...range, kind: 'read' });
     } else if (call.name === 'edit_file') {
       if (!call.result.startsWith('Edited ')) continue;
       for (const [a, b] of editedRanges(call.result)) {
-        events.push({ path: p, start: Math.max(1, a - EDIT_CONTEXT_LINES), end: b + EDIT_CONTEXT_LINES });
+        events.push({ path: p, start: Math.max(1, a - EDIT_CONTEXT_LINES), end: b + EDIT_CONTEXT_LINES, kind: 'edit' });
       }
     } else if (call.name === 'write_file') {
       if (!call.result.startsWith('Wrote ')) continue;
-      events.push({ path: p, start: 1, end: READ_PAGE_LINES });
+      events.push({ path: p, start: 1, end: READ_PAGE_LINES, kind: 'edit' });
     } else if (call.name === 'delete_file') {
-      events.push({ path: p, start: 0, end: -1 });
+      events.push({ path: p, start: 0, end: -1, kind: 'edit' });
     }
   }
 
-  const recent = events.slice(-RECENT_EVENTS);
+  const keepFrom = events.length - RECENT_EVENTS;
+  const editFrom = events.length - EDIT_WINDOW;
+  const recent = events.filter((e, i) => i >= keepFrom || (i >= editFrom && e.kind === 'edit'));
   const deleted = new Set<string>();
   const order: string[] = [];
   const byPath = new Map<string, [number, number][]>();

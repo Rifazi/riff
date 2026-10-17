@@ -27,6 +27,7 @@ describe('finish_step', () => {
     const reply = checksFailedReply('one', 'Committed ab12cd34: feat: add b', 'lint', 'lint failed.\n\nx');
     expect(reply.startsWith('Committed ab12cd34: feat: add b. Step "one" is still in progress: lint failed.')).toBe(true);
     expect(reply.endsWith('lint failed.\n\nx')).toBe(true);
+    expect(reply).toContain('running the check again without changing anything returns the same failure');
   });
 });
 

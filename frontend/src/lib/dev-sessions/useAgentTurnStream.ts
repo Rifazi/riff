@@ -15,6 +15,11 @@ export interface TurnOutcome {
   lastDone: { text: string; isError: boolean } | null;
 }
 
+// Queries a turn changes as it goes (the server saves each entry, plan step and
+// commit as it happens), so they're refetched mid-turn rather than only at the end.
+const LIVE_QUERIES = new Set(['session', 'coding-diff', 'plan-doc', 'requirements-doc', 'qa-report', 'qa-loop']);
+const LIVE_REFRESH_MS = 1500;
+
 let overlaySeq = 0;
 function nextId() {
   overlaySeq += 1;
@@ -35,7 +40,18 @@ export function useAgentTurnStream() {
   const [streaming, setStreaming] = useState(false);
   const [runningTool, setRunningTool] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // When the running turn began: persisted entries from before it are shown,
+  // later ones come from the overlay (they'd otherwise appear twice once a
+  // mid-turn refetch picks them up).
+  const [turnStartedAt, setTurnStartedAt] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const lastLiveRefresh = useRef(0);
+  const refreshLive = () => {
+    const now = Date.now();
+    if (now - lastLiveRefresh.current < LIVE_REFRESH_MS) return;
+    lastLiveRefresh.current = now;
+    void queryClient.invalidateQueries({ predicate: (q) => LIVE_QUERIES.has(String(q.queryKey[0])) });
+  };
   // Each call's tool, so a result can be shown for its tool (the delegate card).
   const toolNames = useRef(new Map<string, string>());
   // Aborted when the component unmounts (tab switch / navigation) so the
@@ -45,6 +61,7 @@ export function useAgentTurnStream() {
 
   const consume = (onEvent?: (event: AgentEvent) => void) => (event: AgentEvent) => {
     onEvent?.(event);
+    if (event.type === 'tool_result' || event.type === 'compacted') refreshLive();
     if (event.type === 'assistant_text') {
       setOverlay((prev) => [...prev, { id: nextId(), role: 'assistant', text: event.text, timestamp: new Date().toISOString() }]);
     } else if (event.type === 'tool_call') {
@@ -115,7 +132,7 @@ export function useAgentTurnStream() {
   const send = async (
     url: string,
     message: string,
-    onDone: () => void,
+    onDone: () => void | Promise<unknown>,
     onEvent?: (event: AgentEvent) => void,
     attachments?: AttachmentInput[],
     extraBody?: Record<string, unknown>
@@ -130,6 +147,7 @@ export function useAgentTurnStream() {
     abortCtrl.current = ctrl;
     setError(null);
     setStreaming(true);
+    setTurnStartedAt(new Date().toISOString());
     setRunningTool(null);
     setOverlay([{ id: nextId(), role: 'user', text: message, timestamp: new Date().toISOString() }]);
 
@@ -141,14 +159,16 @@ export function useAgentTurnStream() {
         setError(outcome.error);
       }
     } finally {
-      setStreaming(false);
-      setRunningTool(null);
-      setOverlay([]);
       if (!ctrl.signal.aborted) {
         // The server saves a message's attachments as the session's reference docs.
         if (attachments?.length) void queryClient.invalidateQueries({ queryKey: ['reference-docs'] });
-        onDone();
+        // Keep the overlay up until the refetch lands, or the turn's last
+        // entries vanish for a moment before the saved ones arrive.
+        await Promise.resolve(onDone()).catch(() => {});
       }
+      setStreaming(false);
+      setRunningTool(null);
+      setOverlay([]);
     }
     return outcome;
   };
@@ -159,11 +179,12 @@ export function useAgentTurnStream() {
   // turn's own message still lands in the persisted transcript once that
   // turn's run*AgentTurn function appends it, picked up on the next
   // session refetch via onDone/onEvent.
-  const runCoordinator = async (sessionId: string, onDone: () => void, onEvent?: (event: AgentEvent) => void) => {
+  const runCoordinator = async (sessionId: string, onDone: () => void | Promise<unknown>, onEvent?: (event: AgentEvent) => void) => {
     const ctrl = new AbortController();
     abortCtrl.current = ctrl;
     setError(null);
     setStreaming(true);
+    setTurnStartedAt(new Date().toISOString());
     setRunningTool(null);
     setOverlay([]);
 
@@ -172,12 +193,16 @@ export function useAgentTurnStream() {
     } catch (err) {
       if (!ctrl.signal.aborted) setError(err instanceof Error ? err.message : String(err));
     } finally {
+      if (!ctrl.signal.aborted) await Promise.resolve(onDone()).catch(() => {});
       setStreaming(false);
       setRunningTool(null);
       setOverlay([]);
-      if (!ctrl.signal.aborted) onDone();
     }
   };
 
-  return { overlay, streaming, runningTool, error, send, runCoordinator };
+  /** The stage's transcript with the running turn's live entries in place of its saved ones. */
+  const withOverlay = (persisted: TranscriptEntry[]) =>
+    streaming ? [...persisted.filter((e) => !turnStartedAt || e.timestamp < turnStartedAt), ...overlay] : persisted;
+
+  return { overlay, streaming, runningTool, error, send, runCoordinator, withOverlay };
 }

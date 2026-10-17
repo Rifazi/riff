@@ -40,6 +40,18 @@ describe('worrying words in the closing message', () => {
     expect(concernInLastMessage([e('assistant', { text: "I couldn't verify the deploy locally." })])).toBe("couldn't");
   });
 
+  test('negated or resolved mentions pass', () => {
+    for (const text of [
+      'All steps done. No tests failed.',
+      'Zero failures in lint and tests.',
+      'Fixed the failing test; everything passes now.',
+      'The suite initially failed on a fixture, then passed after the fix.',
+    ]) {
+      expect(concernInLastMessage([e('assistant', { text })])).toBeNull();
+    }
+    expect(concernInLastMessage([e('assistant', { text: 'Fixed one test but 2 still fail.' })])).toBe('fail');
+  });
+
   test('a clean summary passes', () => {
     expect(concernInLastMessage([e('assistant', { text: 'All 6 steps are done. Lint passes and all 48 unit tests pass.' })])).toBeNull();
   });

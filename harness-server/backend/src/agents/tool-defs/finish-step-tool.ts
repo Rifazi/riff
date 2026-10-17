@@ -62,7 +62,7 @@ export function alreadyPassed(command: 'lint' | 'test'): string {
 
 /** The finish_step reply when the checks fail: the commit stands, the step stays open. */
 export function checksFailedReply(stepId: string, committed: string, check: 'lint' | 'test', report: string): string {
-  return `${committed}. Step "${stepId}" is still in progress: ${check} failed. Fix it and call finish_step again with the files you change.\n\n${report}`;
+  return `${committed}. Step "${stepId}" is still in progress: ${check} failed. Fix it and call finish_step again with the files you change. This report is from the code as it stands: running the check again without changing anything returns the same failure.\n\n${report}`;
 }
 
 export function createFinishStepExecute(deps: FinishStepDeps) {

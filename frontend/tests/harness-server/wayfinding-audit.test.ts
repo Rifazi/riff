@@ -172,6 +172,38 @@ describe('auditWayfinding', () => {
   });
 });
 
+describe('empty sections', () => {
+  const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
+
+  test('regenerate leaves out a Consumers section nothing imports, heading included', () => {
+    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
+    expect(doc('src/pricing/DOMAIN.md')).toContain('## Consumers');
+    expect(messages()).toEqual([]);
+  });
+
+  test('a "none" Consumers block is stale, and regenerate removes it', () => {
+    write('src/invoice/DOMAIN.md', `${doc('src/invoice/DOMAIN.md')}\n## Consumers\n<!-- generated: do not edit -->\n- none\n<!-- end generated -->\n`);
+    expect(messages()).toContain('Consumers section is empty: remove it');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
+    expect(messages()).toEqual([]);
+  });
+
+  test('a DOMAIN.md without Parent, Owns data, Child domains or Does not own passes', () => {
+    write(
+      'src/invoice/DOMAIN.md',
+      domainDoc('invoice').replace(/^(Parent|Owns data|Child domains|Does not own):.*\n/gm, '')
+    );
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(messages()).toEqual([]);
+  });
+
+  test('a child domain still has to name its parent', () => {
+    write('src/pricing/promotions/DOMAIN.md', domainDoc('promotions', { consumers: 'pricing' }).replace(/^Parent:.*\n/m, ''));
+    expect(messages().some((m) => m.includes('Parent is "(missing)"'))).toBe(true);
+  });
+});
+
 describe('generated Files section', () => {
   const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
 

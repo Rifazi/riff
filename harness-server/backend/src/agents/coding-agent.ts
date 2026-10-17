@@ -412,6 +412,10 @@ export async function runCodingAgentTurn(
   // read_file/read_doc's repeat notes describe this conversation only, so
   // compaction's fresh one starts with an empty memo.
   const readMemo = new ReadMemo();
+  // The step the live conversation started on: the turn's, or the one a
+  // mid-turn compaction last carried on from. A turn can finish several
+  // steps in one conversation, so the turn's own start is stale by its end.
+  let conversationStepId: string | null = null;
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
     ...hopLimits(provider),
@@ -439,6 +443,7 @@ export async function runCodingAgentTurn(
       });
       contextStartEntryId = marker.id;
       const fresh = latest ?? session;
+      conversationStepId = currentStepId(fresh) ?? targetStepId;
       const reference = referenceDocsManifest(await listSessionReferenceDocs(fresh));
       return {
         prompt: handoff,
@@ -494,7 +499,7 @@ export async function runCodingAgentTurn(
 
   await updateSession(session.id, {
     codingContext: {
-      stepId: freshReason || !ctx ? targetStepId : ctx.stepId,
+      stepId: conversationStepId ?? (freshReason || !ctx ? targetStepId : ctx.stepId),
       startEntryId: contextStartEntryId,
       tokens: contextTokens,
       teamRound: team?.finishedAt ? team.round : ctx?.teamRound,

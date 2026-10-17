@@ -391,8 +391,9 @@ function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; par
 // Markdown formatters (prettier, run by git_commit and finish_step) put blank lines around the list.
 const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
 
+/** Empty when nothing imports the domain: the section is left out of its DOMAIN.md. */
 function consumersBlock(consumers: string[]): string {
-  return `<!-- generated: do not edit -->\n${consumers.length ? `- ${consumers.join(', ')}\n` : '- none\n'}<!-- end generated -->`;
+  return consumers.length ? `<!-- generated: do not edit -->\n- ${consumers.join(', ')}\n<!-- end generated -->` : '';
 }
 
 const EXPORT_DECL =
@@ -418,7 +419,8 @@ export function exportedNames(source: string): string[] {
  * (child domains list their own), with what each code file exports, so an
  * agent goes from DOMAIN.md straight to the file it needs. `api` is the
  * public file's signatures (publicSignatures), listed under it so another
- * domain can call this one without opening its code.
+ * domain can call this one without opening its code. Empty when the domain
+ * holds no files: the section is left out of its DOMAIN.md.
  */
 export function filesBlock(files: { path: string; source: string | null }[], publicStem: string, api: string[] = []): string {
   const isInterface = (file: string) => !file.includes('/') && isCode(file) && stemOf(file) === publicStem;
@@ -439,7 +441,7 @@ export function filesBlock(files: { path: string; source: string | null }[], pub
   const listed = lines.slice(0, MAX_FILES_LISTED);
   if (lines.length > MAX_FILES_LISTED) listed.push(`- … ${lines.length - MAX_FILES_LISTED} more`);
   if (tests.length) listed.push(`- tests: ${tests.join(', ')}`);
-  return `<!-- generated: files, do not edit -->\n${listed.length ? `${listed.join('\n')}\n` : '- none\n'}<!-- end generated -->`;
+  return listed.length ? `<!-- generated: files, do not edit -->\n${listed.join('\n')}\n<!-- end generated -->` : '';
 }
 
 /**
@@ -610,7 +612,7 @@ export function auditWayfinding(
 
     const parent = headerField(doc, 'Parent');
     const expectedParent = d.parent ? d.parent.name : 'none';
-    if (!parent || !(parent.startsWith(expectedParent) || (d.parent && parent.startsWith(d.parent.id)))) {
+    if (parent ? !(parent.startsWith(expectedParent) || (d.parent && parent.startsWith(d.parent.id))) : d.parent) {
       fail('docs', here, d, `Parent is "${parent ?? '(missing)'}", but the folder says ${expectedParent}`);
     }
     const declaredChildren = listOf(headerField(doc, 'Child domains')).sort().join(', ');
@@ -620,8 +622,9 @@ export function auditWayfinding(
     }
     for (const field of ['Owns', 'Does not own', 'Interface', 'Checkpoint']) {
       const value = headerField(doc, field);
-      if (!value) fail('docs', here, d, `missing "${field}:"`);
-      else if (isPlaceholder(value)) fail('docs', here, d, `"${field}:" is still the template placeholder`);
+      if (!value) {
+        if (field !== 'Does not own') fail('docs', here, d, `missing "${field}:"`);
+      } else if (isPlaceholder(value)) fail('docs', here, d, `"${field}:" is still the template placeholder`);
     }
     const junction = /^Kind:\s*junction/im.test(doc);
     if (junction && !headerField(doc, 'Inputs')) fail('docs', here, d, 'a junction needs "Inputs:" (the decisions it combines)');
@@ -691,6 +694,16 @@ export function auditWayfinding(
     let rewritten = false;
     for (const section of sections) {
       const block = doc.match(section.pattern);
+      if (!section.expected) {
+        if (!block) continue;
+        if (!regenerate) {
+          fail('docs', here, d, `${section.title} section is empty: remove it`);
+          continue;
+        }
+        doc = dropSection(doc, section.title, section.pattern);
+        rewritten = true;
+        continue;
+      }
       if (block && withoutBlankLines(block[0]) === withoutBlankLines(section.expected)) continue;
       if (!regenerate) {
         fail('docs', here, d, block ? section.stale : `missing the generated ${section.title} block`);
@@ -739,6 +752,14 @@ export function auditWayfinding(
     }
   }
   return audit;
+}
+
+/** Removes a generated block and, once nothing else is under it, its heading. */
+function dropSection(doc: string, title: string, pattern: RegExp): string {
+  const lines = doc.replace(pattern, '').split('\n');
+  const heading = lines.findIndex((l) => new RegExp(`^##\\s+${title}\\s*$`, 'i').test(l));
+  if (heading !== -1 && !sectionBody(lines.join('\n'), title).trim()) lines.splice(heading, 1);
+  return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s*$/, '')}\n`;
 }
 
 /**
@@ -970,8 +991,8 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
       }
       lines.push(
         `  Give each one a ${DOMAIN_DOC}, created before you change its code (a folder you're adding gets one with it): fill ` +
-          `it in from the code (Owns, Does not own, Interface, Checkpoint, the Rules its code implements anchored to tests ` +
-          `that exist, Hidden behavior). A child domain's Parent is the domain above it; add it to that parent's "Child ` +
+          `it in from the code (Owns, Interface, Checkpoint, and only what has content: the Rules its code implements anchored to tests that exist, ` +
+          `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A child domain's Parent is the domain above it; add it to that parent's "Child ` +
           `domains" and move the parent's rules about it into the new ${DOMAIN_DOC}. Its public file is the code file named ` +
           `after its folder unless it has a service.ts. Log it under Structural changes in ${MAP_PATH}, then run ` +
           'audit_architecture({ regenerate: true }).'

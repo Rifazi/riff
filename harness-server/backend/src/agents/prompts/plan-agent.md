@@ -182,6 +182,17 @@ full; read the sections you need.
      ### 2. <title>
      ...
      ```
+   Make each step cheap to build. The coding agent sees only its own step,
+   so each step's body names, in backticks: the files it creates or edits;
+   the one existing file whose layout it copies ("mirrors
+   `lib/dictionary/843-segments.ts`"), so the builder starts from that file
+   instead of surveying the repo; and the `read_doc` sections it needs. When
+   a step adds something an existing test treats as unsupported or unknown
+   (a new transaction set, code, type or id), `search_code` for it first and
+   name the existing tests and fixtures that mention it, so the step fixes
+   them. Where the code or tests a step would grow sit in a file past about
+   600 lines, say to put them in a new sibling file. A step that only writes
+   docs names only docs files; those steps run on the cheaper model.
    - `steps`: the same steps as a minimal `{id, title}` list, **in the
      same dependency-respecting order** — the coding agent's checklist is
      seeded verbatim from this, so keep `id` short and stable and `title`

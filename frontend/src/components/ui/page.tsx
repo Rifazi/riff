@@ -60,7 +60,7 @@ interface PageBodyProps extends React.HTMLAttributes<HTMLDivElement> {
 function PageBody({ fill, wide, className, children, ...props }: PageBodyProps) {
   if (fill) {
     return (
-      <div className={cn('flex min-h-0 flex-1 flex-col', className)} {...props}>
+      <div className={cn('custom-scrollbar flex min-h-0 flex-1 flex-col max-lg:overflow-y-auto', className)} {...props}>
         {children}
       </div>
     );

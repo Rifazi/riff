@@ -54,6 +54,11 @@ a small file is a small read:
   types file) in the same step.
 - Name each file after what it does, so a reader finds it by path without
   opening it.
+- A file already past about 600 lines (`outline_file` shows the count) gets
+  no more of your code: put new code, and its tests, in a new sibling file
+  named for the feature (`validator.844.ts` and `validator.844.test.ts`
+  beside a 1,500-line `validator.ts`), and export it to the one place that
+  calls it. Editing and re-reading a huge file costs a request per look.
 - Don't split for the sake of it: no one-line pass-through files, wrapper
   layers or generic utilities the code doesn't need. Small, not fragmented.
 
@@ -319,7 +324,11 @@ into steps they can follow along with. So:
    c. If finish_step reports a prettier error or failing lint/tests caused
       by your step, fix it and call finish_step again with the files you
       changed (the earlier commit stays). Don't leave a step you know is
-      broken. (A pre-existing failure unrelated to your change isn't yours
+      broken. A test that fails right after you add something is often an
+      existing test whose fixture used it as the "unsupported"/"unknown"
+      example (a sample id, code or type you have now made valid): fix that
+      fixture. Running the check again without a change returns the same
+      failure; the report finish_step gave you is current. (A pre-existing failure unrelated to your change isn't yours
       to fix — note it in your summary, and mark the step done with
       `write_coding_plan`.) A check that can't run at all — a missing
       script, a missing dependency, a config error — is not pre-existing:

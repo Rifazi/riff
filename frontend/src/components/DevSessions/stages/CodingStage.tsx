@@ -116,17 +116,18 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     enabled: Boolean(session.branch),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
   const [autoRun, setAutoRun] = useState(false);
   // Why auto-run last stopped on its own, shown until it's restarted.
   const [autoRunStopped, setAutoRunStopped] = useState<string | null>(null);
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
-    queryClient.invalidateQueries({ queryKey: teamStatusKey('coding', sessionId) });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: teamStatusKey('coding', sessionId) }),
+    ]);
 
   // Team mode: the lead (Jack) split the work into 2+ workstreams — at
   // kickoff, or when QA sent the branch back — so a team of agents codes it
@@ -344,7 +345,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     );
   };
 
-  const entries = streaming ? [...session.transcripts.coding, ...overlay] : session.transcripts.coding;
+  const entries = withOverlay(session.transcripts.coding);
   const hasCommits = Boolean(session.branch) && (diffData?.commits.length ?? 0) > 0;
   const canContinue = Boolean(plan) && !allStepsDone && !streaming && !approved && !teamMode;
   // The switch stays up for the whole run (turns included) so it can always

@@ -335,7 +335,11 @@ export function SplitPartStrip({ session }: { session: SessionRecord }) {
           <ChevronDown className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </Button>
       </div>
-      {open && <RoadmapList roadmap={roadmap} currentId={session.id} />}
+      {open && (
+        <div className="max-h-[50vh] overflow-y-auto">
+          <RoadmapList roadmap={roadmap} currentId={session.id} />
+        </div>
+      )}
     </div>
   );
 }
