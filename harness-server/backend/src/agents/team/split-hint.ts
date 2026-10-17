@@ -41,19 +41,41 @@ export function sameFile(a: string, b: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
+// Names every step of a plan can mention without sharing any work: the doc each
+// domain keeps, root config, and a bare `service.ts`/`index.ts` that names a
+// different file in each folder. Session a258f09a's 19 steps across five
+// independent domains all named `DOMAIN.md`, so they looked like one chain
+// and were built solo.
+const SHARED_NAMES = /^(DOMAIN\.md|MAP\.md|README\.md|CHANGELOG\.md|package(-lock)?\.json|tsconfig[\w.-]*\.json|pnpm-lock\.yaml|yarn\.lock)$/;
+const GENERIC_BARE = /^(service|index|types|constants|utils|infra)\.[A-Za-z]+$/;
+
+/** Whether a step's file token names something the step owns, so sharing it with another step means they depend on each other. */
+function ownedFile(file: string): boolean {
+  if (file.startsWith('.')) return false;
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  if (SHARED_NAMES.test(base)) return false;
+  return file.includes('/') || !GENERIC_BARE.test(base);
+}
+
 /**
  * Why this plan is built solo without asking the lead, or null when it's
- * his call. Only for plans where a split can't help: a single step, or a
- * chain where every step names a file the step before it names, so each
- * builds on the last and no two could run at once.
+ * his call. Only for plans where a split can't help: a single step, or steps
+ * whose files all connect (each step shares an owned file with another, down
+ * to one group), so there is no part that could be built beside the rest.
  */
 export function soloReason(steps: StepFiles[]): string | null {
   if (steps.length < 2) return 'The plan has a single step.';
-  for (let i = 1; i < steps.length; i++) {
-    const shared = steps[i].files.find((f) => steps[i - 1].files.some((g) => sameFile(f, g)));
-    if (!shared) return null;
+  const owned = steps.map((s) => s.files.filter(ownedFile));
+  if (owned.some((files) => files.length === 0)) return null;
+  const group = steps.map((_, i) => i);
+  const find = (i: number): number => (group[i] === i ? i : (group[i] = find(group[i])));
+  for (let i = 0; i < steps.length; i++) {
+    for (let k = i + 1; k < steps.length; k++) {
+      if (owned[i].some((f) => owned[k].some((g) => sameFile(f, g)))) group[find(k)] = find(i);
+    }
   }
-  return 'Every step works on a file the step before it touches, so the steps run one after another and none could be built in parallel.';
+  if (new Set(steps.map((_, i) => find(i))).size > 1) return null;
+  return 'Every step works on files shared with the others, so the steps run one after another and none could be built in parallel.';
 }
 
 /** One line per step with the files it names, for the lead's kickoff prompt. */

@@ -1703,6 +1703,39 @@ below) — never inside the target repo.
    Not run with real agents yet: count `recall` redos and merge retries in
    the next session's transcript.
 
+58. User said the app felt much slower than the Claude plugin. Session
+   `a258f09a`'s last coding turn: 80 requests (the cap) in 738 s, ~8 s per
+   request, 1.6k output tokens, 190 tool calls; tools were ~115 s of it
+   (`delegate` 5 × 8 s, `run_checked_command` 7 × 5 s, `finish_step`,
+   `recall`), the rest was round trips, at 2.4 tool calls per request, each
+   re-sending ~42k tokens of context. `read_file`, `search_code`,
+   `outline_file` and `read_doc` take ~0 s but each cost a request. Changed:
+   - **`read_files`** (`tool-defs/file-tools.ts`, `readFilesExecute`): up to
+     8 `read_file`-shaped items in one call, each under an `=== path ===`
+     heading, a failure reported in its place. Plan, coding, QA and team
+     agents have it (AI SDK and Claude engines). `working-set.ts`,
+     `handoff.ts` and the chat UI read it like `read_file`.
+   - **`search_code` `also`**: up to 5 more patterns in one call, each under
+     a `## pattern` heading.
+   - **`audit_architecture`** (`trimAudit`): capped at 10k chars, a repeat of
+     the last result is a one-line note, and later calls leave out the
+     domain list. A turn had paid for 6 audits of ~24k chars.
+   - **Prompts**: a "Work in few requests" section in the coding, team
+     member, QA, QA reviewer and plan prompts; `delegate`'s description now
+     says it takes ~8 s and a single search or `read_files` is better.
+   - **Hop timing**: the Claude engine logs `[hop] boot … first response …
+     N requests … ms/request` per hop (`sdk-client.ts`), to decide whether
+     the 20-step hop size should go up.
+   Tests: `batch-tools`. Not run with real agents yet: compare requests per
+   turn and tool calls per request in the next `usage-log.jsonl`, and read
+   the `[hop]` lines in `state/agent-server.log`.
+   Also: `soloReason` (team/split-hint.ts) built session `a258f09a`'s
+   19-step, five-domain plan solo because every step named `DOMAIN.md`, so
+   each neighbour pair "shared a file". It now ignores docs, root config,
+   relative imports and bare `service.ts`/`index.ts` names, and goes solo
+   without asking only when the remaining files connect every step into
+   one group; otherwise Jack decides (`split-hint` test).
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

@@ -529,6 +529,12 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
     requests: requestUsage.size,
   });
 
+  // Where a hop's time goes: booting the Claude Code subprocess (start → init),
+  // the first model response, then the requests after it.
+  const hopStartedAt = Date.now();
+  let initAt = 0;
+  let firstResponseAt = 0;
+
   const stream = query({
     prompt,
     options: {
@@ -554,6 +560,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
         case 'system': {
           if (message.subtype === 'init') {
             sdkSessionId = message.session_id;
+            initAt = Date.now();
             // HARNESS_LOG_CONTEXT=1: log what fills the context window, e.g.
             // to confirm CLAUDE_ISOLATION leaves only harness-tools loaded.
             if (process.env.HARNESS_LOG_CONTEXT) {
@@ -567,6 +574,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
         }
         case 'assistant': {
           const u = message.message.usage;
+          if (!firstResponseAt) firstResponseAt = Date.now();
           if (u) {
             contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
             if (!startTokens) startTokens = contextTokens;
@@ -652,6 +660,14 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
     const message = err instanceof Error ? err.message : String(err);
     onEvent({ type: 'error', message });
     return { sdkSessionId, resultText: message, isError: true, subtype: null, usage, contextTokens, startTokens, requests: requestUsage.size };
+  } finally {
+    const now = Date.now();
+    const bootMs = initAt ? initAt - hopStartedAt : null;
+    const firstMs = firstResponseAt ? firstResponseAt - (initAt || hopStartedAt) : null;
+    console.log(
+      `[hop] boot ${bootMs ?? '?'}ms, first response ${firstMs ?? '?'}ms, ${requestUsage.size} requests, ` +
+        `${now - hopStartedAt}ms total (${requestUsage.size ? Math.round((now - (firstResponseAt || hopStartedAt)) / requestUsage.size) : 0}ms/request after the first)`
+    );
   }
 
   if (cutForContext && !gotResult) return cutResult();

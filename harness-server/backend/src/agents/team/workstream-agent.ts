@@ -326,7 +326,7 @@ export async function runWorkstreamAgent({
       repoRoot: worktreePath,
       readMemo,
     });
-    const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
+    const { readFileToolClaude, readFilesToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
       ...scoped,
       onRead: (filePath, read) => {
         noteDelegateRead(delegateDeps, filePath);
@@ -350,6 +350,7 @@ export async function runWorkstreamAgent({
       createAuditThemeToolClaude({ repoRoot: worktreePath }),
       ...classifyTextToolsClaude(classifierOn, helperContext),
       readFileToolClaude,
+      readFilesToolClaude,
       writeFileToolClaude,
       editFileToolClaude,
       deleteFileToolClaude,
@@ -371,6 +372,7 @@ export async function runWorkstreamAgent({
       'audit_theme',
       ...(classifierOn ? ['classify_text'] : []),
       'read_file',
+      'read_files',
       'outline_file',
       'write_file',
       'edit_file',
@@ -417,7 +419,7 @@ export async function runWorkstreamAgent({
     repoRoot: worktreePath,
     readMemo,
   });
-  const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
+  const { readFileTool, readFilesTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
     ...scoped,
     onRead: (filePath, read) => {
       noteDelegateRead(delegateDeps, filePath);
@@ -435,6 +437,7 @@ export async function runWorkstreamAgent({
     outline_file: createOutlineFileTool({ repoRoot: worktreePath }),
     audit_theme: createAuditThemeTool({ repoRoot: worktreePath }),
     read_file: readFileTool,
+    read_files: readFilesTool,
     write_file: writeFileTool,
     edit_file: editFileTool,
     delete_file: deleteFileTool,

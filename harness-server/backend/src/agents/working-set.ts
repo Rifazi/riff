@@ -71,6 +71,16 @@ export function editedRanges(result: string): [number, number][] {
   return ranges;
 }
 
+/** The lines a read_file call (or one item of read_files) returned, or null when it was a repeat note or failed. */
+function readRange(input: Record<string, unknown>, result: string): { start: number; end: number } | null {
+  if (/is unchanged since you last read it|^Failed: /.test(result.slice(0, 200))) return null;
+  const symbol = typeof input.symbol === 'string' ? /lines (\d+)-(\d+)/.exec(result.split('\n')[0]) : null;
+  if (symbol) return { start: Number(symbol[1]), end: Number(symbol[2]) };
+  const offset = typeof input.offset === 'number' ? input.offset : 1;
+  const limit = typeof input.limit === 'number' ? input.limit : READ_PAGE_LINES;
+  return { start: offset, end: offset + limit - 1 };
+}
+
 /**
  * The ranges the conversation last read or edited, newest file first, each
  * file's ranges merged and in line order. A file it deleted is left out.
@@ -78,18 +88,21 @@ export function editedRanges(result: string): [number, number][] {
 export function workingSetRanges(entries: Entry[]): WorkingRange[] {
   const events: WorkingRange[] = [];
   for (const call of pairCalls(entries)) {
+    if (call.name === 'read_files' && !call.isError && call.result !== null) {
+      const sections = call.result.split(/^=== (.*) ===$/m);
+      const files = Array.isArray(call.input.files) ? (call.input.files as Record<string, unknown>[]) : [];
+      for (const [i, file] of files.entries()) {
+        const body = sections[i * 2 + 2] ?? '';
+        const range = readRange(file, body.replace(/^\n/, ''));
+        if (typeof file.path === 'string' && range) events.push({ path: file.path, ...range });
+      }
+      continue;
+    }
     const p = typeof call.input.path === 'string' ? call.input.path : null;
     if (!p || call.isError || call.result === null) continue;
     if (call.name === 'read_file') {
-      if (/is unchanged since you last read it/.test(call.result.slice(0, 200))) continue;
-      const symbol = typeof call.input.symbol === 'string' ? /lines (\d+)-(\d+)/.exec(call.result.split('\n')[0]) : null;
-      if (symbol) {
-        events.push({ path: p, start: Number(symbol[1]), end: Number(symbol[2]) });
-        continue;
-      }
-      const offset = typeof call.input.offset === 'number' ? call.input.offset : 1;
-      const limit = typeof call.input.limit === 'number' ? call.input.limit : READ_PAGE_LINES;
-      events.push({ path: p, start: offset, end: offset + limit - 1 });
+      const range = readRange(call.input, call.result);
+      if (range) events.push({ path: p, ...range });
     } else if (call.name === 'edit_file') {
       if (!call.result.startsWith('Edited ')) continue;
       for (const [a, b] of editedRanges(call.result)) {

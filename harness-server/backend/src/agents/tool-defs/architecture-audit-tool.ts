@@ -44,7 +44,25 @@ export function auditArchitectureDescription(deps: Pick<AuditArchitectureDeps, '
   );
 }
 
+// Every call's result stays in the conversation and is re-sent on each later
+// request (one turn paid for 6 audits of ~24k chars each), so a result is
+// capped, a repeat of the last one is a note, and the domain list, which
+// doesn't change within a turn, comes back only the first time.
+const AUDIT_CHAR_LIMIT = 10_000;
+
+export function trimAudit(text: string, previous: string | null): string {
+  if (text === previous) return 'The audit result is unchanged since your last call: the same problems remain. Fix them, then audit again.';
+  let out = text;
+  if (previous !== null) {
+    out = out.replace(/\n\nDomains:\n(?:- .*\n?)+/, '\n\n(Domain list as in your first audit.)\n');
+  }
+  if (out.length <= AUDIT_CHAR_LIMIT) return out;
+  const cut = out.lastIndexOf('\n', AUDIT_CHAR_LIMIT);
+  return `${out.slice(0, cut > 0 ? cut : AUDIT_CHAR_LIMIT)}\n[… ${out.length - AUDIT_CHAR_LIMIT} more characters cut: fix what is listed, then audit again for the rest]`;
+}
+
 export function createAuditArchitectureExecute(deps: AuditArchitectureDeps) {
+  let previous: string | null = null;
   return async (input: { regenerate?: boolean }): Promise<string> => {
     const config = deps.app.architecture;
     if (!config) return "This app doesn't follow an architecture any more; there is nothing to audit.";
@@ -58,7 +76,10 @@ export function createAuditArchitectureExecute(deps: AuditArchitectureDeps) {
       const changes = await branchChanges(deps.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, deps.branch);
       if (changes) scope = branchScope(audit, base, changes.files, changes.docDiff);
     }
-    return formatWayfindingAudit(audit, scope);
+    const full = formatWayfindingAudit(audit, scope);
+    const shown = trimAudit(full, previous);
+    previous = full;
+    return shown;
   };
 }
 

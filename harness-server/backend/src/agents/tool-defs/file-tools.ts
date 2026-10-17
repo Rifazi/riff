@@ -57,6 +57,18 @@ export const readFileDescription =
   'its name (one call instead of outline_file or search_code and then a read), else find the range with ' +
   "outline_file or search_code. Don't re-read a file you just wrote or edited — those tools report what changed.";
 
+const MAX_BATCH_READS = 8;
+const BATCH_CHAR_LIMIT = 40_000;
+
+export const readFilesSchema = z.object({
+  files: z.array(readFileSchema).min(1).max(MAX_BATCH_READS).describe(`Up to ${MAX_BATCH_READS} reads, each shaped like a read_file call`),
+});
+export const readFilesDescription =
+  `Read several repo files (or parts of them) in one call: pass up to ${MAX_BATCH_READS} items shaped like read_file ` +
+  '(path, and optionally symbol or offset/limit). Each model request is slow, so when you know you will need more than one ' +
+  'file, read them together here instead of one read_file per request. One that fails is reported in place and the rest ' +
+  'still come back.';
+
 const CODE_STYLE_RULES =
   'Code you write has no comments (only ones a tool needs, like a lint-disable directive) and stays in small, ' +
   'single-purpose files: where a coherent part can stand on its own, give it its own file.';
@@ -291,7 +303,23 @@ export function createFileExecutors(deps: FileToolDeps) {
     return `Edited ${requestedPath} (${ranges.join(', ')} of ${content.split('\n').length})${around ? `\n\n${around}` : ''}`;
   };
 
-  return { readFileExecute, writeFileExecute, editFileExecute, deleteFileExecute };
+  const readFilesExecute = async ({ files }: z.infer<typeof readFilesSchema>): Promise<string> => {
+    const parts = await Promise.all(
+      files.map(async (file) => {
+        const label = file.symbol ? `${file.path} (${file.symbol})` : file.path;
+        try {
+          return `=== ${label} ===\n${await readFileExecute(file)}`;
+        } catch (err) {
+          return `=== ${label} ===\nFailed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      })
+    );
+    const joined = parts.join('\n\n');
+    if (joined.length <= BATCH_CHAR_LIMIT) return joined;
+    return `${joined.slice(0, joined.lastIndexOf('\n', BATCH_CHAR_LIMIT))}\n[… cut at ${BATCH_CHAR_LIMIT} chars: read the rest of those files with read_file offset/limit]`;
+  };
+
+  return { readFileExecute, readFilesExecute, writeFileExecute, editFileExecute, deleteFileExecute };
 }
 
 // Lines shown either side of an edit, and the cap on what edit_file adds to
@@ -351,9 +379,10 @@ export function nearestText(content: string, oldText: string): string | null {
 }
 
 export function createFileTools(deps: FileToolDeps) {
-  const { readFileExecute, writeFileExecute, editFileExecute, deleteFileExecute } = createFileExecutors(deps);
+  const { readFileExecute, readFilesExecute, writeFileExecute, editFileExecute, deleteFileExecute } = createFileExecutors(deps);
   return {
     readFileTool: tool({ description: readFileDescription, inputSchema: readFileSchema, execute: readFileExecute }),
+    readFilesTool: tool({ description: readFilesDescription, inputSchema: readFilesSchema, execute: readFilesExecute }),
     writeFileTool: tool({ description: writeFileDescription, inputSchema: writeFileSchema, execute: writeFileExecute }),
     editFileTool: tool({ description: editFileDescription, inputSchema: editFileSchema, execute: editFileExecute }),
     deleteFileTool: tool({ description: deleteFileDescription, inputSchema: deleteFileSchema, execute: deleteFileExecute }),

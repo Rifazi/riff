@@ -66,6 +66,7 @@ export const REVIEW_TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'read_files',
   'outline_file',
   'get_diff',
 ];
@@ -117,7 +118,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
     names: [...REVIEW_TOOL_NAMES, ...(deps.classifier ? ['classify_text'] : []), ...architectureToolNames(architectureDeps)],
     claude: () => {
       const { searchDocsToolClaude, readDocToolClaude } = createDocsSearchToolsClaude({ appId: deps.appId, sessionId: deps.sessionId });
-      const { readFileToolClaude } = createFileToolsClaude({ repoRoot: deps.repoRoot, compress: tryCompressCode });
+      const { readFileToolClaude, readFilesToolClaude } = createFileToolsClaude({ repoRoot: deps.repoRoot, compress: tryCompressCode });
       const { getDiffToolClaude } = createQaToolsClaude(qaDeps);
       return [
         searchDocsToolClaude,
@@ -127,13 +128,14 @@ export function createReviewTools(deps: ReviewToolDeps) {
         createAuditThemeToolClaude({ repoRoot: deps.repoRoot }),
         ...classifyTextToolsClaude(deps.classifier, deps.helperContext),
         readFileToolClaude,
+        readFilesToolClaude,
         getDiffToolClaude,
         ...architectureToolsClaude(architectureDeps),
       ];
     },
     aiSdk: (history: unknown[] = []): ToolSet => {
       const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: deps.appId, sessionId: deps.sessionId });
-      const { readFileTool } = createFileTools({ repoRoot: deps.repoRoot, compress: tryCompressCode });
+      const { readFileTool, readFilesTool } = createFileTools({ repoRoot: deps.repoRoot, compress: tryCompressCode });
       const { getDiffTool } = createQaTools(qaDeps);
       return {
         search_docs: searchDocsTool,
@@ -143,6 +145,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
         audit_theme: createAuditThemeTool({ repoRoot: deps.repoRoot }),
         ...classifyTextToolEntry(deps.classifier, deps.helperContext, history),
         read_file: readFileTool,
+        read_files: readFilesTool,
         get_diff: getDiffTool,
         ...architectureToolEntry(architectureDeps, history),
       };

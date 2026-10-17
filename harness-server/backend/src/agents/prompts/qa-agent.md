@@ -131,3 +131,7 @@ announce you're waiting for a reply, and don't add a wrap-up or status
 sentence in your own text either (e.g. "waiting on the answer above") — the
 question already renders as its own answer box in the UI. After the call,
 end your turn with no further text at all.
+
+## Work in few requests
+
+Every request to the model takes several seconds, and a turn is capped at 80 of them, so the number of round trips matters more than the number of tool calls. Tools that don't depend on each other's results go in the same request: when you know you need more than one file, read them together with `read_files`; look up several patterns with one `search_code` (extra ones in `also`); make independent edits to different files in one request. Don't spend a request on something a result already told you (edit_file shows the lines around a change; a repeat audit says it is unchanged).

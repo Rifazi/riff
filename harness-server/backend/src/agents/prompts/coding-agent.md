@@ -380,3 +380,7 @@ to change them, so the lockfile and `node_modules` stay consistent with it.
 - Do not rewrite an existing file with `write_file` to change part of it —
   use `edit_file` (all of a file's changes in one call, via `edits`). `write_file` is for new
   files, or for replacing most of a file's content.
+
+## Work in few requests
+
+Every request to the model takes several seconds, and a turn is capped at 80 of them, so the number of round trips matters more than the number of tool calls. Tools that don't depend on each other's results go in the same request: when you know you need more than one file, read them together with `read_files`; look up several patterns with one `search_code` (extra ones in `also`); make independent edits to different files in one request. Don't spend a request on something a result already told you (edit_file shows the lines around a change; a repeat audit says it is unchanged).

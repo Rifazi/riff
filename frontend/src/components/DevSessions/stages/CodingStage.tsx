@@ -93,6 +93,7 @@ function compactQaReport(markdown: string): string {
 // Tools that change nothing the Coding tab shows (see handleSend).
 const READ_ONLY_TOOLS = new Set([
   'read_file',
+  'read_files',
   'outline_file',
   'search_code',
   'search_docs',
