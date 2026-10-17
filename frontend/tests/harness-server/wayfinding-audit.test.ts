@@ -439,4 +439,22 @@ describe('branch scope', () => {
     const done = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
     expect(branchScope(auditWayfinding(repo, CONFIG), 'main', done!.files, done!.docDiff).offMap).toEqual([]);
   });
+
+  test('a branch adding a code file loose in the source folder is flagged, an entry point is not', async () => {
+    write('src/lib/DOMAIN.md', domainDoc('lib'));
+    write('src/lib/service.ts', 'export const x = 1\n');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+    git('checkout', '-qb', 'feature');
+    write('src/index.ts', 'export {}\n');
+    write('src/helpers.ts', 'export const h = 1\n');
+
+    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const audit = auditWayfinding(repo, CONFIG);
+    const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
+    expect(scope.looseFiles).toEqual(['src/helpers.ts']);
+    expect(formatWayfindingAudit(audit, scope)).toContain('loose in a source folder: src/helpers.ts');
+  });
 });

@@ -25,15 +25,26 @@ export const proposeSplitSchema = z.object({
             'One sentence: what a user can do once this part ships, e.g. "Buyers can download the inventory report as CSV". ' +
               'Shown on the roadmap the human tracks progress on, and told to later parts so they build on it.'
           ),
+        howToTest: z
+          .string()
+          .describe(
+            'How the human checks this part works on its own, before the next part starts: 2-5 concrete steps they can do ' +
+              'in the running app (or one command to run) and what they should see, e.g. "Open Reports, click Export, ' +
+              'open the CSV: one row per item, headers match the table". No part is acceptable without this.'
+          ),
         dependsOn: z
           .array(z.number().int().min(0))
-          .describe('Zero-based indexes of EARLIER parts in this list that must be built first. Empty if independent.'),
+          .describe(
+            'Zero-based indexes of EARLIER parts that must be built first. Parts are built strictly one at a time, so every ' +
+              'part after the first is chained to the one before it automatically; list only extra earlier parts it also needs.'
+          ),
       })
     )
     .min(2)
     .describe(
       'The slices, in the order to build them — as many as the work has: there is no upper limit, and each slice should ' +
-        'be the smallest deliverable that still gives a user something that works. Put first what other parts need (data model, shared integration), then the ' +
+        'be the smallest deliverable that still gives a user something that works and that the human can test by hand in ' +
+        'a few minutes (aim for a part that touches a handful of files, not a whole subsystem). Parts are built and verified one at a time. Put first what other parts need (data model, shared integration), then the ' +
         'part that gets something usable in front of users soonest; make the first part a thin end-to-end slice that ' +
         'works on its own. Riskiest unknowns early. Only list a dependsOn when the part truly needs that code, so ' +
         'independent parts can proceed side by side.'
@@ -45,7 +56,7 @@ export const proposeSplitDescription =
   'goes through its own requirements -> plan -> coding -> QA pipeline on its own branch. Split by default: whenever ' +
   'the request holds more than one deliverable that could ship and be reviewed on its own, split it into the smallest ' +
   'such deliverables rather than a few large ones — one user-visible outcome per part, so each branch is small and ' +
-  'easy to review. Write a single doc only when the request is already one indivisible deliverable. Never cut by ' +
+  'easy to review and test by hand before the next part starts. Write a single doc only when the request is already one indivisible deliverable. Never cut by ' +
   'layer (e.g. "backend" / "frontend") when each half is useless alone, and never make a part so thin it delivers ' +
   'nothing a user can try. Ask enough questions first to know where the seams are, ' +
   'then call this INSTEAD of write_requirements_doc. The order you give is the build order the human follows: a part ' +
@@ -86,7 +97,10 @@ export function createProposeSplitExecute(sessionInfo: { sessionId: string; sess
         sessionKey: key,
         brief: part.brief.trim(),
         outcome: part.outcome.trim(),
-        dependsOn: [...new Set(part.dependsOn)],
+        howToTest: part.howToTest.trim(),
+        // One part at a time: each is built on the previous, which has to be
+        // shipped (or kept) and tested before the next one's plan can start.
+        dependsOn: [...new Set([...(i > 0 ? [i - 1] : []), ...part.dependsOn])].sort((a, b) => a - b),
       };
     });
 

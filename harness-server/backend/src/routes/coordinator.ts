@@ -273,6 +273,22 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0 } : {}) });
   });
 
+  // A session goes to QA by itself once coding is finished and
+  // clean (same checks as auto-drive's coding gate); the human's checkpoint is
+  // after QA. Anything off stops here and the Approve button stays theirs.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/auto-handoff', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (!['coding-in-progress', 'coding-review'].includes(session.stage) || session.coordinatorEnabled) {
+      return { advanced: false, reason: null };
+    }
+    const outcome = await tryAdvance(session, 'coding', session.transcripts.coding, () => {});
+    if (outcome.kind === 'advanced') return { advanced: true, reason: outcome.reason };
+    const reason = outcome.kind === 'stop' ? outcome.reason : outcome.kind === 'fix' ? `lint, tests or the audit failed on the branch.\n${outcome.message}` : null;
+    if (reason) await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Not sent to QA automatically: ${reason}` });
+    return { advanced: false, reason };
+  });
+
   // SSE, same framing as the per-stage /message endpoints. Drives the
   // current stage until it's approved (the run then ends, and the next
   // stage's tab starts the next run) or something needs the human.

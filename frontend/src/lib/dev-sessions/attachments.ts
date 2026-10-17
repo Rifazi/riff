@@ -3,7 +3,7 @@ import type { AttachmentInput } from './types';
 // Mirrors the cap in harness-server/backend/src/agents/attachments.ts —
 // checked here too so an oversized file is rejected before a round trip.
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
-export const ACCEPTED_ATTACHMENT_TYPES = '.pdf,.txt,.md,.markdown,.csv,.json,.yml,.yaml,text/plain,text/markdown,application/pdf';
+export const ACCEPTED_ATTACHMENT_TYPES = '.pdf,.doc,.docx,.txt,.md,.markdown,.csv,.json,.yml,.yaml,text/plain,text/markdown,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

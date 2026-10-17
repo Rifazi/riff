@@ -38,6 +38,9 @@ export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope
   for (const o of scope?.offMap ?? []) {
     lines.push(`[map] ${o.folder}/ has changed code but no DOMAIN.md (${o.parent ? `child domain of ${o.parent}` : 'top-level domain, add it to MAP.md'})`);
   }
+  for (const f of scope?.looseFiles ?? []) {
+    lines.push(`[map] ${f} is loose in a source folder: move it into the subfolder of the domain that owns it (only index/main/app/server/cli may sit there)`);
+  }
   return lines;
 }
 

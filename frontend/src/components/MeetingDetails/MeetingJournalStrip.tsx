@@ -70,7 +70,7 @@ export function MeetingJournalStrip({ meetingId }: { meetingId: string }) {
                 key={journalId}
                 href={notebookHref(journalId)}
                 title={journalParts.map((p) => p.title).join('\n')}
-                className={`flex items-center gap-1.5 rounded-full border border-black/5 px-2.5 py-1 text-xs font-medium ${color.cover} ${color.ink} hover:shadow-sm`}
+                className={`flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs font-medium ${color.cover} ${color.ink} hover:shadow-sm`}
               >
                 <span className={`h-2 w-2 rounded-full ${color.dot}`} />
                 {journalParts[0].notebook_title}

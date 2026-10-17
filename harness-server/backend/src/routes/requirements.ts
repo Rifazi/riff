@@ -328,7 +328,10 @@ function buildSplitBrief(
     `The original request was judged too big for one requirements doc and split into ${proposal.parts.length} sessions. ` +
       `Why: ${proposal.rationale}`,
     `## All parts\n\n${others}`,
-    `## This part: ${part.title}\n\n${part.outcome ? `When it ships: ${part.outcome}\n\n` : ''}${part.brief}${dependsOn}`,
+    `## This part: ${part.title}\n\n${part.outcome ? `When it ships: ${part.outcome}\n\n` : ''}${part.brief}${dependsOn}` +
+      (part.howToTest
+        ? `\n\n## How the human will test this part\n\n${part.howToTest}\n\nWrite acceptance criteria that this check proves, and no more: the next part does not start until this one passes it.`
+        : ''),
     parentDoc
       ? `## The parent's draft requirements (for context — only this part's slice belongs in your doc)\n\n${parentDoc}`
       : null,

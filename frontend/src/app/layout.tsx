@@ -30,6 +30,7 @@ import {
   getAudioFormatsDisplayList,
 } from "@/constants/audioFormats";
 import { JournalEventsBridge } from "@/lib/journal/useJournalEvents";
+import { useThemeMode } from "@/lib/theme-mode";
 
 const sourceSans3 = Source_Sans_3({
   subsets: ["latin"],
@@ -72,6 +73,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  useThemeMode(); // applies the saved light/dark/system choice to <html>
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
 
@@ -257,7 +259,7 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <QueryProvider>

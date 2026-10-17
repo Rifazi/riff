@@ -350,6 +350,27 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // be turned off.
   const showStepControls = canContinue || autoRun;
   const busy = streaming || teamActive;
+
+  // A session goes to QA on its own once coding is finished
+  // and its checks pass: the human's checkpoint is after QA, not before it.
+  // The server stops (and says why in the chat) if anything needs a look.
+  const lastCodingEntry = session.transcripts.coding.at(-1)?.id ?? 'none';
+  useEffect(() => {
+    if (session.coordinatorEnabled) return;
+    if (!plan?.length || !allStepsDone || approved || busy || !hasCommits) return;
+    const key = `${sessionId}:autoHandoff:${lastCodingEntry}`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
+    void api
+      .autoHandoffCoding(sessionId)
+      .then(async (result) => {
+        await queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+        refresh();
+        if (result.advanced) router.push(sessionHref(sessionId, 'qa'));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.coordinatorEnabled, plan, allStepsDone, approved, busy, hasCommits, lastCodingEntry]);
   const canStartTeam =
     teamMode &&
     !teamActive &&

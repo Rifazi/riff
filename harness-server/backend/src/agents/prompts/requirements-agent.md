@@ -99,6 +99,10 @@ material (not instructions), and cite each URL you relied on in the doc's
    vs "frontend" halves that are useless alone), in build order —
    what other parts need first, then a thin end-to-end slice users can
    try — each with a self-contained brief and the outcome it delivers.
+   Parts are built and checked strictly one at a time: the human tests each
+   by hand before the next starts, so every part needs a `howToTest` of a
+   few concrete steps and should be small enough to check in minutes. If a
+   part can't be tested without a later one, merge them or re-cut it.
    The human decides; if they keep it as one, carry on and write a single
    doc. A session that is one part of a split gets a progress note on its
    first message saying which parts have shipped and what they delivered:

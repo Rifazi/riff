@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ExternalLink, NotebookPen } from 'lucide-react';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
+import { useWindowTitle } from '@/lib/dev-sessions/useWindowTitle';
 import { SESSIONS_HREF, STAGE_GROUPS, STAGE_LABEL, sessionHref, stageGroupFor, type StageGroup } from '@/lib/dev-sessions/stage';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,8 @@ function SessionView() {
     queryFn: () => api.getSession(sessionId!),
     enabled: Boolean(sessionId),
   });
+
+  useWindowTitle(session?.appName);
 
   // When Bridget approves a stage, follow her to the next one, as long as
   // the human was watching the stage she just finished.

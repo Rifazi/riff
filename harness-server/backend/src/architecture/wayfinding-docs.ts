@@ -97,7 +97,7 @@ Every change answers three questions:
 
 | Concept | Here |
 | --- | --- |
-| Domain | A folder under ${src} with a \`${DOMAIN_DOC}\`. Owns a set of decisions and the data they need; only it writes its own data. |
+| Domain | **Its own subfolder** under ${src}, holding the domain's code, its tests and its \`${DOMAIN_DOC}\` together. Owns a set of decisions and the data they need; only it writes its own data. Domains are never flat: no domain's files share a folder with another's, and no code file sits loose next to the domain folders (only an entry point such as \`index.ts\` or \`app.ts\` may). |
 | Public interface | The domain's \`${config.interfaceFile}\`, or, when it has none, the file named after its folder (a page's \`ProjectListPage/ProjectListPage.tsx\`): the only file other domains import. No re-export file is needed when that file already is the public surface. |
 | Child domain | A domain folder inside a domain. **Every folder of code inside a domain is one** (a component, a page's part, a module), with its own \`${DOMAIN_DOC}\`; folders of tests and fixtures aren't. Visible only to its parent (and its siblings). Never depends on its parent. Its public file is the code file named after its folder, unless it has a \`${config.interfaceFile}\`. |
 | Junction | A domain whose rules combine other domains' decisions (\`Kind: junction\` and \`Inputs:\` in its ${DOMAIN_DOC}). |
@@ -146,6 +146,22 @@ Every change answers three questions:
 - Run the checkpoint and the mechanical checks.
 - Hand the route, the diff and the docs to an independent QA review.
 
+## Where files and docs go
+
+\`\`\`
+<source folder>/
+  <domain>/
+    ${DOMAIN_DOC}          the domain's documentation: rules, hidden behavior, recipes
+    ${config.interfaceFile}      its public file (or <domain>.ts)
+    <private files>
+    <domain>.test.ts   its tests, beside the code
+    <child>/           a child domain: same shape, its own ${DOMAIN_DOC}
+\`\`\`
+
+A new domain is a new subfolder with its \`${DOMAIN_DOC}\`, created in the segment that needs it, never a new file in a shared
+folder. Documentation about a domain lives in that domain's \`${DOMAIN_DOC}\`, not in a page under \`docs/\`. \`docs/\` holds only what
+belongs to no domain (this guide, setup, cross-cutting notes).
+
 ## What goes in the docs
 
 Write down what the code cannot tell you. Do not restate what it can, unless the restatement is anchored to a test.
@@ -189,8 +205,9 @@ as segments. The mechanical checks report a branch that changed code on no domai
 }
 
 const SHARED = (c: WayfindingConfig) =>
-  `This app follows Wayfinding Architecture: every important decision is owned by exactly one domain. Domains are folders ` +
-  `under ${describeSrcDirs(c, (s) => s)} with a ${DOMAIN_DOC} (Owns, Does not own, Interface, Checkpoint, Rules anchored to tests, ` +
+  `This app follows Wayfinding Architecture: every important decision is owned by exactly one domain. Each domain is its own subfolder ` +
+  `under ${describeSrcDirs(c, (s) => s)}, holding its code, tests and a ${DOMAIN_DOC}; never a flat layer of files, and no code file ` +
+  `loose beside the domain folders except an entry point (index, main, app, server, cli). The ${DOMAIN_DOC} has (Owns, Does not own, Interface, Checkpoint, Rules anchored to tests, ` +
   `Hidden behavior, Recipes, Mirrors, and generated Files and Consumers lists). ${MAP_PATH} at the repo root indexes the ` +
   `top-level domains and junctions. Other domains are reached only through a domain's public file: its ${c.interfaceFile}, or the file named after ` +
   `its folder when it has none (Files marks it "(interface)"); a child domain is ` +
@@ -263,7 +280,10 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `plan under the narrowest domain that implements it. When an interface with separately deployed, external or ` +
       `persisted consumers changes, plan expand then contract: add the new shape, move consumers one step at a time, remove the ` +
       `old shape last; schema changes are forward-only. Behavior-neutral work (refactors, upgrades) takes the short route: ` +
-      `domain, interface unchanged, consumers, segments. A decision gets a new domain only when a second place needs it.`,
+      `domain, interface unchanged, consumers, segments. A decision gets a new domain only when a second place needs it. Every domain the plan creates is its own subfolder ` +
+      `under a source folder, named in the step with the files it will hold, never files added to a shared or flat folder, and its ` +
+      `documentation goes in that domain's ${DOMAIN_DOC} rather than a docs/ page. Work found loose in a source folder gets its own ` +
+      `step moving it into its domain's subfolder.`,
     coding:
       `${FINDING_CODE(config)}\n\n` +
       `Read first, update last. Before changing code, read ${MAP_PATH} and the ${DOMAIN_DOC} of the domain the step names ` +
@@ -289,15 +309,18 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `parent keeps only its own decisions. A folder you add gets its ${DOMAIN_DOC} in the same step. A child's public file is ` +
       `the code file named after its folder (no re-export file), unless it has a ${config.interfaceFile}. Log each new domain ` +
       `under Structural changes in ${MAP_PATH} and run audit_architecture({ regenerate: true }) for Files and Consumers. ` +
-      `Files directly under a domain folder setting (entry points such as src/app.ts) are exempt. A step isn't finished while ` +
-      `the audit reports changed code with no ${DOMAIN_DOC}.`,
+      `Layout: a new domain is a new subfolder with its ${DOMAIN_DOC}, its code and its tests inside it; never add a code file ` +
+      `directly under a source folder (only an entry point such as index, main, app, server or cli may sit there) and never put ` +
+      `files of two domains in one folder. A domain's documentation goes in its ${DOMAIN_DOC}, not a page in docs/. If code you ` +
+      `must change sits loose or in a shared folder, move it into its owning domain's subfolder in its own step first. A step isn't ` +
+      `finished while the audit reports changed code with no ${DOMAIN_DOC} or code loose in a source folder.`,
     qa:
       `${FINDING_CODE(config)}\n\n` +
       `You are the independent QA the procedure calls for: validate the code and the docs together. Run audit_architecture: ` +
       `it reports the structural and doc checks, which domains the branch touched and any ownership or structural edits. Flag ` +
       `as findings: an audit problem in MAP.md or a domain the branch touched; a changed business rule without a matching ` +
       `change in that domain's Rules, anchored to a test that exists; Owns, Does not own or Mirrors changed without being its ` +
-      `own commit/step, or inconsistent with the guardrails; a new domain not logged in ${MAP_PATH}; code changed in a folder with no ${DOMAIN_DOC}, top-level or inside a domain (the audit reports it); a parent ` +
+      `own commit/step, or inconsistent with the guardrails; a new domain not logged in ${MAP_PATH}; code changed in a folder with no ${DOMAIN_DOC}, top-level or inside a domain, or a code file added loose in a source folder or in a folder shared by two domains (the audit reports the first two), and domain documentation put in docs/ instead of the domain's ${DOMAIN_DOC}; a parent ` +
       `${DOMAIN_DOC} that describes a child domain's behavior instead of leaving it to the child's; duplicate authority (logic ` +
       `outside the owning domain that re-implements its decision), undeclared mirrors, and misplaced decisions (a rule ` +
       `implemented in a consumer); hidden behavior the work relied on or discovered but didn't record; and a diff touching ` +

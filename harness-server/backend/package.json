@@ -22,9 +22,11 @@
     "fast-xml-parser": "^4.5.0",
     "fastify": "^5.1.0",
     "gray-matter": "^4.0.3",
+    "mammoth": "^1.13.0",
     "pdf-parse": "^2.4.5",
     "simple-git": "^3.27.0",
     "uuid": "^11.1.0",
+    "word-extractor": "^1.0.4",
     "zod": "^4.0.0"
   },
   "devDependencies": {

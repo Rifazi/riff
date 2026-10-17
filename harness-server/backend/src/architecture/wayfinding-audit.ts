@@ -782,11 +782,17 @@ export interface BranchScope {
   // folder of code inside a domain (parent = that domain's id, the child
   // domain it should become).
   offMap: { folder: string; parent: string | null; files: string[] }[];
+  // Changed code files sitting directly in a source folder, next to the
+  // domain folders, that aren't an entry point: each belongs in a domain's
+  // own subfolder.
+  looseFiles: string[];
   // DOMAIN.md files whose ownership lines (Owns, Does not own, Owns data, Kind, Inputs, Parent, Child domains) changed.
   ownershipEdits: { file: string; fields: string[] }[];
   // DOMAIN.md files added or deleted: structural changes, logged in MAP.md.
   structural: { file: string; change: 'added' | 'removed' }[];
 }
+
+const ENTRY_STEMS = ['index', 'main', 'app', 'server', 'cli'];
 
 const OWNERSHIP_FIELDS = ['Owns', 'Owns data', 'Does not own', 'Kind', 'Inputs', 'Parent', 'Child domains'];
 
@@ -801,8 +807,9 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     else outside.push(file);
   }
 
-  // Files straight under a source folder have no folder to draw a domain
-  // around; they stay in `outside`.
+  // Entry points (src/index.ts, src/app.ts) may sit straight under a source
+  // folder; any other code file there should be in a domain's own folder.
+  const looseFiles: string[] = [];
   const roots = auditedSrcDirs(audit).filter((d) => d !== '.');
   const offMap = new Map<string, { parent: string | null; files: string[] }>();
   const flag = (folder: string, parent: string | null, file: string) =>
@@ -810,7 +817,11 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
   for (const file of outside) {
     const root = roots.find((r) => file.startsWith(`${r}/`));
     const rest = root ? file.slice(root.length + 1) : null;
-    if (!rest || !rest.includes('/') || path.posix.basename(file) === DOMAIN_DOC) continue;
+    if (!rest || path.posix.basename(file) === DOMAIN_DOC) continue;
+    if (!rest.includes('/')) {
+      if (isCode(rest) && !isTest(file) && !ENTRY_STEMS.includes(path.posix.parse(rest).name)) looseFiles.push(file);
+      continue;
+    }
     flag(`${root}/${rest.split('/')[0]}`, null, file);
   }
   // Inside a domain, the outermost folder without a DOMAIN.md comes first: its
@@ -839,6 +850,7 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     base,
     byDomain: [...byDomain].map(([domain, files]) => ({ domain, files })).sort((a, b) => a.domain.localeCompare(b.domain)),
     outside,
+    looseFiles: looseFiles.sort(),
     offMap: [...offMap]
       .map(([folder, { parent, files }]) => ({ folder, parent, files: files.sort() }))
       .sort((a, b) => a.folder.localeCompare(b.folder)),
@@ -934,11 +946,21 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
     if (problems.length > MAX_LISTED) lines.push(`- … ${problems.length - MAX_LISTED} more`);
   };
   const offMap = scope?.offMap ?? [];
-  if (!audit.problems.length && !offMap.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
+  const loose = scope?.looseFiles ?? [];
+  if (loose.length) {
+    lines.push(
+      '',
+      `✗ This branch put ${loose.length} code file(s) loose in a source folder: ${loose.slice(0, 5).join(', ')}${loose.length > 5 ? ', …' : ''}`,
+      `  Every domain is its own subfolder with its ${DOMAIN_DOC}, its code and its tests together; only an entry point (index, main, app, server, cli) ` +
+        `may sit directly under a source folder. Move each file into the subfolder of the domain that owns its decision (a new domain gets a new ` +
+        `subfolder and ${DOMAIN_DOC}, logged in ${MAP_PATH}).`
+    );
+  }
+  if (!audit.problems.length && !offMap.length && !loose.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
   else if (!touched) listProblems(`✗ ${audit.problems.length} problem(s):`, audit.problems);
   else {
     if (inScope.length) listProblems(`✗ ${inScope.length} problem(s) in MAP.md or domains this branch touched:`, inScope);
-    else if (!offMap.length) lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
+    else if (!offMap.length && !loose.length) lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
     if (offMap.length) {
       lines.push('', `✗ This branch changed code in ${offMap.length} folder(s) with no ${DOMAIN_DOC}:`);
       for (const o of offMap) {

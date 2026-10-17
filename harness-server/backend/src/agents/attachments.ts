@@ -1,4 +1,7 @@
 import { PDFParse } from 'pdf-parse';
+import { htmlToText, looksLikeHtml, looksLikeMime, mimeHtmlPart } from './html-text.js';
+import mammoth from 'mammoth';
+import WordExtractor from 'word-extractor';
 import { appendTranscriptEntry } from '../sessions/session-store.js';
 import { addReferenceDocs } from '../sessions/reference-docs.js';
 
@@ -44,6 +47,10 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
   }
 
   const isPdf = input.mediaType === 'application/pdf' || /\.pdf$/i.test(input.name);
+  const isWord =
+    /\.docx?$/i.test(input.name) ||
+    input.mediaType === 'application/msword' ||
+    input.mediaType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   const isText = input.mediaType.startsWith('text/') || /\.(md|markdown|txt|csv|json|ya?ml)$/i.test(input.name);
   const mightBeText = input.mediaType === 'application/octet-stream' || input.mediaType === '';
 
@@ -58,6 +65,8 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
     if (!text) {
       throw new Error(`${input.name}: no extractable text found — it may be a scanned/image-only PDF.`);
     }
+  } else if (isWord) {
+    text = await extractWordText(input.name, buffer);
   } else if (isText) {
     text = buffer.toString('utf8');
   } else if (mightBeText) {
@@ -66,13 +75,13 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
     const decoded = buffer.toString('utf8');
     if (decoded.includes('\0')) {
       throw new Error(
-        `${input.name}: unsupported file type "${input.mediaType}" — attach a PDF or a plain-text/code file.`
+        `${input.name}: unsupported file type "${input.mediaType}" — attach a PDF, Word document or plain-text/code file.`
       );
     }
     text = decoded;
   } else {
     throw new Error(
-      `${input.name}: unsupported file type "${input.mediaType || 'unknown'}" — attach a PDF or a plain-text/markdown file.`
+      `${input.name}: unsupported file type "${input.mediaType || 'unknown'}" — attach a PDF, Word document or plain-text/markdown file.`
     );
   }
 
@@ -82,6 +91,32 @@ async function parseAttachment(input: AttachmentInput): Promise<ParsedAttachment
   }
 
   return { name: input.name, text };
+}
+
+// A .docx is a zip (PK), a legacy .doc an OLE2 container; the extension and
+// media type are often wrong, so the bytes decide.
+async function extractWordText(name: string, buffer: Buffer): Promise<string> {
+  const isZip = buffer.subarray(0, 2).toString('latin1') === 'PK';
+  const isOle = buffer.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]));
+  let text: string;
+  try {
+    if (isZip) {
+      text = (await mammoth.extractRawText({ buffer })).value;
+    } else if (isOle) {
+      text = (await new WordExtractor().extract(buffer)).getBody();
+    } else {
+      const head = buffer.subarray(0, 2048).toString('utf8');
+      // Word's "web page" and Confluence/Jira exports are HTML (or MHTML) saved as .doc.
+      const html = looksLikeMime(head) ? mimeHtmlPart(buffer.toString('latin1')) : looksLikeHtml(head) ? buffer.toString('utf8') : null;
+      if (html === null) throw new Error('not a Word, HTML or MHTML file');
+      return htmlToText(html);
+    }
+  } catch (err) {
+    throw new Error(`${name}: could not read the Word document (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  text = text.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!text) throw new Error(`${name}: no extractable text found in the Word document.`);
+  return text;
 }
 
 /**
