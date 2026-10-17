@@ -33,12 +33,24 @@ describe('split hint', () => {
   test('solo when every step touches a file the step before it does', () => {
     const chain = stepFiles(plan(['`src/a.ts`', '`src/a.ts`, `src/b.ts`', 'uses `b.ts`']));
     expect(soloReason(chain)).toContain('one after another');
+    expect(soloReason(stepFiles(plan(['`src/a.ts`', '`src/b.ts`', '`src/a.ts`, `src/b.ts`'])))).toContain('one after another');
   });
 
   test('the lead decides when two neighbours share nothing, or for one step', () => {
     expect(soloReason(stepFiles(plan(['`src/a.ts`', '`src/b.ts`'])))).toBeNull();
     expect(soloReason(stepFiles(plan(['`src/a.ts`', 'no files here'])))).toBeNull();
     expect(soloReason(stepFiles(plan(['`src/a.ts`'])))).toBe('The plan has a single step.');
+  });
+
+  test('a doc or config every step names does not chain them', () => {
+    const domains = stepFiles(
+      plan([
+        '`src/ui/Button.tsx`, `DOMAIN.md`, `service.ts`',
+        '`src/auth/jwt.ts`, `DOMAIN.md`, `service.ts`, `../ui/service`',
+        '`src/projects/list.ts`, `DOMAIN.md`, `package.json`',
+      ])
+    );
+    expect(soloReason(domains)).toBeNull();
   });
 
   test('the map lists every step', () => {

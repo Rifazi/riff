@@ -69,6 +69,12 @@ export function SplitProposalCard({
             {openIndex === i && (
               <div className="px-3 pb-2.5 pt-1 text-xs text-foreground whitespace-pre-wrap border-t border-border">
                 {part.brief}
+                {part.howToTest && (
+                  <div className="mt-2">
+                    <span className="font-medium">How you'll test it</span>
+                    <div className="text-muted-foreground">{part.howToTest}</div>
+                  </div>
+                )}
               </div>
             )}
           </li>
@@ -329,7 +335,11 @@ export function SplitPartStrip({ session }: { session: SessionRecord }) {
           <ChevronDown className={`transition-transform ${open ? 'rotate-180' : ''}`} />
         </Button>
       </div>
-      {open && <RoadmapList roadmap={roadmap} currentId={session.id} />}
+      {open && (
+        <div className="max-h-[50vh] overflow-y-auto">
+          <RoadmapList roadmap={roadmap} currentId={session.id} />
+        </div>
+      )}
     </div>
   );
 }

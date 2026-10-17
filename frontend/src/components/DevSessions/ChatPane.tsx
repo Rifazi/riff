@@ -46,7 +46,7 @@ function resultText(result: unknown): string {
 type ToolIcon = typeof Wrench;
 function toolIcon(name: string): ToolIcon {
   if (name === 'search_code' || name === 'search_docs') return Search;
-  if (name === 'read_file' || name === 'outline_file' || name === 'read_doc') return FileText;
+  if (name === 'read_file' || name === 'read_files' || name === 'outline_file' || name === 'read_doc') return FileText;
   if (name === 'write_file' || name === 'edit_file') return FileCode;
   if (name.startsWith('run_') || name === 'get_diff') return Terminal;
   if (name === 'git_create_branch') return GitBranch;
@@ -63,6 +63,10 @@ function resultBadge(name: string, input: unknown, text: string, isError: boolea
       // Grouped output: file headers are non-indented lines
       const files = text.split('\n').filter((l) => l && !l.startsWith(' ')).length;
       return files === 0 ? 'no results' : `${files} file${files === 1 ? '' : 's'}`;
+    }
+    case 'read_files': {
+      const files = Array.isArray((input as { files?: unknown })?.files) ? (input as { files: unknown[] }).files.length : 0;
+      return `${files} file${files === 1 ? '' : 's'}`;
     }
     case 'read_file': {
       const lines = text.split('\n').length;
@@ -124,6 +128,9 @@ function ToolInputRows({ name, input }: { name: string; input: unknown }) {
     case 'read_doc':
       if (str(obj.query ?? obj.path)) rows.push(['Query', str(obj.query ?? obj.path)!]);
       break;
+    case 'read_files':
+      if (Array.isArray(obj.files)) rows.push(['Files', (obj.files as { path?: string }[]).map((f) => f?.path).filter(Boolean).join(', ')]);
+      break;
     case 'read_file':
       if (str(obj.path)) rows.push(['File', str(obj.path)!]);
       if (num(obj.offset)) rows.push(['From line', num(obj.offset)!]);
@@ -173,7 +180,7 @@ function ResultPreview({ text, name }: { text: string; name: string }) {
   const [showFull, setShowFull] = useState(false);
   const PREVIEW = 600;
   const trimmed = showFull ? text : text.slice(0, PREVIEW);
-  const isCode = ['read_file', 'get_diff', 'search_code', 'outline_file', 'run_checked_command', 'run_npm_install', 'read_doc'].includes(name);
+  const isCode = ['read_file', 'read_files', 'get_diff', 'search_code', 'outline_file', 'run_checked_command', 'run_npm_install', 'read_doc'].includes(name);
   return (
     <div className={`${isCode ? 'font-mono' : 'font-sans'} whitespace-pre-wrap break-all`}>
       {trimmed}
@@ -810,7 +817,7 @@ export function ChatPane({
               ))}
             </div>
           )}
-          <div className="flex gap-2 items-end">
+          <div className="flex gap-2 items-center">
             <input
               ref={fileInputRef}
               type="file"
@@ -848,8 +855,8 @@ export function ChatPane({
                   : (placeholder ?? 'Type a message…')
               }
               disabled={disabled}
-              rows={2}
-              className="flex-1 min-h-0 shadow-sm resize-none disabled:bg-muted"
+              rows={1}
+              className="flex-1 h-9 min-h-0 py-2 leading-5 shadow-sm resize-none disabled:bg-muted"
             />
             <Button onClick={send} disabled={!canSend}>
               <Send />

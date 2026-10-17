@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
+import { useWindowTitle } from '@/lib/dev-sessions/useWindowTitle';
 import type { IntegrationDoc } from '@/lib/dev-sessions/types';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +17,7 @@ function IntegrationsView() {
   const appId = useSearchParams().get('appId');
   const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
   const appName = apps?.find((a) => a.id === appId)?.name ?? appId;
+  useWindowTitle(apps?.find((a) => a.id === appId)?.name);
 
   const { data: integrations, isLoading } = useQuery({
     queryKey: ['integrations', appId],

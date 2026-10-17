@@ -1703,6 +1703,104 @@ below) — never inside the target repo.
    Not run with real agents yet: count `recall` redos and merge retries in
    the next session's transcript.
 
+58. User said the app felt much slower than the Claude plugin. Session
+   `a258f09a`'s last coding turn: 80 requests (the cap) in 738 s, ~8 s per
+   request, 1.6k output tokens, 190 tool calls; tools were ~115 s of it
+   (`delegate` 5 × 8 s, `run_checked_command` 7 × 5 s, `finish_step`,
+   `recall`), the rest was round trips, at 2.4 tool calls per request, each
+   re-sending ~42k tokens of context. `read_file`, `search_code`,
+   `outline_file` and `read_doc` take ~0 s but each cost a request. Changed:
+   - **`read_files`** (`tool-defs/file-tools.ts`, `readFilesExecute`): up to
+     8 `read_file`-shaped items in one call, each under an `=== path ===`
+     heading, a failure reported in its place. Plan, coding, QA and team
+     agents have it (AI SDK and Claude engines). `working-set.ts`,
+     `handoff.ts` and the chat UI read it like `read_file`.
+   - **`search_code` `also`**: up to 5 more patterns in one call, each under
+     a `## pattern` heading.
+   - **`audit_architecture`** (`trimAudit`): capped at 10k chars, a repeat of
+     the last result is a one-line note, and later calls leave out the
+     domain list. A turn had paid for 6 audits of ~24k chars.
+   - **Prompts**: a "Work in few requests" section in the coding, team
+     member, QA, QA reviewer and plan prompts; `delegate`'s description now
+     says it takes ~8 s and a single search or `read_files` is better.
+   - **Hop timing**: the Claude engine logs `[hop] boot … first response …
+     N requests … ms/request` per hop (`sdk-client.ts`), to decide whether
+     the 20-step hop size should go up.
+   Tests: `batch-tools`. Not run with real agents yet: compare requests per
+   turn and tool calls per request in the next `usage-log.jsonl`, and read
+   the `[hop]` lines in `state/agent-server.log`.
+   Also: `soloReason` (team/split-hint.ts) built session `a258f09a`'s
+   19-step, five-domain plan solo because every step named `DOMAIN.md`, so
+   each neighbour pair "shared a file". It now ignores docs, root config,
+   relative imports and bare `service.ts`/`index.ts` names, and goes solo
+   without asking only when the remaining files connect every step into
+   one group; otherwise Jack decides (`split-hint` test).
+
+59. User asked why the EDI Viewer 844 build (session `a4933a48`) was slow and
+   for optimizations. Solo build, 8 steps, ~190 calls, ~8 s per request. Its
+   validator step failed `test:ci` after `finish_step` because an existing
+   test used 844 as its example of an *unsupported* set; the agent then re-ran
+   the same test unchanged, and the conversation was cut three times in two
+   minutes. Fixed:
+   - **Stale step id** (`coding-agent.ts`): `codingContext.stepId` was the
+     step the *turn* began on, but a turn can finish several steps in one
+     conversation. After it hit the 80-request cap, the next turn saw a
+     different step and discarded a conversation compacted 10 s earlier,
+     with a handoff that named the wrong step ("covered the step sections").
+     The compaction handoff now records the step it carries on from
+     (`conversationStepId`) and that is what is stored.
+   - **`finish_step` failure reply** says the report is current and that
+     re-running the check unchanged returns the same failure. The coding
+     prompt says a test that fails right after adding something is often an
+     existing fixture that used it as the unsupported example.
+   - **Working set** (`working-set.ts`): an edit stays in the handoff's
+     working set for 45 events, not 15. The last 15 were reads of other
+     files, so the file being fixed was re-read after every cut.
+   - **Docs-only steps are light** (`step-effort.ts`, used by
+     `write_plan_doc`): a step whose section names only `.md`/`docs/` files
+     is tagged light whatever the title classifier says (it tagged "Docs:
+     docs/edi-viewer.md" standard; 14 of 173 steps have ever been light).
+   - **Prompts**: plan steps name the files they touch, the one file whose
+     layout they copy, the `read_doc` sections they need, and the existing
+     tests/fixtures that mention what they add; code or tests that would grow
+     a file past ~600 lines go in a new sibling file (plan, coding and team
+     member prompts).
+   Considered and not changed: running lint and tests in parallel inside
+   `finish_step` (lint is ~9 s of a 35-75 s step end, and a `lint --fix` could
+   change files mid-test); lowering the 55k compaction point (the log shows
+   too many cuts, not too few); limiting concurrent sessions (nothing shows
+   rate limiting, the `[hop]` log lines are the thing to compare).
+   Tests: `step-effort.test.ts`, additions to `working-set` and `finish-step`;
+   the folder (359) passes through a node:test shim except 19 cases that
+   fail the same way without these changes (the shim lacks `toStartWith`,
+   `rejects`). Not run with real agents yet: check calls between cuts and
+   `finish_step` failures per session on the next EDI Viewer build.
+
+60. User pointed at the `wayfinding-fix` requirement (split every domain into
+   child domains, one per file, shared helpers as sibling children, thin
+   parents) and said DOMAIN.md was one gigantic file full of empty sections.
+   - **Empty means absent**: the DOMAIN.md template (`renderDomainTemplate`)
+     marks Parent (top-level), Owns data, Child domains and Does not own as
+     "leave the line out"; only Owns, Interface and Checkpoint are required.
+     Mirrors, Hidden behavior, Recipes and Rules are sections to write only
+     when there is something in them. `filesBlock`/`consumersBlock` return ''
+     when there is nothing to list, so a domain nothing imports has no
+     Consumers section. A leftover "- none" block is stale ("section is
+     empty: remove it"), and `regenerate` removes it with its heading
+     (`dropSection`). The MAP.md template lost its comment block, "Legacy
+     tables" and "External sequences" sections (add them when needed).
+   - **Splitting rule** in the guide ("Splitting a domain"), the plan
+     briefing and the child-domain instructions: one child per file/module,
+     code two children share becomes a sibling child (never parent-owned),
+     the parent keeps its public file, entry point and composition (CDK
+     construct), rules move to the child that implements them, behavior
+     unchanged, one domain per step.
+   Tests: `wayfinding-audit.test.ts` ("empty sections"); the folder passes
+   through a node:test shim except the 19 cases that fail the same way
+   without these changes. Domains already on disk keep their "none" lines
+   until `audit_architecture({ regenerate: true })` runs; "Owns data: none"
+   and "Mirrors - none" are still accepted, just no longer written.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

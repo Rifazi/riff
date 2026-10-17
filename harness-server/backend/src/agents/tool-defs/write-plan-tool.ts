@@ -5,6 +5,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { config } from '../../config.js';
 import { classifyText } from '../helpers/classifier/classifier.js';
+import { docsOnlyStepIdsOf } from '../step-effort.js';
 
 // Labels fed to the on-device NLI classifier to auto-determine step effort.
 const EFFORT_LABELS = [
@@ -66,8 +67,12 @@ export function createWritePlanExecute(sessionInfo: { sessionKey: string; ticket
     // Auto-classify effort for each step using the on-device NLI classifier.
     // The plan agent no longer needs to reason about light vs standard — the
     // classifier tags it for free, and model-routing.ts reads these tags.
+    const docsOnly = docsOnlyStepIdsOf(markdownBody, steps);
     const stepsWithEffort = await Promise.all(
-      steps.map(async (step) => ({ ...step, effort: await classifyEffort(step.title) })),
+      steps.map(async (step) => ({
+        ...step,
+        effort: docsOnly.has(step.id) ? ('light' as const) : await classifyEffort(step.title),
+      })),
     );
 
     const frontmatter = {

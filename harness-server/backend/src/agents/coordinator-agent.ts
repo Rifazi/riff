@@ -275,8 +275,28 @@ function toolResultText(result: unknown): string {
 const CONCERN_WORDS =
   /\b(fail(s|ed|ing|ure|ures)?|couldn'?t|could not|unable to|not (been )?(verified|tested)|untested|unverified|skipped|blocked|pre-?existing|flaky|workaround)\b/i;
 
-/** The first worrying phrase in the agent's last message, or null. */
+const NEGATED_BEFORE = /\b(no|zero|0|without|none|never|nothing|neither|nor)\b[^.,;:!?\n]*$/i;
+const RESOLVED_IN_SENTENCE = /\b(fixed|resolved|now (passes?|passing|green|succeeds?)|then (passes?|passed)|after (the )?fix(ing)?|previously|earlier|initially)\b/i;
+
+function isBenignMention(text: string, index: number): boolean {
+  const start = Math.max(text.lastIndexOf('.', index), text.lastIndexOf('\n', index), text.lastIndexOf('!', index), text.lastIndexOf('?', index)) + 1;
+  const ends = ['.', '\n', '!', '?'].map((c) => text.indexOf(c, index)).filter((i) => i >= 0);
+  const sentence = text.slice(start, ends.length ? Math.min(...ends) : text.length);
+  if (NEGATED_BEFORE.test(text.slice(start, index))) return true;
+  return RESOLVED_IN_SENTENCE.test(sentence) && !/\bstill\b/i.test(sentence);
+}
+
+/** The first worrying phrase in the agent's last message, or null. A negated ("no tests failed") or resolved ("fixed the failing test") mention doesn't count. */
 export function concernInLastMessage(entries: TranscriptEntry[]): string | null {
   const last = [...entries].reverse().find((e) => e.role === 'assistant')?.text ?? '';
-  return CONCERN_WORDS.exec(last)?.[0] ?? null;
+  const words = new RegExp(CONCERN_WORDS.source, 'gi');
+  for (const m of last.matchAll(words)) {
+    if (!isBenignMention(last, m.index ?? 0)) return m[0];
+  }
+  return null;
+}
+
+/** A concern the pre-QA lint and test run can confirm or clear, unlike "skipped" or "unverified". */
+export function isFailureWord(word: string): boolean {
+  return /^fail/i.test(word);
 }

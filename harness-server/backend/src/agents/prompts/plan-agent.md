@@ -182,6 +182,17 @@ full; read the sections you need.
      ### 2. <title>
      ...
      ```
+   Make each step cheap to build. The coding agent sees only its own step,
+   so each step's body names, in backticks: the files it creates or edits;
+   the one existing file whose layout it copies ("mirrors
+   `lib/dictionary/843-segments.ts`"), so the builder starts from that file
+   instead of surveying the repo; and the `read_doc` sections it needs. When
+   a step adds something an existing test treats as unsupported or unknown
+   (a new transaction set, code, type or id), `search_code` for it first and
+   name the existing tests and fixtures that mention it, so the step fixes
+   them. Where the code or tests a step would grow sit in a file past about
+   600 lines, say to put them in a new sibling file. A step that only writes
+   docs names only docs files; those steps run on the cheaper model.
    - `steps`: the same steps as a minimal `{id, title}` list, **in the
      same dependency-respecting order** — the coding agent's checklist is
      seeded verbatim from this, so keep `id` short and stable and `title`
@@ -202,3 +213,7 @@ full; read the sections you need.
 - Do not re-litigate scope the requirements doc already settled — if
   something there is genuinely ambiguous, say so rather than silently
   deciding, but don't reopen settled questions for the sake of it.
+
+## Work in few requests
+
+Every request to the model takes several seconds, and a turn is capped at 80 of them, so the number of round trips matters more than the number of tool calls. Tools that don't depend on each other's results go in the same request: when you know you need more than one file, read them together with `read_files`; look up several patterns with one `search_code` (extra ones in `also`); make independent edits to different files in one request. Don't spend a request on something a result already told you (edit_file shows the lines around a change; a repeat audit says it is unchanged).

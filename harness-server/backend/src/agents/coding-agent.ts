@@ -92,6 +92,7 @@ const TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'read_files',
   'outline_file',
   'write_file',
   'edit_file',
@@ -411,6 +412,10 @@ export async function runCodingAgentTurn(
   // read_file/read_doc's repeat notes describe this conversation only, so
   // compaction's fresh one starts with an empty memo.
   const readMemo = new ReadMemo();
+  // The step the live conversation started on: the turn's, or the one a
+  // mid-turn compaction last carried on from. A turn can finish several
+  // steps in one conversation, so the turn's own start is stale by its end.
+  let conversationStepId: string | null = null;
   const compaction: CompactionOptions = {
     atTokens: COMPACT_AT_TOKENS,
     ...hopLimits(provider),
@@ -438,6 +443,7 @@ export async function runCodingAgentTurn(
       });
       contextStartEntryId = marker.id;
       const fresh = latest ?? session;
+      conversationStepId = currentStepId(fresh) ?? targetStepId;
       const reference = referenceDocsManifest(await listSessionReferenceDocs(fresh));
       return {
         prompt: handoff,
@@ -493,7 +499,7 @@ export async function runCodingAgentTurn(
 
   await updateSession(session.id, {
     codingContext: {
-      stepId: freshReason || !ctx ? targetStepId : ctx.stepId,
+      stepId: conversationStepId ?? (freshReason || !ctx ? targetStepId : ctx.stepId),
       startEntryId: contextStartEntryId,
       tokens: contextTokens,
       teamRound: team?.finishedAt ? team.round : ctx?.teamRound,
@@ -515,7 +521,7 @@ export async function runCodingAgentTurn(
         sessionId: session.id,
         readMemo,
       });
-      const { readFileToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
+      const { readFileToolClaude, readFilesToolClaude, writeFileToolClaude, editFileToolClaude, deleteFileToolClaude } = createFileToolsClaude({
         repoRoot: app.repoRoot,
         onRead: (filePath, read) => {
           noteDelegateRead(delegateDeps, filePath);
@@ -556,6 +562,7 @@ export async function runCodingAgentTurn(
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             ...classifyTextToolsClaude(classifierOn, helperContext),
             readFileToolClaude,
+            readFilesToolClaude,
             writeFileToolClaude,
             editFileToolClaude,
             deleteFileToolClaude,
@@ -616,7 +623,7 @@ export async function runCodingAgentTurn(
       }
 
       const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id, readMemo });
-      const { readFileTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
+      const { readFileTool, readFilesTool, writeFileTool, editFileTool, deleteFileTool } = createFileTools({
         repoRoot: app.repoRoot,
         onRead: (filePath, read) => {
           noteDelegateRead(delegateDeps, filePath);
@@ -651,6 +658,7 @@ export async function runCodingAgentTurn(
         outline_file: createOutlineFileTool({ repoRoot: app.repoRoot }),
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         read_file: readFileTool,
+        read_files: readFilesTool,
         write_file: writeFileTool,
         edit_file: editFileTool,
         delete_file: deleteFileTool,

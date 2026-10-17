@@ -6,6 +6,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/shadcn/style.css";
 import "@blocknote/core/fonts/inter.css";
+import { useThemeMode } from "@/lib/theme-mode";
 
 interface EditorProps {
   initialContent?: Block[];
@@ -14,6 +15,7 @@ interface EditorProps {
 }
 
 export default function Editor({ initialContent, onChange, editable = true }: EditorProps) {
+  const { isDark } = useThemeMode();
   console.log('📝 EDITOR: Initializing BlockNote editor with blocks:', {
     hasContent: !!initialContent,
     blocksCount: initialContent?.length || 0,
@@ -47,5 +49,5 @@ export default function Editor({ initialContent, onChange, editable = true }: Ed
     };
   }, [editor, onChange]);
 
-  return <BlockNoteView editor={editor} editable={editable} theme="light" />;
+  return <BlockNoteView editor={editor} editable={editable} theme={isDark ? "dark" : "light"} />;
 }

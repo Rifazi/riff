@@ -391,8 +391,9 @@ function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; par
 // Markdown formatters (prettier, run by git_commit and finish_step) put blank lines around the list.
 const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
 
+/** Empty when nothing imports the domain: the section is left out of its DOMAIN.md. */
 function consumersBlock(consumers: string[]): string {
-  return `<!-- generated: do not edit -->\n${consumers.length ? `- ${consumers.join(', ')}\n` : '- none\n'}<!-- end generated -->`;
+  return consumers.length ? `<!-- generated: do not edit -->\n- ${consumers.join(', ')}\n<!-- end generated -->` : '';
 }
 
 const EXPORT_DECL =
@@ -418,7 +419,8 @@ export function exportedNames(source: string): string[] {
  * (child domains list their own), with what each code file exports, so an
  * agent goes from DOMAIN.md straight to the file it needs. `api` is the
  * public file's signatures (publicSignatures), listed under it so another
- * domain can call this one without opening its code.
+ * domain can call this one without opening its code. Empty when the domain
+ * holds no files: the section is left out of its DOMAIN.md.
  */
 export function filesBlock(files: { path: string; source: string | null }[], publicStem: string, api: string[] = []): string {
   const isInterface = (file: string) => !file.includes('/') && isCode(file) && stemOf(file) === publicStem;
@@ -439,7 +441,7 @@ export function filesBlock(files: { path: string; source: string | null }[], pub
   const listed = lines.slice(0, MAX_FILES_LISTED);
   if (lines.length > MAX_FILES_LISTED) listed.push(`- … ${lines.length - MAX_FILES_LISTED} more`);
   if (tests.length) listed.push(`- tests: ${tests.join(', ')}`);
-  return `<!-- generated: files, do not edit -->\n${listed.length ? `${listed.join('\n')}\n` : '- none\n'}<!-- end generated -->`;
+  return listed.length ? `<!-- generated: files, do not edit -->\n${listed.join('\n')}\n<!-- end generated -->` : '';
 }
 
 /**
@@ -610,7 +612,7 @@ export function auditWayfinding(
 
     const parent = headerField(doc, 'Parent');
     const expectedParent = d.parent ? d.parent.name : 'none';
-    if (!parent || !(parent.startsWith(expectedParent) || (d.parent && parent.startsWith(d.parent.id)))) {
+    if (parent ? !(parent.startsWith(expectedParent) || (d.parent && parent.startsWith(d.parent.id))) : d.parent) {
       fail('docs', here, d, `Parent is "${parent ?? '(missing)'}", but the folder says ${expectedParent}`);
     }
     const declaredChildren = listOf(headerField(doc, 'Child domains')).sort().join(', ');
@@ -620,8 +622,9 @@ export function auditWayfinding(
     }
     for (const field of ['Owns', 'Does not own', 'Interface', 'Checkpoint']) {
       const value = headerField(doc, field);
-      if (!value) fail('docs', here, d, `missing "${field}:"`);
-      else if (isPlaceholder(value)) fail('docs', here, d, `"${field}:" is still the template placeholder`);
+      if (!value) {
+        if (field !== 'Does not own') fail('docs', here, d, `missing "${field}:"`);
+      } else if (isPlaceholder(value)) fail('docs', here, d, `"${field}:" is still the template placeholder`);
     }
     const junction = /^Kind:\s*junction/im.test(doc);
     if (junction && !headerField(doc, 'Inputs')) fail('docs', here, d, 'a junction needs "Inputs:" (the decisions it combines)');
@@ -691,6 +694,16 @@ export function auditWayfinding(
     let rewritten = false;
     for (const section of sections) {
       const block = doc.match(section.pattern);
+      if (!section.expected) {
+        if (!block) continue;
+        if (!regenerate) {
+          fail('docs', here, d, `${section.title} section is empty: remove it`);
+          continue;
+        }
+        doc = dropSection(doc, section.title, section.pattern);
+        rewritten = true;
+        continue;
+      }
       if (block && withoutBlankLines(block[0]) === withoutBlankLines(section.expected)) continue;
       if (!regenerate) {
         fail('docs', here, d, block ? section.stale : `missing the generated ${section.title} block`);
@@ -741,6 +754,14 @@ export function auditWayfinding(
   return audit;
 }
 
+/** Removes a generated block and, once nothing else is under it, its heading. */
+function dropSection(doc: string, title: string, pattern: RegExp): string {
+  const lines = doc.replace(pattern, '').split('\n');
+  const heading = lines.findIndex((l) => new RegExp(`^##\\s+${title}\\s*$`, 'i').test(l));
+  if (heading !== -1 && !sectionBody(lines.join('\n'), title).trim()) lines.splice(heading, 1);
+  return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s*$/, '')}\n`;
+}
+
 /**
  * Adds a generated block under its heading: an existing "## <title>" keeps
  * its place, else Files goes before Consumers (or Mirrors) and anything else at the end.
@@ -782,11 +803,17 @@ export interface BranchScope {
   // folder of code inside a domain (parent = that domain's id, the child
   // domain it should become).
   offMap: { folder: string; parent: string | null; files: string[] }[];
+  // Changed code files sitting directly in a source folder, next to the
+  // domain folders, that aren't an entry point: each belongs in a domain's
+  // own subfolder.
+  looseFiles: string[];
   // DOMAIN.md files whose ownership lines (Owns, Does not own, Owns data, Kind, Inputs, Parent, Child domains) changed.
   ownershipEdits: { file: string; fields: string[] }[];
   // DOMAIN.md files added or deleted: structural changes, logged in MAP.md.
   structural: { file: string; change: 'added' | 'removed' }[];
 }
+
+const ENTRY_STEMS = ['index', 'main', 'app', 'server', 'cli'];
 
 const OWNERSHIP_FIELDS = ['Owns', 'Owns data', 'Does not own', 'Kind', 'Inputs', 'Parent', 'Child domains'];
 
@@ -801,8 +828,9 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     else outside.push(file);
   }
 
-  // Files straight under a source folder have no folder to draw a domain
-  // around; they stay in `outside`.
+  // Entry points (src/index.ts, src/app.ts) may sit straight under a source
+  // folder; any other code file there should be in a domain's own folder.
+  const looseFiles: string[] = [];
   const roots = auditedSrcDirs(audit).filter((d) => d !== '.');
   const offMap = new Map<string, { parent: string | null; files: string[] }>();
   const flag = (folder: string, parent: string | null, file: string) =>
@@ -810,7 +838,11 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
   for (const file of outside) {
     const root = roots.find((r) => file.startsWith(`${r}/`));
     const rest = root ? file.slice(root.length + 1) : null;
-    if (!rest || !rest.includes('/') || path.posix.basename(file) === DOMAIN_DOC) continue;
+    if (!rest || path.posix.basename(file) === DOMAIN_DOC) continue;
+    if (!rest.includes('/')) {
+      if (isCode(rest) && !isTest(file) && !ENTRY_STEMS.includes(path.posix.parse(rest).name)) looseFiles.push(file);
+      continue;
+    }
     flag(`${root}/${rest.split('/')[0]}`, null, file);
   }
   // Inside a domain, the outermost folder without a DOMAIN.md comes first: its
@@ -839,6 +871,7 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     base,
     byDomain: [...byDomain].map(([domain, files]) => ({ domain, files })).sort((a, b) => a.domain.localeCompare(b.domain)),
     outside,
+    looseFiles: looseFiles.sort(),
     offMap: [...offMap]
       .map(([folder, { parent, files }]) => ({ folder, parent, files: files.sort() }))
       .sort((a, b) => a.folder.localeCompare(b.folder)),
@@ -934,11 +967,21 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
     if (problems.length > MAX_LISTED) lines.push(`- … ${problems.length - MAX_LISTED} more`);
   };
   const offMap = scope?.offMap ?? [];
-  if (!audit.problems.length && !offMap.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
+  const loose = scope?.looseFiles ?? [];
+  if (loose.length) {
+    lines.push(
+      '',
+      `✗ This branch put ${loose.length} code file(s) loose in a source folder: ${loose.slice(0, 5).join(', ')}${loose.length > 5 ? ', …' : ''}`,
+      `  Every domain is its own subfolder with its ${DOMAIN_DOC}, its code and its tests together; only an entry point (index, main, app, server, cli) ` +
+        `may sit directly under a source folder. Move each file into the subfolder of the domain that owns its decision (a new domain gets a new ` +
+        `subfolder and ${DOMAIN_DOC}, logged in ${MAP_PATH}).`
+    );
+  }
+  if (!audit.problems.length && !offMap.length && !loose.length) lines.push('', '✓ No problems: structure, data ownership, rules, recipes, files, consumers and map all check out.');
   else if (!touched) listProblems(`✗ ${audit.problems.length} problem(s):`, audit.problems);
   else {
     if (inScope.length) listProblems(`✗ ${inScope.length} problem(s) in MAP.md or domains this branch touched:`, inScope);
-    else if (!offMap.length) lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
+    else if (!offMap.length && !loose.length) lines.push('', '✓ No problems in MAP.md or the domains this branch touched.');
     if (offMap.length) {
       lines.push('', `✗ This branch changed code in ${offMap.length} folder(s) with no ${DOMAIN_DOC}:`);
       for (const o of offMap) {
@@ -948,8 +991,8 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
       }
       lines.push(
         `  Give each one a ${DOMAIN_DOC}, created before you change its code (a folder you're adding gets one with it): fill ` +
-          `it in from the code (Owns, Does not own, Interface, Checkpoint, the Rules its code implements anchored to tests ` +
-          `that exist, Hidden behavior). A child domain's Parent is the domain above it; add it to that parent's "Child ` +
+          `it in from the code (Owns, Interface, Checkpoint, and only what has content: the Rules its code implements anchored to tests that exist, ` +
+          `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A child domain's Parent is the domain above it; add it to that parent's "Child ` +
           `domains" and move the parent's rules about it into the new ${DOMAIN_DOC}. Its public file is the code file named ` +
           `after its folder unless it has a service.ts. Log it under Structural changes in ${MAP_PATH}, then run ` +
           'audit_architecture({ regenerate: true }).'

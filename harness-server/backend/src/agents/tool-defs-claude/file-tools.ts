@@ -2,6 +2,8 @@ import { tool } from '@anthropic-ai/claude-agent-sdk';
 import {
   readFileSchema,
   readFileDescription,
+  readFilesSchema,
+  readFilesDescription,
   writeFileSchema,
   writeFileDescription,
   editFileSchema,
@@ -14,9 +16,12 @@ import {
 import { wrapForClaudeSdk } from './wrap.js';
 
 export function createFileToolsClaude(deps: FileToolDeps) {
-  const { readFileExecute, writeFileExecute, editFileExecute, deleteFileExecute } = createFileExecutors(deps);
+  const { readFileExecute, readFilesExecute, writeFileExecute, editFileExecute, deleteFileExecute } = createFileExecutors(deps);
   return {
     readFileToolClaude: tool('read_file', readFileDescription, readFileSchema.shape, wrapForClaudeSdk(readFileExecute), {
+      annotations: { readOnlyHint: true },
+    }),
+    readFilesToolClaude: tool('read_files', readFilesDescription, readFilesSchema.shape, wrapForClaudeSdk(readFilesExecute), {
       annotations: { readOnlyHint: true },
     }),
     writeFileToolClaude: tool('write_file', writeFileDescription, writeFileSchema.shape, wrapForClaudeSdk(writeFileExecute)),

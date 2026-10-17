@@ -74,16 +74,66 @@ interface CoverColor {
 // theme tokens — see NotebookCover.
 // Full class strings so Tailwind keeps them. Keys match NOTEBOOK_COLORS in repository.rs.
 export const NOTEBOOK_COLORS: Record<string, CoverColor> = {
-  indigo: { spine: 'bg-indigo-600', cover: 'bg-indigo-50', ink: 'text-indigo-900', dot: 'bg-indigo-500' },
-  emerald: { spine: 'bg-emerald-600', cover: 'bg-emerald-50', ink: 'text-emerald-900', dot: 'bg-emerald-500' },
-  amber: { spine: 'bg-amber-500', cover: 'bg-amber-50', ink: 'text-amber-900', dot: 'bg-amber-500' },
-  rose: { spine: 'bg-rose-600', cover: 'bg-rose-50', ink: 'text-rose-900', dot: 'bg-rose-500' },
-  sky: { spine: 'bg-sky-600', cover: 'bg-sky-50', ink: 'text-sky-900', dot: 'bg-sky-500' },
-  violet: { spine: 'bg-violet-600', cover: 'bg-violet-50', ink: 'text-violet-900', dot: 'bg-violet-500' },
-  teal: { spine: 'bg-teal-600', cover: 'bg-teal-50', ink: 'text-teal-900', dot: 'bg-teal-500' },
-  orange: { spine: 'bg-orange-500', cover: 'bg-orange-50', ink: 'text-orange-900', dot: 'bg-orange-500' },
-  slate: { spine: 'bg-slate-600', cover: 'bg-slate-100', ink: 'text-slate-900', dot: 'bg-slate-500' },
-  pink: { spine: 'bg-pink-600', cover: 'bg-pink-50', ink: 'text-pink-900', dot: 'bg-pink-500' },
+  indigo: {
+    spine: 'bg-indigo-600',
+    cover: 'bg-indigo-50 dark:bg-indigo-950',
+    ink: 'text-indigo-900 dark:text-indigo-100',
+    dot: 'bg-indigo-500',
+  },
+  emerald: {
+    spine: 'bg-emerald-600',
+    cover: 'bg-emerald-50 dark:bg-emerald-950',
+    ink: 'text-emerald-900 dark:text-emerald-100',
+    dot: 'bg-emerald-500',
+  },
+  amber: {
+    spine: 'bg-amber-500',
+    cover: 'bg-amber-50 dark:bg-amber-950',
+    ink: 'text-amber-900 dark:text-amber-100',
+    dot: 'bg-amber-500',
+  },
+  rose: {
+    spine: 'bg-rose-600',
+    cover: 'bg-rose-50 dark:bg-rose-950',
+    ink: 'text-rose-900 dark:text-rose-100',
+    dot: 'bg-rose-500',
+  },
+  sky: {
+    spine: 'bg-sky-600',
+    cover: 'bg-sky-50 dark:bg-sky-950',
+    ink: 'text-sky-900 dark:text-sky-100',
+    dot: 'bg-sky-500',
+  },
+  violet: {
+    spine: 'bg-violet-600',
+    cover: 'bg-violet-50 dark:bg-violet-950',
+    ink: 'text-violet-900 dark:text-violet-100',
+    dot: 'bg-violet-500',
+  },
+  teal: {
+    spine: 'bg-teal-600',
+    cover: 'bg-teal-50 dark:bg-teal-950',
+    ink: 'text-teal-900 dark:text-teal-100',
+    dot: 'bg-teal-500',
+  },
+  orange: {
+    spine: 'bg-orange-500',
+    cover: 'bg-orange-50 dark:bg-orange-950',
+    ink: 'text-orange-900 dark:text-orange-100',
+    dot: 'bg-orange-500',
+  },
+  slate: {
+    spine: 'bg-slate-600',
+    cover: 'bg-slate-100 dark:bg-slate-800',
+    ink: 'text-slate-900 dark:text-slate-100',
+    dot: 'bg-slate-500',
+  },
+  pink: {
+    spine: 'bg-pink-600',
+    cover: 'bg-pink-50 dark:bg-pink-950',
+    ink: 'text-pink-900 dark:text-pink-100',
+    dot: 'bg-pink-500',
+  },
 };
 
 export function coverColor(color: string): CoverColor {

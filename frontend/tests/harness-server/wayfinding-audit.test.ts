@@ -172,6 +172,38 @@ describe('auditWayfinding', () => {
   });
 });
 
+describe('empty sections', () => {
+  const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
+
+  test('regenerate leaves out a Consumers section nothing imports, heading included', () => {
+    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
+    expect(doc('src/pricing/DOMAIN.md')).toContain('## Consumers');
+    expect(messages()).toEqual([]);
+  });
+
+  test('a "none" Consumers block is stale, and regenerate removes it', () => {
+    write('src/invoice/DOMAIN.md', `${doc('src/invoice/DOMAIN.md')}\n## Consumers\n<!-- generated: do not edit -->\n- none\n<!-- end generated -->\n`);
+    expect(messages()).toContain('Consumers section is empty: remove it');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
+    expect(messages()).toEqual([]);
+  });
+
+  test('a DOMAIN.md without Parent, Owns data, Child domains or Does not own passes', () => {
+    write(
+      'src/invoice/DOMAIN.md',
+      domainDoc('invoice').replace(/^(Parent|Owns data|Child domains|Does not own):.*\n/gm, '')
+    );
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    expect(messages()).toEqual([]);
+  });
+
+  test('a child domain still has to name its parent', () => {
+    write('src/pricing/promotions/DOMAIN.md', domainDoc('promotions', { consumers: 'pricing' }).replace(/^Parent:.*\n/m, ''));
+    expect(messages().some((m) => m.includes('Parent is "(missing)"'))).toBe(true);
+  });
+});
+
 describe('generated Files section', () => {
   const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
 
@@ -438,5 +470,23 @@ describe('branch scope', () => {
     write('src/lib/more/DOMAIN.md', domainDoc('more', { parent: 'lib' }));
     const done = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
     expect(branchScope(auditWayfinding(repo, CONFIG), 'main', done!.files, done!.docDiff).offMap).toEqual([]);
+  });
+
+  test('a branch adding a code file loose in the source folder is flagged, an entry point is not', async () => {
+    write('src/lib/DOMAIN.md', domainDoc('lib'));
+    write('src/lib/service.ts', 'export const x = 1\n');
+    auditWayfinding(repo, CONFIG, { regenerate: true });
+    git('init', '-q', '-b', 'main');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
+    git('checkout', '-qb', 'feature');
+    write('src/index.ts', 'export {}\n');
+    write('src/helpers.ts', 'export const h = 1\n');
+
+    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const audit = auditWayfinding(repo, CONFIG);
+    const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
+    expect(scope.looseFiles).toEqual(['src/helpers.ts']);
+    expect(formatWayfindingAudit(audit, scope)).toContain('loose in a source folder: src/helpers.ts');
   });
 });

@@ -11,6 +11,7 @@ import {
   hasUnansweredQuestion,
   latestChecksFailed,
   concernInLastMessage,
+  isFailureWord,
 } from '../agents/coordinator-agent.js';
 import { runRequirementsAgentTurn } from '../agents/requirements-agent.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
@@ -97,13 +98,18 @@ type Outcome = { kind: 'advanced' | 'stop'; reason: string } | { kind: 'not-read
  * the lead's next message (failing output only, far cheaper than a QA round
  * that fails on the same thing); `stop` = over to the human.
  */
-async function preQaGate(session: SessionRecord, send: (event: AgentEvent) => void): Promise<Outcome | null> {
+async function preQaGate(
+  session: SessionRecord,
+  send: (event: AgentEvent) => void,
+  mustRun?: string,
+): Promise<Outcome | null> {
   send({ type: 'coordinator_decision', action: 'continue', reason: 'Running lint, the unit tests and the architecture audit before QA.' });
   let gate;
   try {
     gate = await runPreQaGate(session, await getApp(session.appId));
   } catch (err) {
     // A broken gate mustn't hold the branch back: QA runs the same checks.
+    if (mustRun) return { kind: 'stop', reason: mustRun };
     await appendTranscriptEntry(session.id, 'coding', {
       role: 'system',
       text: `Pre-QA checks couldn't run (${err instanceof Error ? err.message : String(err)}); QA will run them.`,
@@ -111,6 +117,7 @@ async function preQaGate(session: SessionRecord, send: (event: AgentEvent) => vo
     return null;
   }
   if (gate.status !== 'fail') {
+    if (gate.status === 'skipped' && mustRun) return { kind: 'stop', reason: mustRun };
     if (gate.status === 'skipped') {
       await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Pre-QA checks skipped: ${gate.summary}. QA will run them.` });
     }
@@ -167,10 +174,12 @@ async function tryAdvance(
         return { kind: 'stop', reason: 'Every step is done, but the latest lint or test run failed. Look at it before the branch goes to QA.' };
       }
       const concern = concernInLastMessage(transcript);
-      if (concern) {
-        return { kind: 'stop', reason: `Every step is done, but the coding agent's summary mentions "${concern}". Check it before the branch goes to QA.` };
-      }
-      const checks = await preQaGate(session, send);
+      const concernReason = concern
+        ? `Every step is done, but the coding agent's summary mentions "${concern}". Check it before the branch goes to QA.`
+        : undefined;
+      // A failure word is settled by running lint and the tests; anything else (skipped, unverified) only a human can judge.
+      if (concern && !isFailureWord(concern)) return { kind: 'stop', reason: concernReason! };
+      const checks = await preQaGate(session, send, concernReason);
       if (checks) return checks;
       return gate(() => approveCoding(session), 'Every step is done and nothing needs you: sent the branch to QA.');
     }
@@ -271,6 +280,22 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     const { enabled } = request.body ?? {};
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) is required' });
     return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0 } : {}) });
+  });
+
+  // A session goes to QA by itself once coding is finished and
+  // clean (same checks as auto-drive's coding gate); the human's checkpoint is
+  // after QA. Anything off stops here and the Approve button stays theirs.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/auto-handoff', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (!['coding-in-progress', 'coding-review'].includes(session.stage) || session.coordinatorEnabled) {
+      return { advanced: false, reason: null };
+    }
+    const outcome = await tryAdvance(session, 'coding', session.transcripts.coding, () => {});
+    if (outcome.kind === 'advanced') return { advanced: true, reason: outcome.reason };
+    const reason = outcome.kind === 'stop' ? outcome.reason : outcome.kind === 'fix' ? `lint, tests or the audit failed on the branch.\n${outcome.message}` : null;
+    if (reason) await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Not sent to QA automatically: ${reason}` });
+    return { advanced: false, reason };
   });
 
   // SSE, same framing as the per-stage /message endpoints. Drives the

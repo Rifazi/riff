@@ -267,6 +267,8 @@ export interface SplitPart {
   brief: string;
   /** What works once this part ships. Absent on older proposals. */
   outcome?: string;
+  /** How to check this part by hand before the next starts. Absent on older proposals. */
+  howToTest?: string;
   /** Indexes of earlier parts in the same proposal. */
   dependsOn: number[];
 }
@@ -474,6 +476,8 @@ export interface SessionRecord {
   // During a QA fix: the files QA named that the coder may write, and each widening (harness-server agents/fix-scope.ts).
   fixScope?: { paths: string[]; widened: { paths: string[]; reason: string; at: string }[]; pass: number } | null;
   qaRerunPending: boolean;
+  qaPass?: number;
+  qaRounds?: unknown[];
 
   reopenedFromCoding: boolean;
   pendingRequirementsRelayNote: string | null;

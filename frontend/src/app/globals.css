@@ -116,8 +116,29 @@
     --radius-full: 9999px;
   }
 
-  /* No `.dark` placeholders: nothing in the app sets the `dark` class today,
-     and when a theme is applied its own dark-mode tokens cover it. */
+  /* Dark mode: `useThemeMode` (lib/theme-mode.ts) puts `.dark` on <html>.
+     Same token names, so every component follows without changes. Like the
+     block above, this goes away when a theme is applied: the theme's own
+     dark-mode tokens take over. */
+  :root.dark {
+    color-scheme: dark;
+    --color-bg: oklch(0.16 0.01 270);
+    --color-surface: oklch(0.21 0.012 270);
+    --color-surface-muted: oklch(0.27 0.014 270);
+    --color-border: oklch(0.34 0.015 270);
+    --color-text: oklch(0.95 0.005 270);
+    --color-text-muted: oklch(0.72 0.012 270);
+    --color-primary: oklch(0.7 0.15 275);
+    --color-on-primary: oklch(0.16 0.01 270);
+    --color-success: oklch(0.66 0.13 160);
+    --color-warning: oklch(0.74 0.14 70);
+    --color-danger: oklch(0.65 0.19 22);
+    --color-info: oklch(0.68 0.11 235);
+    --color-on-success: oklch(0.16 0.01 270);
+    --color-on-warning: oklch(0.16 0.01 270);
+    --color-on-info: oklch(0.16 0.01 270);
+    --destructive-foreground: oklch(0.16 0.01 270);
+  }
 }
 
 /*
@@ -249,7 +270,9 @@
    * `prose` block inherits the theme instead of each call site
    * overriding colors class by class.
    */
-  .prose {
+  /* `.prose.prose`: the plugin's own `.prose` defaults are emitted after the
+     base layer at equal specificity and would otherwise win. */
+  .prose.prose {
     --tw-prose-body: var(--foreground);
     --tw-prose-headings: var(--foreground);
     --tw-prose-lead: var(--muted-foreground);

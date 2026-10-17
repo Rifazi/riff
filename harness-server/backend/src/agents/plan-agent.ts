@@ -57,6 +57,7 @@ const TOOL_NAMES = [
   'search_code',
   'audit_theme',
   'read_file',
+  'read_files',
   'outline_file',
   'write_plan_doc',
   'ask_multiple_choice',
@@ -177,7 +178,7 @@ export async function runPlanAgentTurn(
       appId: app.id,
       sessionId: session.id,
     });
-    const { readFileToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot, onRead });
+    const { readFileToolClaude, readFilesToolClaude } = createFileToolsClaude({ repoRoot: app.repoRoot, onRead });
     const createMcpServer = () =>
       createSdkMcpServer({
         name: 'harness-tools',
@@ -190,6 +191,7 @@ export async function runPlanAgentTurn(
           createOutlineFileToolClaude({ repoRoot: app.repoRoot }),
           createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
           readFileToolClaude,
+          readFilesToolClaude,
           ...architectureToolsClaude(architectureDeps),
           ...(researchDeps ? [createDelegateToolClaude(researchDeps)] : []),
           createWritePlanToolClaude({
@@ -225,7 +227,7 @@ export async function runPlanAgentTurn(
     }
 
     const { searchDocsTool, readDocTool } = createDocsSearchTools({ appId: app.id, sessionId: session.id });
-    const { readFileTool } = createFileTools({ repoRoot: app.repoRoot, onRead });
+    const { readFileTool, readFilesTool } = createFileTools({ repoRoot: app.repoRoot, onRead });
     const tools: ToolSet = {
       search_docs: searchDocsTool,
       read_doc: readDocTool,
@@ -234,6 +236,7 @@ export async function runPlanAgentTurn(
       audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
       ...classifyTextToolEntry(classifierOn, stageHelperContext(session.id, 'plan'), session.histories.plan),
       read_file: readFileTool,
+      read_files: readFilesTool,
       ...architectureToolEntry(architectureDeps, session.histories.plan),
       ...delegateToolEntry(researchDeps, session.histories.plan),
       write_plan_doc: createWritePlanTool({

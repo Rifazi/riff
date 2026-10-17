@@ -34,6 +34,16 @@ describe('workingSetRanges', () => {
     ]);
   });
 
+  test('an edit stays in the working set after more than 15 reads of other files', () => {
+    const entries: object[] = [call('edit_file', { path: 'src/fix.ts' }, 'e'), result('Edited src/fix.ts (lines 100-102 of 900)', 'e')];
+    for (let i = 0; i < 20; i++) entries.push(call('read_file', { path: `other${i}.ts` }, `r${i}`), result('text', `r${i}`));
+    const paths = workingSetRanges(entries).map((r) => r.path);
+    expect(paths).toContain('src/fix.ts');
+    expect(paths).not.toContain('other0.ts');
+    expect(paths).toContain('other19.ts');
+    expect(paths).toHaveLength(16);
+  });
+
   test('a symbol read uses the range its result names', () => {
     const entries = [call('read_file', { path: 'a.ts', symbol: 'parse' }, '1'), result('[parse: lines 40-58.]\nfunction parse() {}', '1')];
     expect(workingSetRanges(entries)).toEqual([{ path: 'a.ts', start: 40, end: 58 }]);

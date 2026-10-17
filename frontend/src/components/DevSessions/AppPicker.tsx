@@ -10,6 +10,24 @@ import { api } from '@/lib/dev-sessions/api';
 import { NewAppOnboarding } from './NewAppOnboarding';
 
 const ADD_NEW = '__add_new_app__';
+const LAST_APP_KEY = 'riff.devSessions.lastAppId';
+
+function readLastApp(): string | null {
+  try {
+    return localStorage.getItem(LAST_APP_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Remember the app a session was started on, so the picker opens on it next time. */
+export function rememberLastApp(appId: string) {
+  try {
+    localStorage.setItem(LAST_APP_KEY, appId);
+  } catch {
+    // Storage unavailable: the picker just starts empty.
+  }
+}
 
 /**
  * App selector with an "Add new app…" option that opens the new-app
@@ -34,9 +52,14 @@ export function AppPicker({
   });
   const [adding, setAdding] = useState(false);
 
-  // Default to the first app, but never override a choice already made.
+  // Start from the app last used to start a session, or the only app there is.
+  // With several apps and no history nothing is preselected, so a session
+  // never lands on an arbitrary repo. A choice already made is never overridden.
   useEffect(() => {
-    if (!value && apps && apps.length > 0) onChange(apps[0].id);
+    if (value || !apps || apps.length === 0) return;
+    const remembered = readLastApp();
+    const pick = apps.find((a) => a.id === remembered) ?? (apps.length === 1 ? apps[0] : undefined);
+    if (pick) onChange(pick.id);
   }, [apps, value, onChange]);
 
   const noApps = apps && apps.length === 0;
@@ -51,6 +74,7 @@ export function AppPicker({
         <NewAppOnboarding
           onDone={(app) => {
             setAdding(false);
+            rememberLastApp(app.id);
             onChange(app.id);
           }}
           onCancel={() => setAdding(false)}
@@ -74,7 +98,7 @@ export function AppPicker({
 
   return (
     <>
-      <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : onChange(next))}>
+      <Select value={value || undefined} onValueChange={(next) => (next === ADD_NEW ? setAdding(true) : (rememberLastApp(next), onChange(next)))}>
         <SelectTrigger className={`bg-card ${triggerClassName}`}>
           <SelectValue placeholder={apps ? 'Choose an app' : 'Loading…'} />
         </SelectTrigger>

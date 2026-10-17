@@ -275,6 +275,11 @@ export const api = {
   approveCoding: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
+  autoHandoffCoding: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/coding/auto-handoff`), { method: 'POST' }).then((r) =>
+      json<{ advanced: boolean; reason: string | null }>(r),
+    ),
+
   rejectCoding: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 

@@ -93,6 +93,7 @@ function compactQaReport(markdown: string): string {
 // Tools that change nothing the Coding tab shows (see handleSend).
 const READ_ONLY_TOOLS = new Set([
   'read_file',
+  'read_files',
   'outline_file',
   'search_code',
   'search_docs',
@@ -115,17 +116,18 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     enabled: Boolean(session.branch),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
   const [autoRun, setAutoRun] = useState(false);
   // Why auto-run last stopped on its own, shown until it's restarted.
   const [autoRunStopped, setAutoRunStopped] = useState<string | null>(null);
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] });
-    queryClient.invalidateQueries({ queryKey: teamStatusKey('coding', sessionId) });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['coding-diff', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: teamStatusKey('coding', sessionId) }),
+    ]);
 
   // Team mode: the lead (Jack) split the work into 2+ workstreams — at
   // kickoff, or when QA sent the branch back — so a team of agents codes it
@@ -343,13 +345,34 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     );
   };
 
-  const entries = streaming ? [...session.transcripts.coding, ...overlay] : session.transcripts.coding;
+  const entries = withOverlay(session.transcripts.coding);
   const hasCommits = Boolean(session.branch) && (diffData?.commits.length ?? 0) > 0;
   const canContinue = Boolean(plan) && !allStepsDone && !streaming && !approved && !teamMode;
   // The switch stays up for the whole run (turns included) so it can always
   // be turned off.
   const showStepControls = canContinue || autoRun;
   const busy = streaming || teamActive;
+
+  // A session goes to QA on its own once coding is finished
+  // and its checks pass: the human's checkpoint is after QA, not before it.
+  // The server stops (and says why in the chat) if anything needs a look.
+  const lastCodingEntry = session.transcripts.coding.at(-1)?.id ?? 'none';
+  useEffect(() => {
+    if (session.coordinatorEnabled) return;
+    if (!plan?.length || !allStepsDone || approved || busy || !hasCommits) return;
+    const key = `${sessionId}:autoHandoff:${lastCodingEntry}`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
+    void api
+      .autoHandoffCoding(sessionId)
+      .then(async (result) => {
+        await queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
+        refresh();
+        if (result.advanced) router.push(sessionHref(sessionId, 'qa'));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.coordinatorEnabled, plan, allStepsDone, approved, busy, hasCommits, lastCodingEntry]);
   const canStartTeam =
     teamMode &&
     !teamActive &&

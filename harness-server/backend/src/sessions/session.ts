@@ -94,6 +94,9 @@ export interface SplitPart {
   // What works once this part ships — shown on the roadmap. Absent on
   // proposals made before it existed.
   outcome?: string;
+  // How the human verifies this part by hand before the next one starts.
+  // Absent on proposals made before it existed.
+  howToTest?: string;
   // Indexes into the same parts array — each only ever points at an
   // earlier part, so the order is also a valid build order.
   dependsOn: number[];

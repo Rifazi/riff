@@ -127,6 +127,16 @@ function filesTouched(entries: ContextEntry[]): { changed: string[]; read: strin
   for (const e of entries) {
     if (e.role !== 'tool_call') continue;
     const name = toolName(e.toolName);
+    if (name === 'read_files') {
+      const files = (e.toolInput as { files?: { path?: string; offset?: number; limit?: number }[] } | undefined)?.files ?? [];
+      for (const f of files) {
+        if (!f?.path) continue;
+        const ranges = read.get(f.path) ?? [];
+        if (f.offset || f.limit) ranges.push(`${f.offset ?? 1}+${f.limit ?? '…'}`);
+        read.set(f.path, ranges);
+      }
+      continue;
+    }
     const p = inputPath(e.toolInput);
     if (!p) continue;
     if (name === 'write_file' || name === 'edit_file') changed.add(p);

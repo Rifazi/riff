@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BackButton } from '@/components/BackButton';
 import { Card } from '@/components/ui/card';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
+import { useWindowTitle } from '@/lib/dev-sessions/useWindowTitle';
 import { LoadingState, PageShell } from '@/components/DevSessions/PageShell';
 import 'swagger-ui-react/swagger-ui.css';
 
@@ -17,6 +18,7 @@ function ApiSpecView() {
   const appId = useSearchParams().get('appId');
   const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
   const appName = apps?.find((a) => a.id === appId)?.name ?? appId;
+  useWindowTitle(apps?.find((a) => a.id === appId)?.name);
 
   return (
     <PageShell

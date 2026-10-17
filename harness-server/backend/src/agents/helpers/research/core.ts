@@ -58,6 +58,8 @@ export const delegateDescription =
   "files: they can't run git or shell commands, see history or uncommitted diffs, or count a long list exactly. " +
   'Ask each task as a precise question: ask for a path:line, a complete list, or a yes/no with the path — ' +
   'whatever the question actually needs. A task that finds nothing comes back as one line. ' +
+  'A delegation takes ~8 seconds, so when one search_code (with `also` for more patterns) or one read_files call ' +
+  'answers the question, do that instead. ' +
   'Verify a surprising answer with ranged read_file before acting.';
 
 // How an answer is shaped, shared by the tool-loop helper and the built-in

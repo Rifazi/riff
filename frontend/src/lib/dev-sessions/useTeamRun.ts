@@ -95,7 +95,10 @@ export function useTeamRun(kind: TeamKind = 'coding') {
         }
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      // 409: a run is already going server-side (auto-drive started it), so
+      // there's nothing to report; the status poll picks it up.
+      if (!message.includes('(409)')) setError(message);
     } finally {
       setRunning(false);
       setLeadActive(false);

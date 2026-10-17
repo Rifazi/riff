@@ -37,13 +37,14 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     queryFn: () => api.getRequirementsDoc(sessionId),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    queryClient.invalidateQueries({ queryKey: ['requirements-doc', sessionId] });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['requirements-doc', sessionId] }),
+    ]);
 
   const approveMutation = useMutation({
     mutationFn: () => api.approveRequirements(sessionId),
@@ -156,7 +157,7 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.requirementsRelayPending, streaming]);
 
-  const entries = streaming ? [...session.transcripts.requirements, ...overlay] : session.transcripts.requirements;
+  const entries = withOverlay(session.transcripts.requirements);
   const isApproved = session.requirementsStatus === 'approved';
   const isSplit = session.stage === 'split';
   const splitBusy = acceptSplitMutation.isPending ? 'accept' : dismissSplitMutation.isPending ? 'dismiss' : null;

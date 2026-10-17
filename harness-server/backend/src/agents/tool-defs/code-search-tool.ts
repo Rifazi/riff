@@ -15,6 +15,11 @@ export const searchCodeSchema = z.object({
       'Optional pathspec to narrow the search, e.g. "src/global/adapters/primary/**". "." searches the whole repo even when ' +
         'the search would otherwise start in your current focus (see the tool description)'
     ),
+  also: z
+    .array(z.string())
+    .max(5)
+    .optional()
+    .describe('More patterns to search in the same call (same glob and context), each answered under its own heading: look several things up in one request'),
   context: z
     .number()
     .optional()
@@ -37,7 +42,8 @@ export const searchCodeDescription =
   'already exists before proposing new code, and to find the line range to read_file. In an app that follows an ' +
   'architecture, a search without `glob` looks in the folders you are working in first (the result says which) and ' +
   'only searches the whole repo when nothing matches there. A pattern that matches every line (".") lists files instead ' +
-  'of returning their lines; in an app that follows an architecture it returns the domains\' generated Files sections.';
+  'of returning their lines; in an app that follows an architecture it returns the domains\' generated Files sections. ' +
+  'To look up several things, pass the extra patterns in `also` instead of making one request per pattern.';
 
 /**
  * Where a search without a glob looks first: e.g. the domains a coding step
@@ -120,7 +126,7 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
     return `A pattern that matches every line only lists files. ${files.length} under "${glob ?? '.'}":\n${files.slice(0, PLAIN_LIST_LIMIT).join('\n')}${more}`;
   };
 
-  return async ({ query, glob, context: rawContext }: z.infer<typeof searchCodeSchema>): Promise<string> => {
+  const searchOne = async ({ query, glob, context: rawContext }: { query: string; glob?: string; context?: number }): Promise<string> => {
     if (isListAllQuery(query)) return listFiles(glob);
     const context = clampContext(rawContext);
     let note = '';
@@ -145,6 +151,14 @@ export function createSearchCodeExecute(deps: SearchCodeDeps) {
     const paths = matchPaths(files.split('\0').filter(Boolean), query);
     if (!paths.length) return `No matches for "${query}".`;
     return `${note}No line matches "${query}", but these files' paths do:\n${paths.join('\n')}`;
+  };
+
+  return async ({ query, also, glob, context }: z.infer<typeof searchCodeSchema>): Promise<string> => {
+    const extra = (also ?? []).filter((q) => q.trim() && q !== query);
+    if (!extra.length) return searchOne({ query, glob, context });
+    const queries = [query, ...extra];
+    const results = await Promise.all(queries.map((q) => searchOne({ query: q, glob, context }).catch((err) => `Failed: ${err instanceof Error ? err.message : String(err)}`)));
+    return queries.map((q, i) => `## ${q}\n${results[i]}`).join('\n\n');
   };
 }
 

@@ -102,13 +102,14 @@ export function PlanStage({ session }: { session: SessionRecord }) {
     queryFn: () => api.getPlanDoc(sessionId),
   });
 
-  const { overlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
+  const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ['session', sessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    queryClient.invalidateQueries({ queryKey: ['plan-doc', sessionId] });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['session', sessionId] }),
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      queryClient.invalidateQueries({ queryKey: ['plan-doc', sessionId] }),
+    ]);
 
   const waitingOn = useUnshippedDependencies(session);
   const approveMutation = useMutation({
@@ -178,7 +179,7 @@ export function PlanStage({ session }: { session: SessionRecord }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.planRelayPending, streaming]);
 
-  const entries = streaming ? [...session.transcripts.plan, ...overlay] : session.transcripts.plan;
+  const entries = withOverlay(session.transcripts.plan);
   const isApproved = session.planStatus === 'approved';
   const blockedByParts = waitingOn.length > 0 && !isApproved && !session.branch;
   const codingStarted = Boolean(session.branch);

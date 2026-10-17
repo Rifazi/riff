@@ -7,6 +7,7 @@ import { Paintbrush, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BackButton } from '@/components/BackButton';
 import { api } from '@/lib/dev-sessions/api';
+import { useWindowTitle } from '@/lib/dev-sessions/useWindowTitle';
 import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
 import type { ThemeApplyResult, ThemeDraft } from '@/lib/dev-sessions/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +29,7 @@ function ThemeView() {
   });
   const { data: themes } = useThemes();
   const app = apps?.find((a) => a.id === appId);
+  useWindowTitle(app?.name);
   const current = themeState?.current ?? null;
 
   // Until the user picks or edits, the draft is the saved theme (or the first preset).

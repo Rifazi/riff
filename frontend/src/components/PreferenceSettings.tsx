@@ -9,12 +9,14 @@ import { FolderOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import Analytics from '@/lib/analytics';
 import AnalyticsConsentSwitch from './AnalyticsConsentSwitch';
+import { useThemeMode, ThemeMode } from '@/lib/theme-mode';
 import { useConfig, NotificationSettings } from '@/contexts/ConfigContext';
 
 export function PreferenceSettings() {
   const { notificationSettings, storageLocations, isLoadingPreferences, loadPreferences, updateNotificationSettings } =
     useConfig();
 
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [previousNotificationsEnabled, setPreviousNotificationsEnabled] = useState<boolean | null>(null);
@@ -154,6 +156,28 @@ export function PreferenceSettings() {
 
   return (
     <div className="space-y-6">
+      {/* Appearance Section */}
+      <Card className="p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground mb-2">Appearance</h3>
+            <p className="text-sm text-muted-foreground">Use a light or dark theme, or follow your system</p>
+          </div>
+          <div className="flex gap-2">
+            {(['system', 'light', 'dark'] as ThemeMode[]).map((m) => (
+              <Button
+                key={m}
+                size="sm"
+                variant={themeMode === m ? 'default' : 'outline'}
+                onClick={() => setThemeMode(m)}
+              >
+                {m[0].toUpperCase() + m.slice(1)}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </Card>
+
       {/* Notifications Section */}
       <Card className="p-6">
         <div className="flex items-center justify-between">
