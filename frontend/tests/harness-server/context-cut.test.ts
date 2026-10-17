@@ -5,6 +5,7 @@ import {
   DEFER_CEILING_TOKENS,
   MIN_GROWTH_TO_COMPACT,
   shouldCompact,
+  shouldCompactAfterBatch,
 } from '../../../harness-server/backend/src/agents/compaction';
 
 // A conversation is cut for compaction once its context reaches the
@@ -69,5 +70,32 @@ describe('deferred compaction', () => {
     expect(compactionDeferral([call('git_commit'), call('review_workstream'), call('read_file')])).toBe('mid-review');
     expect(compactionDeferral([call('review_workstream'), call('merge_workstream'), call('read_file')])).toBeNull();
     expect(compactionDeferral([call('review_workstream'), call('send_back_workstream'), call('review_workstream')])).toBe('mid-review');
+  });
+});
+
+// The cut is decided at the end of a tool batch, before the next request.
+describe('shouldCompactAfterBatch', () => {
+  const at = { atTokens: 55_000 };
+  const batch = { contextTokens: 50_000, outputTokens: 500, resultTokens: 0, startTokens: 20_000, progressed: false };
+
+  test('counts what the batch will add to the context', () => {
+    expect(shouldCompactAfterBatch(at, batch)).toBe(false);
+    expect(shouldCompactAfterBatch(at, { ...batch, resultTokens: 4_600 })).toBe(true);
+  });
+
+  test('cuts a little early after a batch that made progress', () => {
+    const near = { ...batch, contextTokens: 50_000 - 1_000 };
+    expect(shouldCompactAfterBatch(at, near)).toBe(false);
+    expect(shouldCompactAfterBatch(at, { ...near, progressed: true })).toBe(true);
+    expect(shouldCompactAfterBatch(at, { ...batch, contextTokens: 40_000, progressed: true })).toBe(false);
+  });
+
+  test('still waits for growth and honours deferral', () => {
+    expect(shouldCompactAfterBatch(at, { ...batch, startTokens: 45_000, progressed: true })).toBe(false);
+    expect(shouldCompactAfterBatch({ ...at, defer: () => true }, { ...batch, resultTokens: 9_000 })).toBe(false);
+  });
+
+  test('never without compaction', () => {
+    expect(shouldCompactAfterBatch(undefined, { ...batch, resultTokens: 99_000 })).toBe(false);
   });
 });

@@ -20,6 +20,31 @@ export function shouldCompact(
   return contextTokens >= DEFER_CEILING_TOKENS || !compaction.defer?.();
 }
 
+// How close to the threshold a conversation must be, right after a batch that
+// moved the work forward, to be cut there instead of one batch later.
+export const EARLY_CUT_SHARE = 0.9;
+
+export const tokensFromChars = (chars: number): number => Math.ceil(chars / 4);
+
+/**
+ * The cut decision at the end of a tool batch, before the next request is
+ * sent: the context that request would carry is what the last one saw, plus
+ * what it wrote and what its tools returned. Cutting here wastes no request;
+ * cutting when the results arrive aborts one already in flight. Within
+ * EARLY_CUT_SHARE of the threshold, a batch that made progress is a good
+ * place to cut (the handoff's working set holds what it just wrote).
+ */
+export function shouldCompactAfterBatch(
+  compaction: { atTokens: number; defer?: () => boolean } | undefined,
+  batch: { contextTokens: number; outputTokens: number; resultTokens: number; startTokens: number; progressed: boolean },
+): boolean {
+  if (!compaction) return false;
+  const projected = batch.contextTokens + batch.outputTokens + batch.resultTokens;
+  const effective =
+    batch.progressed && projected >= compaction.atTokens * EARLY_CUT_SHARE ? Math.max(projected, compaction.atTokens) : projected;
+  return shouldCompact(compaction, effective, batch.startTokens);
+}
+
 // Tool calls that move the work forward. A conversation cut before making
 // one re-reads what it had just read and is cut again: in 151 mid-step cuts,
 // 35 conversations wrote nothing, up to 4 in a row.
@@ -38,6 +63,8 @@ const PROGRESS_TOOLS = new Set([
 ]);
 // The lead's verdict on a workstream he's reviewing.
 const VERDICT_TOOLS = new Set(['merge_workstream', 'send_back_workstream', 'drop_workstreams']);
+
+export const isProgressTool = (name: string | undefined): boolean => PROGRESS_TOOLS.has(bareToolName(name));
 
 const bareToolName = (name: string | undefined) => (name ?? '').replace(/^mcp__[^_]+(-[^_]+)?__/, '');
 

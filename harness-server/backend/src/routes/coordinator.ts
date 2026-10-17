@@ -13,6 +13,14 @@ import {
   concernInLastMessage,
   isFailureWord,
 } from '../agents/coordinator-agent.js';
+import {
+  isSelfHealableBlock,
+  isUsageLimitError,
+  MAX_FAILED_TURNS,
+  MAX_SELF_HEALS,
+  SELF_HEAL_MESSAGE,
+  usageLimitStopReason,
+} from '../agents/agent-failure.js';
 import { runRequirementsAgentTurn } from '../agents/requirements-agent.js';
 import { runPlanAgentTurn } from '../agents/plan-agent.js';
 import { runCodingAgentTurn } from '../agents/coding-agent.js';
@@ -265,6 +273,8 @@ async function settleTeam(
       continue;
     }
     if (team.status === 'needs_attention') {
+      const limit = team.members.find((m) => isUsageLimitError(m.note));
+      if (limit) return usageLimitStopReason(limit.note!);
       return kind === 'coding'
         ? 'The coding team needs attention: a workstream failed or is waiting on a decision. See the Coding tab.'
         : 'The QA team needs attention: a reviewer failed. See the QA tab.';
@@ -326,6 +336,8 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     const turnedOff = async () => !(await getSession(sessionId))?.coordinatorEnabled;
 
     try {
+      let selfHeals = 0;
+      let failedTurns = 0;
       for (let turns = 0; ; ) {
         const session = await getSession(sessionId);
         if (!session) break;
@@ -434,23 +446,51 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
             transcriptText: flattenTranscript(transcript),
             appId: session.appId,
           });
-          if (decision.action === 'ready' || !decision.message) {
+          const lastAgentText = [...transcript].reverse().find((e) => e.role === 'assistant')?.text ?? '';
+          if (decision.action === 'blocked' && selfHeals < MAX_SELF_HEALS && isSelfHealableBlock(decision.reason, lastAgentText)) {
+            // Not finding a file or a setup is the agent's to solve, not the human's.
+            selfHeals++;
+            send({ type: 'coordinator_decision', action: 'continue', reason: `The agent is stuck on something it can fix itself: ${decision.reason}` });
+            await note(group, `the agent said it was stuck (${decision.reason}). That's its to solve, so I've told it to try another way.`);
+            message = SELF_HEAL_MESSAGE;
+          } else if (decision.action === 'ready' || !decision.message) {
             // Nothing finished to approve, and the agent isn't going on by itself.
             await stop(group, decision.reason || `The ${STAGE_DOC[group]} isn't finished and the agent stopped.`);
             break;
+          } else {
+            selfHeals = 0;
+            send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
+            message = decision.message;
           }
-          send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
-          message = decision.message;
         }
 
         turns++;
+        // A turn can fail without throwing: the engines report it as an error or an errored done event.
+        let turnError: string | null = null;
+        const watch = (event: AgentEvent) => {
+          if (event.type === 'error') turnError = event.message;
+          else if (event.type === 'done' && event.isError) turnError = event.text || turnError || 'The turn ended in an error.';
+          send(event);
+        };
         try {
-          await runTurn(session, message, send);
+          await runTurn(session, message, watch);
         } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          send({ type: 'error', message: reason });
-          await note(group, `stopped: ${reason}`, true);
-          break;
+          turnError = err instanceof Error ? err.message : String(err);
+          send({ type: 'error', message: turnError });
+        }
+        if (turnError) {
+          const failure: string = turnError;
+          if (isUsageLimitError(failure)) {
+            // Out of tokens: another attempt fails the same way, so stop and say why.
+            await stop(group, usageLimitStopReason(failure));
+            break;
+          }
+          if (++failedTurns >= MAX_FAILED_TURNS) {
+            await note(group, `stopped after ${failedTurns} failed turns in a row: ${failure}`, true);
+            break;
+          }
+        } else {
+          failedTurns = 0;
         }
       }
     } finally {

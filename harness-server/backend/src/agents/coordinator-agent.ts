@@ -25,7 +25,9 @@ Respond with ONLY a single JSON object, no other text, matching exactly one of t
 {"action": "ready", "reason": "<one sentence, why this stage's work is finished>"}
 {"action": "blocked", "reason": "<one sentence, what the human needs to do>"}
 
-Always "blocked" when the agent's last message is waiting on the human: it asks them a question, asks them to confirm, choose or review something, or says it is blocked on something only a human can do (credentials, a dirty repo, a decision). Never answer on the human's behalf.
+Always "blocked" when the agent's last message is waiting on the human: it asks them a question, asks them to confirm, choose or review something, or says it is blocked on something only a human can do (credentials, a decision). Never answer on the human's behalf.
+
+Not blocked: the agent couldn't find a file, search turned up nothing, a test setup or dependency is missing, or a command failed. The agent can fix those itself (search under other names, check the config, create what's missing), so answer "continue" with a message telling it to.
 
 "ready" only when the agent has produced the stage's document, diff or report, says it is complete, and has nothing left it means to do. Say "blocked" if you have any doubt.
 

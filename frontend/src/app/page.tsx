@@ -24,6 +24,7 @@ import { indexedDBService } from "@/services/indexedDBService";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Page } from "@/components/ui/page";
+import { useOpenLatestCodingSession } from "@/lib/dev-sessions/useOpenLatestCodingSession";
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -78,6 +79,10 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
+
+  useOpenLatestCodingSession(
+    recordingState.isRecording || status !== RecordingStatus.IDLE,
+  );
 
   useEffect(() => {
     // Track page view

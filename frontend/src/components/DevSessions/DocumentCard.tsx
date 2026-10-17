@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownDocument } from './MarkdownDocument';
+import { useFullscreen } from './FullscreenToggle';
 import { ErrorText } from './PageShell';
 
 interface DocumentCardProps {
@@ -45,8 +46,9 @@ export function DocumentCard({
   scrollFooter,
   editing,
 }: DocumentCardProps) {
+  const fullscreen = useFullscreen(title);
   return (
-    <Card className="flex flex-col flex-1 min-h-0">
+    <Card className={`flex flex-col flex-1 min-h-0 ${fullscreen.className}`}>
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border flex-shrink-0">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">{title}</h2>
@@ -60,6 +62,7 @@ export function DocumentCard({
               {editing.editLabel}
             </Button>
           )}
+          {fullscreen.button}
         </div>
       </div>
 

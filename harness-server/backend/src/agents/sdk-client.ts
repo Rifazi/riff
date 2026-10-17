@@ -5,7 +5,7 @@ import { createGoogle } from '@ai-sdk/google';
 import { query, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import type { ApiKeyProvider } from '../settings/settings.js';
 import { ollamaEndpoint, openAICompatBase } from '../settings/ollama.js';
-import { shouldCompact } from './compaction.js';
+import { isProgressTool, shouldCompact, shouldCompactAfterBatch, tokensFromChars } from './compaction.js';
 
 const DEFAULT_TEST_MODEL: Record<ApiKeyProvider, string> = {
   anthropic: 'claude-haiku-4-5',
@@ -490,6 +490,13 @@ const CONTEXT_BUDGET = 'context_budget';
 // before ever returning to the human.
 const MAX_TURNS_PER_STEP = 20;
 
+// Characters in a tool result: a string or MCP content parts.
+function resultTextLength(result: unknown): number {
+  if (typeof result === 'string') return result.length;
+  if (Array.isArray(result)) return result.reduce((n, p) => n + (typeof p?.text === 'string' ? p.text.length : 0), 0);
+  return JSON.stringify(result ?? '').length;
+}
+
 async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopParams): Promise<RunClaudeAgentTurnOnceResult> {
   const { systemPrompt, createMcpServer, toolNames, model, resumeSessionId, prompt, cwd, onEvent, compaction } = params;
   const allowedTools = toolNames.map((n) => `mcp__${CLAUDE_MCP_SERVER_NAME}__${n}`);
@@ -516,7 +523,13 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
   // its id and usage).
   const unanswered = new Set<string>();
   const requestUsage = new Map<string, TokenUsage>();
+  // Once set, the request already in flight is being aborted: the tool calls
+  // it streamed out never ran and the SDK answers each with "interrupted", so
+  // neither is shown or counted. The handoff conversation starts over anyway.
   let cutForContext = false;
+  let lastOutputTokens = 0;
+  // Results the batch hook already reported, so the SDK's own copy isn't shown twice.
+  const reported = new Set<string>();
   const cutUsage = (): TokenUsage => [...requestUsage.values()].reduce(addUsage, ZERO_USAGE);
   const cutResult = (): RunClaudeAgentTurnOnceResult => ({
     sdkSessionId,
@@ -551,6 +564,41 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
       ...(model ? { model } : {}),
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
       abortController,
+      hooks: {
+        PostToolBatch: [
+          {
+            hooks: [
+              async (input) => {
+                if (input.hook_event_name !== 'PostToolBatch' || cutForContext) return {};
+                const calls = input.tool_calls;
+                const resultChars = calls.reduce((n, c) => n + resultTextLength(c.tool_response), 0);
+                const progressed = calls.some((c) => isProgressTool(c.tool_name));
+                const start = params.conversationStart ?? startTokens;
+                if (
+                  !shouldCompactAfterBatch(compaction, {
+                    contextTokens,
+                    outputTokens: lastOutputTokens,
+                    resultTokens: tokensFromChars(resultChars),
+                    startTokens: start,
+                    progressed,
+                  })
+                ) {
+                  return {};
+                }
+                for (const c of calls) {
+                  if (!unanswered.delete(c.tool_use_id)) continue;
+                  reported.add(c.tool_use_id);
+                  onEvent({ type: 'tool_result', toolCallId: c.tool_use_id, content: c.tool_response as never, isError: false });
+                }
+                console.log(`[cut] before the next request, context ~${Math.round((contextTokens + lastOutputTokens + tokensFromChars(resultChars)) / 1000)}k`);
+                cutForContext = true;
+                abortController.abort();
+                return {};
+              },
+            ],
+          },
+        ],
+      },
     },
   });
 
@@ -577,6 +625,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
           if (!firstResponseAt) firstResponseAt = Date.now();
           if (u) {
             contextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+            lastOutputTokens = u.output_tokens ?? 0;
             if (!startTokens) startTokens = contextTokens;
             requestUsage.set(message.message.id, {
               input: u.input_tokens ?? 0,
@@ -589,6 +638,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
             if (block.type === 'text') {
               onEvent({ type: 'assistant_text', text: block.text });
             } else if (block.type === 'tool_use') {
+              if (cutForContext) continue;
               unanswered.add(block.id);
               onEvent({ type: 'tool_call', toolCallId: block.id, name: block.name, input: block.input });
             }
@@ -601,6 +651,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
           if (Array.isArray(content)) {
             for (const block of content) {
               if (block.type === 'tool_result') {
+                if (cutForContext || reported.has(block.tool_use_id)) continue;
                 answered = unanswered.delete(block.tool_use_id) || answered;
                 onEvent({
                   type: 'tool_result',
@@ -613,6 +664,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
           }
           const start = params.conversationStart ?? startTokens;
           if (answered && unanswered.size === 0 && shouldCompact(compaction, contextTokens, start)) {
+            console.log(`[cut] after the results (fallback), context ~${Math.round(contextTokens / 1000)}k`);
             cutForContext = true;
             abortController.abort();
           }

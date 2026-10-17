@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentInput, HelperRunStats, TranscriptEntry } from '@/lib/dev-sessions/types';
 import type { AgentPersona } from '@/lib/dev-sessions/agents';
 import { ACCEPTED_ATTACHMENT_TYPES, readAttachments } from '@/lib/dev-sessions/attachments';
+import { useFullscreen } from './FullscreenToggle';
 import { HelperBubble, helperFor, helperStatsBefore } from './HelperBubbles';
 
 interface ChatPaneProps {
@@ -530,6 +531,7 @@ export function ChatPane({
   headerActions,
   className,
 }: ChatPaneProps) {
+  const fullscreen = useFullscreen(`${agent.name}'s chat`);
   const [draft, setDraft] = useState('');
   const [pendingFiles, setPendingFiles] = useState<AttachmentInput[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -539,7 +541,15 @@ export function ChatPane({
   const [answers, setAnswers] = useState<Record<string, DraftAnswer>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Follow new messages only while the reader is at the bottom; scrolling up to read must not be undone.
+  const stickToBottom = useRef(true);
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
+    if (!stickToBottom.current) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [entries.length, streaming, runningTool]);
 
@@ -606,6 +616,7 @@ export function ChatPane({
           ? `See attached: ${pendingFiles[0].name}`
           : `See attached files: ${pendingFiles.map((f) => f.name).join(', ')}`);
     }
+    stickToBottom.current = true;
     onSend?.(message, pendingFiles.length ? pendingFiles : undefined);
     setDraft('');
     setPendingFiles([]);
@@ -624,7 +635,7 @@ export function ChatPane({
   };
 
   return (
-    <Card className={`flex flex-col flex-1 min-h-0 ${className ?? ''}`}>
+    <Card className={`flex flex-col flex-1 min-h-0 ${className ?? ''} ${fullscreen.className}`}>
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
         <AgentAvatar agent={agent} />
         <div className="min-w-0 flex-1">
@@ -633,10 +644,15 @@ export function ChatPane({
           </div>
           <div className="text-xs text-muted-foreground break-words">{agent.title}</div>
         </div>
-        {headerActions && <div className="flex items-center gap-2 flex-shrink-0">{headerActions}</div>}
+        {(headerActions || !readOnly) && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {headerActions}
+            {!readOnly && fullscreen.button}
+          </div>
+        )}
       </div>
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
         {entries.length === 0 && !streaming && (
           <div className="py-8 text-center text-sm text-muted-foreground">
             {emptyHint ?? 'Say what you want to build.'}
