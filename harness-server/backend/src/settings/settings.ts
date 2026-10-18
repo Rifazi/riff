@@ -44,8 +44,8 @@ export interface RoleModelConfig {
   readMemory?: boolean;
 }
 
-export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
-export const ROLES: Role[] = ['requirements', 'plan', 'coding', 'qa', 'coordinator'];
+export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator' | 'uiux';
+export const ROLES: Role[] = ['requirements', 'plan', 'coding', 'qa', 'coordinator', 'uiux'];
 
 export function isRole(value: string): value is Role {
   return (ROLES as string[]).includes(value);
@@ -146,6 +146,7 @@ export const DEFAULT_SETTINGS: HarnessSettings = {
     coding: { provider: 'claude', model: 'claude-sonnet-5' },
     qa: { provider: 'claude', model: 'claude-sonnet-5' },
     coordinator: { provider: 'claude', model: 'claude-haiku-4-5' },
+    uiux: { provider: 'claude', model: 'claude-sonnet-5' },
   },
   ollamaEndpoint: DEFAULT_OLLAMA_ENDPOINT,
   jira: DEFAULT_JIRA_SETTINGS,

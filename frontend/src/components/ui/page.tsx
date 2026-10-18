@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
  */
 const Page = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('flex h-screen min-w-0 flex-col bg-background', className)} {...props} />
+    <div ref={ref} className={cn('flex h-[calc(100dvh-var(--phone-bar,0px))] min-w-0 flex-col bg-background', className)} {...props} />
   ),
 );
 Page.displayName = 'Page';
@@ -37,11 +37,14 @@ interface PageHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'ti
 function PageHeader({ title, subtitle, actions, back, className, children, ...props }: PageHeaderProps) {
   return (
     <header className={cn('flex-shrink-0 border-b border-border bg-background', className)} {...props}>
-      <div className="flex items-center justify-between gap-4 px-8 py-5">
+      <div className="flex items-center justify-between gap-4 px-4 py-3 md:px-8 md:py-5">
         <div className="min-w-0">
           {back && <div className="mb-1">{back}</div>}
-          <h1 className="truncate text-2xl font-bold text-foreground">{title}</h1>
-          {subtitle && <div className="mt-1 text-sm text-muted-foreground">{subtitle}</div>}
+          <h1 className="truncate text-xl font-bold text-foreground max-md:line-clamp-2 max-md:whitespace-normal md:text-2xl">{title}</h1>
+          {subtitle && (
+            // A plain-text blurb is just description, so a phone drops it; a subtitle of badges/links is data and stays.
+            <div className={cn('mt-1 text-sm text-muted-foreground', typeof subtitle === 'string' && 'max-md:hidden')}>{subtitle}</div>
+          )}
         </div>
         {actions && <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>}
       </div>
@@ -67,7 +70,7 @@ function PageBody({ fill, wide, className, children, ...props }: PageBodyProps) 
   }
   return (
     <div className="custom-scrollbar flex-1 overflow-y-auto" {...props}>
-      <div className={cn('mx-auto px-8 py-6', wide ? 'max-w-7xl' : 'max-w-6xl', className)}>{children}</div>
+      <div className={cn('mx-auto px-4 py-4 md:px-8 md:py-6', wide ? 'max-w-7xl' : 'max-w-6xl', className)}>{children}</div>
     </div>
   );
 }

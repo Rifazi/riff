@@ -21,7 +21,7 @@ export function PageShell({ title, subtitle, actions, back, children, fill }: Pa
     <Page>
       <PageHeader title={title} subtitle={subtitle} actions={actions} back={back} />
       <AgentServerBanner />
-      <PageBody fill={fill} className={fill ? 'px-8 py-4' : undefined}>
+      <PageBody fill={fill} className={fill ? 'px-4 py-3 md:px-8 md:py-4' : undefined}>
         {children}
       </PageBody>
     </Page>

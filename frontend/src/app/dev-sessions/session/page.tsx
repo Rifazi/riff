@@ -49,7 +49,7 @@ function SessionView() {
     if (!session || !liveGroup) return;
     const before = previousLive.current;
     previousLive.current = liveGroup;
-    if (!session.coordinatorEnabled || !before || before === liveGroup) return;
+    if ((!session.coordinatorEnabled && session.kind !== 'uiux') || !before || before === liveGroup) return;
     const viewing = isStageGroup(stageParam) ? stageParam : before;
     if (viewing === before) router.replace(sessionHref(session.id, liveGroup));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +97,7 @@ function SessionView() {
                   ? `/journal/notebook?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
                   : `/meeting-details?id=${encodeURIComponent(session.sourceMeeting.meetingId)}`
               }
-              className="inline-flex items-center gap-1 text-primary hover:underline"
+              className="inline-flex max-w-full items-center gap-1 text-primary hover:underline max-md:hidden"
             >
               <NotebookPen className="w-3.5 h-3.5" />
               {session.sourceMeeting.kind === 'journal' ? 'From journal' : 'From meeting'}:{' '}
@@ -113,6 +113,7 @@ function SessionView() {
             size="icon"
             variant="ghost"
             onClick={() => invoke('open_session_window', { sessionId: session.id, title: session.title })}
+            className="max-md:hidden"
             aria-label="Open in new window"
             title="Open in new window"
           >

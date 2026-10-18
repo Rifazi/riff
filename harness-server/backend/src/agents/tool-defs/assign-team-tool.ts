@@ -60,12 +60,14 @@ export const assignTeamDescription =
   'Split the remaining coding work across a team of engineers who build it in parallel, instead of building it ' +
   'yourself one step at a time. You are the lead: this is your call to make, at kickoff (the approved plan) and ' +
   'whenever QA sends the branch back (its findings).\n\n' +
-  'Split only when it genuinely saves time: two or more groups of steps write completely disjoint sets of files ' +
-  '(e.g. an API endpoint and the page that calls it, two unrelated adapters, fixes in unrelated areas), at least two ' +
-  'groups can run at the same time, and each is a meaningful chunk, not a one-line change. The longest chain of ' +
-  'dependent workstreams must be at most three quarters of the work (light steps count half), so a big foundation ' +
-  'with two small leaves is rejected. Small or tightly coupled ' +
-  'work, or anything where you aren\'t sure which files a step touches, you build yourself — don\'t call this.\n\n' +
+  'Prefer splitting. Whenever two or more groups of steps write disjoint sets of files (e.g. an API endpoint and the ' +
+  'page that calls it, two unrelated adapters, fixes in unrelated areas) and at least two groups can run at the same ' +
+  'time, split — even when one group depends on a small foundation the others wait for, and even when a group is ' +
+  'only a step or two. Cut workstreams as finely as the file ownership allows: more engineers running at once is ' +
+  'the goal. The longest chain of dependent workstreams must be at most 70% of the work (light steps count half), ' +
+  'so a big foundation with two small leaves is rejected. Build it yourself only when the steps really share ' +
+  'files and run one after another; if you aren\'t sure which files a step touches, search_code / outline_file ' +
+  'first rather than giving up on the split.\n\n' +
   'For each workstream:\n' +
   '- ownedPaths: every file or directory it will write, new and edited, tests included. Ownership is enforced (an ' +
   'engineer cannot write outside its paths) and no two workstreams may overlap, so be complete, and prefer ' +

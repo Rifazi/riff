@@ -158,7 +158,7 @@ export function PreferenceSettings() {
     <div className="space-y-6">
       {/* Appearance Section */}
       <Card className="p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4 max-md:flex-col max-md:items-start">
           <div>
             <h3 className="text-lg font-semibold text-foreground mb-2">Appearance</h3>
             <p className="text-sm text-muted-foreground">Use a light or dark theme, or follow your system</p>
@@ -180,7 +180,7 @@ export function PreferenceSettings() {
 
       {/* Notifications Section */}
       <Card className="p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-foreground mb-2">Notifications</h3>
             <p className="text-sm text-muted-foreground">Enable or disable notifications of start and end of meeting</p>

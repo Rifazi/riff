@@ -126,7 +126,7 @@ export function SummaryModelSettings({ refetchTrigger }: SummaryModelSettingsPro
   return (
     <div className="flex flex-col gap-4">
       <Card className="p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-foreground mb-2">Auto Summary</h3>
             <p className="text-sm text-muted-foreground">

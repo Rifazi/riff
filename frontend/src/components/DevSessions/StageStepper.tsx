@@ -21,7 +21,7 @@ function formatTokens(n: number): string {
 
 export function StageStepper({ session, current }: { session: SessionRecord; current: StageGroup }) {
   return (
-    <div className="grid grid-cols-4 gap-2">
+    <div className="grid grid-cols-4 gap-1.5 md:gap-2">
       {STAGE_GROUPS.map(({ group, label }, index) => {
         const agent = AGENT_PERSONAS[group];
         const reached = isStageReached(session, group);
@@ -33,7 +33,7 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
         const tokens = u ? u.input + u.output + u.cacheRead + u.cacheWrite : 0;
 
         const content = (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 max-md:flex-col max-md:gap-1 max-md:text-center">
             <div
               className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
                 completed
@@ -47,11 +47,11 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
             >
               {completed ? <Check className="w-4 h-4" /> : reached ? index + 1 : <Lock className="w-3.5 h-3.5" />}
             </div>
-            <div className="min-w-0">
-              <div className={`text-sm font-semibold truncate ${isCurrent ? 'text-primary' : 'text-foreground'}`}>
+            <div className="min-w-0 max-md:w-full">
+              <div className={`text-sm max-md:text-xs font-semibold truncate ${isCurrent ? 'text-primary' : 'text-foreground'}`}>
                 {label}
               </div>
-              <div className="text-xs text-muted-foreground truncate" title={agent.fullName}>
+              <div className="text-xs text-muted-foreground truncate max-md:hidden" title={agent.fullName}>
                 {agent.name} · {statusText}
                 {tokens > 0 && (
                   <span
@@ -71,7 +71,7 @@ export function StageStepper({ session, current }: { session: SessionRecord; cur
           </div>
         );
 
-        const base = 'rounded-lg border px-3 py-2.5 transition-colors';
+        const base = 'rounded-lg border px-3 py-2.5 max-md:px-1 max-md:py-2 min-w-0 transition-colors';
         if (!reached) {
           return (
             <div

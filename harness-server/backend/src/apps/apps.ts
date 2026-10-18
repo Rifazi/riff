@@ -26,6 +26,8 @@ export interface AppConfig {
   // Opt-in architecture the agents follow (architecture/architecture.ts);
   // missing = none.
   architecture?: ArchitectureConfig;
+  // Opt-in: the Apps page offers a UI/UX pass for this app (sessions/uiux-session.ts).
+  uiuxPass?: boolean;
 }
 
 export function baseBranchFor(app: AppConfig): string {

@@ -53,6 +53,7 @@ pub mod groq;
 pub mod journal;
 pub mod openrouter;
 pub mod parakeet_engine;
+pub mod remote;
 pub mod search;
 pub mod state;
 pub mod summary;
@@ -637,6 +638,8 @@ pub fn run() {
 
             // Local agent server behind Dev Sessions (requirements → QA)
             agent_server::start(_app.handle());
+            // Phone remote control (off until enabled in Settings)
+            remote::start(_app.handle());
 
             // Ctrl+C in the dev terminal / SIGTERM: exit through RunEvent::Exit
             // so the cleanup there runs. A second signal exits immediately.
@@ -770,6 +773,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             agent_server::get_agent_server_status,
+            remote::remote_reply,
+            remote::remote_event,
+            remote::remote_info,
+            remote::remote_set_enabled,
+            remote::remote_set_network,
+            remote::remote_rotate_token,
             agent_server::restart_agent_server,
             agent_server::pick_app_repo_folder,
             start_recording,

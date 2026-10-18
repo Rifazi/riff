@@ -9,6 +9,7 @@ import {
   FlaskConical,
   Bot,
   Search,
+  Smartphone,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { motion } from "framer-motion";
@@ -18,6 +19,8 @@ import { PreferenceSettings } from "@/components/PreferenceSettings";
 import { SummaryModelSettings } from "@/components/SummaryModelSettings";
 import { BetaSettings } from "@/components/BetaSettings";
 import { SearchSettings } from "@/components/SearchSettings";
+import { PhoneSettings } from "@/components/PhoneSettings";
+import { IS_MOBILE } from "@/lib/remote/is-mobile";
 import { DevAgentSettings } from "@/components/DevSessions/DevAgentSettings";
 import { useConfig } from "@/contexts/ConfigContext";
 import { BackButton } from "@/components/BackButton";
@@ -25,15 +28,19 @@ import { Page, PageBody, PageHeader } from "@/components/ui/page";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 // Tabs configuration (constant)
-const TABS = [
+const ALL_TABS = [
   { value: "general", label: "General", icon: Settings2 },
   { value: "recording", label: "Recordings", icon: Mic },
   { value: "Transcriptionmodels", label: "Transcription", icon: DatabaseIcon },
   { value: "summaryModels", label: "Summary", icon: SparkleIcon },
   { value: "search", label: "Search", icon: Search },
   { value: "devAgents", label: "Dev Agents", icon: Bot },
+  { value: "phone", label: "Phone", icon: Smartphone },
   { value: "beta", label: "Beta", icon: FlaskConical },
 ] as const;
+
+// Phone pairing is set up on the Mac, so the phone app doesn't show it.
+const TABS = ALL_TABS.filter((tab) => !(IS_MOBILE && tab.value === "phone"));
 
 export default function SettingsPage() {
   const { transcriptModelConfig, setTranscriptModelConfig } = useConfig();
@@ -98,7 +105,7 @@ export default function SettingsPage() {
                   ref={(el) => {
                     tabRefs.current[index] = el;
                   }}
-                  className="flex items-center gap-2 px-6 py-4 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10"
+                  className="flex shrink-0 items-center gap-2 px-6 py-4 max-md:px-3 max-md:py-3 bg-transparent rounded-none border-0 data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none text-muted-foreground hover:text-foreground relative z-10"
                 >
                   <Icon className="w-4 h-4" />
                   {tab.label}
@@ -137,6 +144,9 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="devAgents">
             <DevAgentSettings />
+          </TabsContent>
+          <TabsContent value="phone">
+            <PhoneSettings />
           </TabsContent>
           <TabsContent value="beta" className="mt-6">
             <BetaSettings />

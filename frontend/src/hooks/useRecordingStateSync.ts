@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { IS_MOBILE } from '@/lib/remote/is-mobile';
 import { recordingService } from '@/services/recordingService';
 
 interface UseRecordingStateSyncReturn {
@@ -47,7 +48,8 @@ export function useRecordingStateSync(
 
     // Test if Tauri is available
     console.log('Testing Tauri availability...');
-    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+    // The phone has no Tauri globals; its commands go to the Mac over the bridge.
+    if (IS_MOBILE || (typeof window !== 'undefined' && (window as any).__TAURI__)) {
       console.log('Tauri is available, starting state check');
       checkRecordingState();
 

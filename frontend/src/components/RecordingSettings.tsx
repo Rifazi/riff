@@ -216,7 +216,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       </div>
 
       {/* Auto Save Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between gap-4 p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">Save Audio Recordings</div>
           <div className="text-sm text-muted-foreground">Automatically save audio files when recording stops</div>
@@ -259,7 +259,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
       )}
 
       {/* Recording Notification Toggle */}
-      <div className="flex items-center justify-between p-4 border rounded-lg">
+      <div className="flex items-center justify-between gap-4 p-4 border rounded-lg">
         <div className="flex-1">
           <div className="font-medium">Recording Start Notification</div>
           <div className="text-sm text-muted-foreground">
@@ -271,7 +271,7 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
 
       {/* Auto-record meetings */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex items-center justify-between gap-4 p-4 border rounded-lg">
           <div className="flex-1 pr-4">
             <div className="font-medium">Record meetings automatically</div>
             <div className="text-sm text-muted-foreground">

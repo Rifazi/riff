@@ -90,6 +90,8 @@ export interface AppConfig {
   theme: AppThemeSummary | null;
   // The architecture the agents follow; null when none.
   architecture: ArchitectureConfig | null;
+  // Whether the UI/UX pass is turned on for this app.
+  uiuxPass: boolean;
 }
 
 // Mirrors harness-server's architecture/architecture.ts.
@@ -441,6 +443,10 @@ export type DeliveryPlan =
 
 export interface SessionRecord {
   id: string;
+  /** 'uiux' for a UI/UX pass; absent on an ordinary session. */
+  kind?: 'uiux';
+  /** A UI/UX pass: what it was asked to look at; null = the whole UI. */
+  uiuxFocus?: string | null;
   /** Unique; names the session's docs. Not the ticket. */
   sessionKey: string;
   /** Ticket ID the human gave, if any. Several sessions can share one. */
@@ -557,7 +563,7 @@ export interface RoleModelConfig {
   readMemory?: boolean;
 }
 
-export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator';
+export type Role = 'requirements' | 'plan' | 'coding' | 'qa' | 'coordinator' | 'uiux';
 
 export interface JiraSettingsFields {
   baseUrl: string;

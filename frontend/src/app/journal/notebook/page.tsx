@@ -243,7 +243,7 @@ function NotebookView() {
 
           {/* Summary + Ask */}
           <aside className="lg:sticky lg:top-0 lg:self-start">
-            <Card className="flex h-[calc(100vh-11rem)] min-h-[28rem] flex-col p-4">
+            <Card className="flex h-[calc(100dvh-var(--phone-bar,0px)-11rem)] min-h-[28rem] flex-col p-4">
               <Tabs defaultValue="summary" className="flex min-h-0 flex-1 flex-col">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="summary">

@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, apiUrl } from '@/lib/dev-sessions/api';
 import type { AppConfig, ArchitectureConfig, CheckCommands, Role } from '@/lib/dev-sessions/types';
-import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
+import { AGENT_PERSONAS, COORDINATOR_PERSONA, UIUX_PERSONA } from '@/lib/dev-sessions/agents';
 import { SESSIONS_HREF } from '@/lib/dev-sessions/stage';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +20,7 @@ import { NewAppOnboarding } from '@/components/DevSessions/NewAppOnboarding';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
 import { ExternalAnchor } from '@/components/DevSessions/ExternalAnchor';
 import { AppReferenceDocsButton } from '@/components/DevSessions/ReferenceDocs';
+import { UiuxPassRow } from '@/components/DevSessions/UiuxPass';
 import { ArchitectureFields, ArchitectureTools, architectureLabel } from '@/components/DevSessions/ArchitectureSettings';
 
 const DEFAULT_CHECK_COMMANDS: Record<keyof CheckCommands, string> = {
@@ -29,6 +30,7 @@ const DEFAULT_CHECK_COMMANDS: Record<keyof CheckCommands, string> = {
 };
 
 const ROLES: { key: Role; label: string }[] = [
+  { key: 'uiux', label: `UI/UX — ${UIUX_PERSONA.name}` },
   { key: 'requirements', label: `Requirements — ${AGENT_PERSONAS.requirements.name}` },
   { key: 'plan', label: `Plan — ${AGENT_PERSONAS.plan.name}` },
   { key: 'coding', label: `Coding — ${AGENT_PERSONAS.coding.name}` },
@@ -207,6 +209,7 @@ function AppCard({ app }: { app: AppConfig }) {
             </>
           )}
         </div>
+        <UiuxPassRow app={app} />
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button size="sm" variant="default" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
             {saveMutation.isPending ? 'Saving…' : 'Save'}

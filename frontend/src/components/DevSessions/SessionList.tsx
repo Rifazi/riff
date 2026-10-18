@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight, ExternalLink, GitFork, Loader2, NotebookPen, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, GitFork, Loader2, NotebookPen, Paintbrush, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -259,12 +259,18 @@ function SessionRow({
   return (
     <Link
       href={sessionHref(session.id, stageGroupFor(session))}
-      className="group flex items-center gap-4 bg-card rounded-lg border border-border px-4 py-3 hover:border-primary/50 hover:shadow-sm transition-all"
+      className="group flex items-center gap-4 bg-card rounded-lg border border-border px-4 py-3 hover:border-primary/50 hover:shadow-sm transition-all max-md:flex-col max-md:items-stretch max-md:gap-2"
     >
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-foreground truncate">{session.title}</div>
+        <div className="font-medium text-foreground truncate max-md:whitespace-normal max-md:line-clamp-2">{session.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono">{session.ticket ?? session.sessionKey}</span>
+          {session.kind === 'uiux' && (
+            <Badge variant="info" className="gap-1">
+              <Paintbrush className="w-3 h-3" />
+              UI/UX pass
+            </Badge>
+          )}
           {session.splitFrom && (
             <Badge variant="secondary" className="gap-1" title={`Split from "${session.splitFrom.title}"`}>
               <GitFork className="w-3 h-3" />
@@ -281,16 +287,19 @@ function SessionRow({
           {session.sourceMeeting && (
             <Badge
               variant="info"
-              className="gap-1"
+              className="gap-1 max-w-full min-w-0"
               title={session.sourceMeeting.kind === 'journal' ? 'Started from a journal' : 'Started from a meeting transcript'}
             >
-              <NotebookPen className="w-3 h-3" />
-              {session.sourceMeeting.meetingTitle || 'Meeting'}
+              <NotebookPen className="w-3 h-3 shrink-0" />
+              <span className="truncate">{session.sourceMeeting.meetingTitle || 'Meeting'}</span>
             </Badge>
           )}
-          <span>Updated {new Date(session.updatedAt).toLocaleString()}</span>
+          <span className="max-md:hidden">Updated {new Date(session.updatedAt).toLocaleString()}</span>
+          <span className="md:hidden">Updated {new Date(session.updatedAt).toLocaleDateString()}</span>
         </div>
       </div>
+      {/* One footer row on a phone (stage + actions); on desktop `contents` leaves them inline in the row. */}
+      <div className="flex items-center justify-between gap-2 md:contents">
       <Badge variant={stageTone(session)}>{STAGE_LABEL[session.stage] ?? session.stage}</Badge>
       <div className="flex items-center gap-1">
         {session.stage === 'abandoned' && (
@@ -324,7 +333,7 @@ function SessionRow({
         <Button
           size="icon"
           variant="ghost"
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground max-md:hidden"
           onClick={(e) => {
             stop(e);
             invoke('open_session_window', { sessionId: session.id, title: session.title });
@@ -335,6 +344,7 @@ function SessionRow({
           <ExternalLink className="w-4 h-4" />
         </Button>
         <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-muted-foreground" />
+      </div>
       </div>
     </Link>
   );

@@ -46,6 +46,7 @@ import { stageHelperContext } from './helpers/helper.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { runUiuxAgentTurn } from './uiux-agent.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
 const TOOL_NAMES = [
@@ -69,6 +70,8 @@ export async function runRequirementsAgentTurn(
   // checks it with wantsWebAccess) — coordinator-driven turns never do.
   options: { webAccess?: boolean } = {},
 ): Promise<SessionRecord> {
+  // A UI/UX pass's first stage is the UI/UX lead, in this stage's chat and documents.
+  if (session.kind === 'uiux') return runUiuxAgentTurn(session, userMessage, onEvent, attachments);
   const webAccess = options.webAccess ?? false;
   await appendTranscriptEntry(session.id, 'requirements', { role: 'user', text: userMessage });
   let prompt = await applyAttachments(session.id, 'requirements', userMessage, attachments);

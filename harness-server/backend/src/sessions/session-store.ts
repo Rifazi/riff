@@ -3,7 +3,7 @@ import path from 'node:path';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
 import type { ModelMessage } from 'ai';
-import type { SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionStage, TranscriptEntry } from './session.js';
+import type { SessionKind, SessionMeetingSource, SessionRecord, SessionSplitOrigin, SessionStage, TranscriptEntry } from './session.js';
 import { slugify } from './session.js';
 import { LEGACY_APP_ID } from '../apps/apps.js';
 import { addUsage, ZERO_USAGE, type TokenUsage, type ToolOutputStats } from '../agents/sdk-client.js';
@@ -157,6 +157,7 @@ export async function createSession(input: {
   sourceMeeting?: SessionMeetingSource | null;
   splitFrom?: SessionSplitOrigin | null;
   splitBrief?: string | null;
+  kind?: SessionKind;
 }): Promise<SessionRecord> {
   const now = new Date().toISOString();
   const sessionKey = input.sessionKey?.trim() || slugify(input.title);
@@ -166,6 +167,7 @@ export async function createSession(input: {
     ticket: input.ticket?.trim() || null,
     title: input.title,
     appId: input.appId,
+    ...(input.kind ? { kind: input.kind } : {}),
     stage: 'requirements-in-progress',
     requirementsPath: null,
     requirementsStatus: null,

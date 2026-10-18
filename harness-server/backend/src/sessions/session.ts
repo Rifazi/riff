@@ -20,6 +20,10 @@ export type SessionStage =
   // them (sessions/split-roadmap.ts).
   | 'split';
 
+// A UI/UX pass (sessions/uiux-session.ts): its requirements stage is the UI/UX
+// lead, who writes the requirements and plan; coding uses the UI/UX prompt.
+export type SessionKind = 'uiux';
+
 export type TranscriptRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'system';
 
 export type CodingStepStatus = 'pending' | 'in_progress' | 'done';
@@ -323,6 +327,10 @@ export type ReferenceDocsStage = 'requirements' | 'plan' | 'coding' | 'qa';
 
 export interface SessionRecord {
   id: string;
+  // Absent on an ordinary session.
+  kind?: SessionKind;
+  // A UI/UX pass: what the human asked it to look at, or null for the whole UI.
+  uiuxFocus?: string | null;
   // Unique per session: names its requirements/plan/QA docs. Derived from
   // the ticket when there is one (see session-keys.ts's uniqueSessionKey),
   // so it isn't the ticket itself — several sessions can share a ticket.

@@ -40,7 +40,11 @@ import type {
 // The agent server the Riff desktop app starts alongside itself (see
 // src-tauri/src/agent_server.rs). Absolute, since the UI is a static export
 // served from the Tauri webview, not from this server.
-export const AGENT_SERVER_URL = process.env.NEXT_PUBLIC_AGENT_SERVER_URL ?? 'http://127.0.0.1:4319';
+// The phone build is served by the Mac's remote bridge, which proxies `/agent`.
+export const AGENT_SERVER_URL =
+  process.env.NEXT_PUBLIC_RIFF_MOBILE === '1'
+    ? '/agent'
+    : (process.env.NEXT_PUBLIC_AGENT_SERVER_URL ?? 'http://127.0.0.1:4319');
 
 export function apiUrl(path: string): string {
   return `${AGENT_SERVER_URL}${path}`;
@@ -89,7 +93,7 @@ export const api = {
 
   updateApp: (
     id: string,
-    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null }
+    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean }
   ) =>
     fetch(apiUrl(`/api/apps/${id}`), {
       method: 'PATCH',
@@ -159,6 +163,13 @@ export const api = {
     fetch(apiUrl(`/api/sessions${filter?.meetingId ? `?meetingId=${encodeURIComponent(filter.meetingId)}` : ''}`)).then(
       (r) => json<SessionRecord[]>(r),
     ),
+
+  startUiuxPass: (appId: string, input: { title?: string; focus?: string }) =>
+    fetch(apiUrl(`/api/apps/${appId}/uiux-session`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then((r) => json<SessionRecord>(r)),
 
   getSession: (id: string) => fetch(apiUrl(`/api/sessions/${id}`)).then((r) => json<SessionRecord>(r)),
 

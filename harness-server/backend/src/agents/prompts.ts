@@ -15,6 +15,7 @@ const PROMPT_FILE: Partial<Record<Role, string>> = {
   plan: 'plan-agent.md',
   coding: 'coding-agent.md',
   qa: 'qa-agent.md',
+  uiux: 'uiux-agent.md',
 };
 
 // "coordinator" has no prompt file — its base is the inline

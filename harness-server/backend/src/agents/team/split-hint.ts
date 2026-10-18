@@ -67,14 +67,21 @@ export function soloReason(steps: StepFiles[]): string | null {
   if (steps.length < 2) return 'The plan has a single step.';
   const owned = steps.map((s) => s.files.filter(ownedFile));
   if (owned.some((files) => files.length === 0)) return null;
-  const group = steps.map((_, i) => i);
-  const find = (i: number): number => (group[i] === i ? i : (group[i] = find(group[i])));
-  for (let i = 0; i < steps.length; i++) {
-    for (let k = i + 1; k < steps.length; k++) {
-      if (owned[i].some((f) => owned[k].some((g) => sameFile(f, g)))) group[find(k)] = find(i);
+  // A later step depends on every earlier step it shares an owned file with.
+  // The plan is a chain only when each pair of steps is ordered by those
+  // dependencies, so two steps off the same foundation still reach the lead.
+  const reach = steps.map(() => new Set<number>());
+  for (let k = 0; k < steps.length; k++) {
+    for (let i = 0; i < k; i++) {
+      if (owned[i].some((f) => owned[k].some((g) => sameFile(f, g)))) {
+        reach[k].add(i);
+        for (const a of reach[i]) reach[k].add(a);
+      }
     }
   }
-  if (new Set(steps.map((_, i) => find(i))).size > 1) return null;
+  for (let k = 0; k < steps.length; k++) {
+    for (let i = 0; i < k; i++) if (!reach[k].has(i)) return null;
+  }
   return 'Every step works on files shared with the others, so the steps run one after another and none could be built in parallel.';
 }
 

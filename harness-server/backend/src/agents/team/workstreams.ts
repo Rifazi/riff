@@ -35,7 +35,7 @@ export const workstreamSchema = z.object({
 });
 
 // The longest dependency chain may be at most this share of all the work.
-export const MAX_CRITICAL_SHARE = 0.75;
+export const MAX_CRITICAL_SHARE = 0.7;
 
 export class InvalidWorkstreamsError extends Error {
   constructor(message: string) {

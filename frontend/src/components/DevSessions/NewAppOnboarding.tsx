@@ -1,5 +1,6 @@
 'use client';
 
+import { IS_MOBILE } from '@/lib/remote/is-mobile';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
@@ -164,10 +165,13 @@ export function NewAppOnboarding({ onDone, onCancel }: { onDone: (app: AppWriteR
                 className="font-mono text-xs"
                 autoFocus
               />
-              <Button type="button" size="sm" variant="outline" className="h-9" onClick={browse}>
-                <FolderOpen />
-                Browse…
-              </Button>
+              {/* The picker opens on the Mac, so the phone types the path instead. */}
+              {!IS_MOBILE && (
+                <Button type="button" size="sm" variant="outline" className="h-9" onClick={browse}>
+                  <FolderOpen />
+                  Browse…
+                </Button>
+              )}
             </div>
           </div>
           <div className="space-y-1.5">

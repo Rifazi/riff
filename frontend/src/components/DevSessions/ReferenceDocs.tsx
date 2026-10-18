@@ -60,7 +60,9 @@ export function SessionReferenceDocsButton({ session }: { session: SessionRecord
     <>
       <Button variant="outline" onClick={() => setOpen(true)} title="Documents every agent in this session can read">
         <Library />
-        Reference docs{count > 0 ? ` · ${count}` : ''}
+        <span className="max-md:hidden">Reference docs</span>
+        <span className="md:hidden">Docs</span>
+        {count > 0 ? ` · ${count}` : ''}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[600px]">

@@ -234,7 +234,7 @@ export default function MeetingsPage() {
                   <File className="w-4 h-4 text-muted-foreground" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-foreground truncate">
+                  <div className="font-medium text-foreground truncate max-md:whitespace-normal max-md:line-clamp-2">
                     {meeting.title}
                   </div>
                   <MeetingJournalDots

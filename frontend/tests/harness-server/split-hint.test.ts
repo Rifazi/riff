@@ -33,7 +33,8 @@ describe('split hint', () => {
   test('solo when every step touches a file the step before it does', () => {
     const chain = stepFiles(plan(['`src/a.ts`', '`src/a.ts`, `src/b.ts`', 'uses `b.ts`']));
     expect(soloReason(chain)).toContain('one after another');
-    expect(soloReason(stepFiles(plan(['`src/a.ts`', '`src/b.ts`', '`src/a.ts`, `src/b.ts`'])))).toContain('one after another');
+    // Two steps off a shared foundation can run side by side: the lead decides.
+    expect(soloReason(stepFiles(plan(['`src/a.ts`', '`src/b.ts`', '`src/a.ts`, `src/b.ts`'])))).toBeNull();
   });
 
   test('the lead decides when two neighbours share nothing, or for one step', () => {

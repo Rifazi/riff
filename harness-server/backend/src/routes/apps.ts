@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { createUiuxSession } from '../sessions/uiux-session.js';
 import { listApps, getApp, createApp, updateApp, deleteApp, AppInUseError } from '../apps/apps-store.js';
 import { docsDirFor, readRepoUrl, validateRepoRoot, describeSetup, baseBranchFor, InvalidRepoRootError, type CheckCommands } from '../apps/apps.js';
 import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-index.js';
@@ -26,6 +27,7 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     repoUrl: readRepoUrl(app),
     theme: summarizeAppTheme(app.repoRoot),
     architecture: app.architecture ?? null,
+    uiuxPass: app.uiuxPass === true,
   };
 }
 
@@ -102,7 +104,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{
     Params: { id: string };
-    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown };
+    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown; uiuxPass?: boolean };
   }>(
     '/api/apps/:id',
     async (request, reply) => {
@@ -130,6 +132,18 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
       }
     }
   );
+
+  // Starts a UI/UX pass: its own session, opened on the Coding tab with its
+  // requirements and plan already approved (sessions/uiux-session.ts). Only for
+  // apps that turned the pass on.
+  app.post<{ Params: { id: string }; Body: { title?: string; focus?: string } }>('/api/apps/:id/uiux-session', async (request, reply) => {
+    const target = await getApp(request.params.id).catch(() => null);
+    if (!target) return reply.code(404).send({ error: 'app not found' });
+    if (!target.uiuxPass) return reply.code(400).send({ error: 'the UI/UX pass is not turned on for this app' });
+    const title = request.body?.title?.trim() || 'UI/UX pass';
+    const session = await createUiuxSession(target, { title, focus: request.body?.focus });
+    return reply.code(201).send(session);
+  });
 
   app.delete<{ Params: { id: string } }>('/api/apps/:id', async (request, reply) => {
     try {

@@ -25,6 +25,13 @@ export const AGENT_PERSONAS: Record<StageGroup, AgentPersona> = {
   qa: { name: 'Tess', fullName: 'Tess Case', title: 'QA Engineer', initials: 'TE' },
 };
 
+export const UIUX_PERSONA: AgentPersona = {
+  name: 'Pixel',
+  fullName: 'Pixel Perfect',
+  title: 'UI/UX Lead',
+  initials: 'PX',
+};
+
 export const COORDINATOR_PERSONA: AgentPersona = {
   name: 'Bridget',
   fullName: 'Bridget Gapp',

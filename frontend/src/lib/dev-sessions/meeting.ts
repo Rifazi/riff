@@ -111,3 +111,14 @@ export function themeMigrationKickoffMessage(themeName: string): string {
       'about anything the audit leaves open, such as whether light mode should be supported.',
   ].join('\n');
 }
+
+// Opening message of a UI/UX pass (Apps page → Start a pass).
+export function uiuxKickoffMessage(session: SessionRecord): string {
+  return [
+    'Run a UI/UX pass on this app.',
+    '',
+    session.uiuxFocus ? `Focus: ${session.uiuxFocus}` : 'Focus: the whole UI.',
+    '',
+    'Look at it, judge it, write the requirements and the plan, and hand it to coding.',
+  ].join('\n');
+}

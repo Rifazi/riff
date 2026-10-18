@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePhone } from "@/hooks/usePhone";
 import { RecordingControls } from "@/components/RecordingControls";
 import { useSidebar } from "@/components/Sidebar/SidebarProvider";
 import { usePermissionCheck } from "@/hooks/usePermissionCheck";
@@ -41,6 +42,7 @@ export default function Home() {
   const { status, isStopping, isProcessing, isSaving } = recordingState;
 
   // Hooks
+  const phone = usePhone();
   const { hasMicrophone } = usePermissionCheck();
   const {
     setIsMeetingActive,
@@ -245,14 +247,14 @@ export default function Home() {
         {(hasMicrophone || isRecording) &&
           status !== RecordingStatus.PROCESSING_TRANSCRIPTS &&
           status !== RecordingStatus.SAVING && (
-            <div className="fixed bottom-12 left-0 right-0 z-10">
+            <div className="fixed bottom-12 left-0 right-0 z-10 max-md:bottom-[calc(1rem+env(safe-area-inset-bottom))]">
               <div
-                className="flex justify-center pl-8 transition-[margin] duration-300"
+                className="flex justify-center pl-8 transition-[margin] duration-300 max-md:pl-0"
                 style={{
-                  marginLeft: sidebarCollapsed ? "4rem" : "16rem",
+                  marginLeft: phone ? 0 : sidebarCollapsed ? "4rem" : "16rem",
                 }}
               >
-                <div className="w-2/3 max-w-[750px] flex justify-center">
+                <div className="w-2/3 max-w-[750px] flex justify-center max-md:w-full max-md:px-4">
                   <div className="bg-card rounded-full shadow-lg flex items-center">
                     <RecordingControls
                       isRecording={recordingState.isRecording}

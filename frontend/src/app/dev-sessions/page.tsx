@@ -25,6 +25,7 @@ export default function DevSessionsPage() {
   const { data: apps } = useQuery({ queryKey: ['apps'], queryFn: api.listApps });
   const noProviderConfigured = settings && !Object.values(settings.credentials).some((c) => c.hasKey);
 
+  const [formOpen, setFormOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [ticket, setTicket] = useState('');
   const [appId, setAppId] = useState('');
@@ -76,32 +77,36 @@ export default function DevSessionsPage() {
         )}
         {apps && (
           <Card>
-            <CardHeader>
+            <CardHeader className="max-md:flex-row max-md:items-center max-md:justify-between max-md:space-y-0">
               <CardTitle>Start a new session</CardTitle>
+              {/* On a phone the form stays folded away so the session list is what you see first. */}
+              <Button type="button" size="sm" variant="outline" className="md:hidden" onClick={() => setFormOpen((open) => !open)}>
+                {formOpen ? 'Hide' : 'New'}
+              </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className={formOpen ? undefined : 'max-md:hidden'}>
               <form
-                className="flex flex-wrap gap-2"
+                className="flex flex-wrap gap-2 max-md:flex-col"
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (title.trim() && appId) createMutation.mutate();
                 }}
               >
-                <AppPicker value={appId} onChange={setAppId} triggerClassName="w-44" />
+                <AppPicker value={appId} onChange={setAppId} triggerClassName="w-44 max-md:w-full" />
                 <Input
-                  className="flex-1 min-w-[220px]"
+                  className="flex-1 min-w-[220px] max-md:min-w-0 max-md:w-full"
                   placeholder="Feature title, e.g. Acme Distributors inventory report"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                 />
                 <Input
-                  className="w-52"
+                  className="w-52 max-md:w-full"
                   placeholder="Ticket ID (optional)"
                   value={ticket}
                   onChange={(e) => setTicket(e.target.value)}
                 />
                 <Input
-                  className="w-52"
+                  className="w-52 max-md:w-full"
                   placeholder="Existing branch (optional)"
                   value={existingBranch}
                   onChange={(e) => setExistingBranch(e.target.value)}
@@ -112,9 +117,11 @@ export default function DevSessionsPage() {
                 </Button>
               </form>
               <ErrorText>{createMutation.isError ? (createMutation.error as Error).message : null}</ErrorText>
-              <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1.5">
-                <NotebookPen className="w-3.5 h-3.5" />
-                Or open a meeting and click <span className="font-medium">Requirements</span> to start from its transcript.
+              <p className="text-xs text-muted-foreground mt-3 flex items-start gap-1.5">
+                <NotebookPen className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>
+                  Or open a meeting and click <span className="font-medium">Requirements</span> to start from its transcript.
+                </span>
               </p>
             </CardContent>
           </Card>

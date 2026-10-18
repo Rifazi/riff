@@ -30,6 +30,9 @@ import {
   getAudioFormatsDisplayList,
 } from "@/constants/audioFormats";
 import { JournalEventsBridge } from "@/lib/journal/useJournalEvents";
+import { RemoteBridge } from "@/lib/remote/RemoteBridge";
+import { MobileGate } from "@/lib/remote/MobileGate";
+import { IS_MOBILE } from "@/lib/remote/is-mobile";
 import { useThemeMode } from "@/lib/theme-mode";
 
 const sourceSans3 = Source_Sans_3({
@@ -76,6 +79,10 @@ export default function RootLayout({
   useThemeMode(); // applies the saved light/dark/system choice to <html>
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingCompleted, setOnboardingCompleted] = useState(false);
+  // Phone only: why the app can't be shown (never the desktop's onboarding).
+  const [phoneGate, setPhoneGate] = useState<"setup" | "unreachable" | null>(
+    null,
+  );
 
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false);
@@ -89,7 +96,9 @@ export default function RootLayout({
         const isComplete = status?.completed ?? false;
         setOnboardingCompleted(isComplete);
 
-        if (!isComplete) {
+        if (!isComplete && IS_MOBILE) {
+          setPhoneGate("setup");
+        } else if (!isComplete) {
           console.log(
             "[Layout] Onboarding not completed, showing onboarding flow",
           );
@@ -100,6 +109,10 @@ export default function RootLayout({
       })
       .catch((error) => {
         console.error("[Layout] Failed to check onboarding status:", error);
+        if (IS_MOBILE) {
+          setPhoneGate("unreachable");
+          return;
+        }
         // Default to showing onboarding if we can't check
         setShowOnboarding(true);
         setOnboardingCompleted(false);
@@ -260,6 +273,13 @@ export default function RootLayout({
 
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Phone build: installable from Safari's Add to Home Screen, full screen, safe-area aware */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <link rel="apple-touch-icon" href="/icon_128x128.png" />
+      </head>
       <body className={`${sourceSans3.variable} font-sans antialiased`}>
         <AnalyticsProvider>
           <QueryProvider>
@@ -278,9 +298,12 @@ export default function RootLayout({
                                 {/* Download progress toast provider - listens for background downloads */}
                                 <DownloadProgressToastProvider />
                                 <JournalEventsBridge />
+                                <RemoteBridge />
 
                                 {/* Show onboarding or main app */}
-                                {showOnboarding ? (
+                                {phoneGate ? (
+                                  <MobileGate reason={phoneGate} />
+                                ) : showOnboarding ? (
                                   <OnboardingFlow
                                     onComplete={handleOnboardingComplete}
                                   />

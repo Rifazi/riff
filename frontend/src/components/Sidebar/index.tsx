@@ -33,6 +33,7 @@ import { useRecordingState } from "@/contexts/RecordingStateContext";
 import { useImportDialog } from "@/contexts/ImportDialogContext";
 import { useConfig } from "@/contexts/ConfigContext";
 
+import { usePhone } from "@/hooks/usePhone";
 import Logo from "../Logo";
 import Info from "../Info";
 import { TokenRingIndicator } from "../DevSessions/TokenRingIndicator";
@@ -57,8 +58,21 @@ const Sidebar: React.FC = () => {
       {journalReview.length}
     </Badge>
   );
-  const { isCollapsed, toggleCollapse, handleRecordingToggle, serverAddress } =
-    useSidebar();
+  const {
+    isCollapsed: sidebarCollapsed,
+    toggleCollapse,
+    handleRecordingToggle,
+    serverAddress,
+  } = useSidebar();
+  // On a phone the sidebar is a drawer: always the full menu, shown or hidden.
+  const phone = usePhone();
+  const isCollapsed = sidebarCollapsed && !phone;
+  const drawerOpen = phone && !sidebarCollapsed;
+  useEffect(() => {
+    if (phone && !sidebarCollapsed) toggleCollapse();
+    // close the drawer after navigating
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   // Get recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -398,13 +412,27 @@ const Sidebar: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-0 left-0 h-screen z-40">
+    <>
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40"
+          onClick={toggleCollapse}
+          aria-hidden
+        />
+      )}
+    <div
+      className={`fixed top-0 left-0 h-dvh transition-transform duration-300 ${
+        phone
+          ? `z-50 ${drawerOpen ? "translate-x-0" : "-translate-x-full"}`
+          : "z-40"
+      }`}
+    >
       {/* Floating collapse button */}
       <Button
         variant="outline"
         size="icon"
         onClick={toggleCollapse}
-        className="absolute -right-6 top-20 z-50 h-8 w-8 rounded-full bg-card shadow-lg"
+        className="absolute -right-6 top-20 z-50 h-8 w-8 rounded-full bg-card shadow-lg max-md:hidden"
         style={{ transform: "translateX(50%)" }}
       >
         {isCollapsed ? (
@@ -415,8 +443,8 @@ const Sidebar: React.FC = () => {
       </Button>
 
       <div
-        className={`h-screen bg-card border-r border-border shadow-sm flex flex-col transition-all duration-300 ${
-          isCollapsed ? "w-16" : "w-64"
+        className={`h-dvh bg-card border-r border-border shadow-sm flex flex-col transition-all duration-300 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${
+          isCollapsed ? "w-16" : phone ? "w-[85vw] max-w-xs" : "w-64"
         }`}
       >
         {/*  Header with traffic light spacing */}
@@ -531,6 +559,7 @@ const Sidebar: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   );
 };
 

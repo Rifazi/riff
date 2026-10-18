@@ -251,7 +251,7 @@ function MeetingDetailsContent() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-[calc(100dvh-var(--phone-bar,0px))]">
         <div className="text-center">
           <p className="text-destructive mb-4">{error}</p>
           <BackButton fallbackHref="/meetings" />
@@ -263,7 +263,7 @@ function MeetingDetailsContent() {
   // Show loading spinner while initial data loads
   if (isLoading || !meetingDetails || meetingDetails.id !== meetingId) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-[calc(100dvh-var(--phone-bar,0px))]">
         <LoaderIcon className="animate-spin size-6 " />
       </div>
     );
@@ -299,7 +299,7 @@ export default function MeetingDetails() {
   return (
     <Suspense
       fallback={
-        <div className="flex items-center justify-center h-screen">
+        <div className="flex items-center justify-center h-[calc(100dvh-var(--phone-bar,0px))]">
           <LoaderIcon className="animate-spin size-6" />
         </div>
       }

@@ -29,7 +29,7 @@ export function BetaSettings() {
       {featureOrder.map((featureKey) => (
         <Card key={featureKey}>
           <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
                 <div className="mb-2 flex items-center gap-2">
                   <FlaskConical className="h-5 w-5 text-muted-foreground" />

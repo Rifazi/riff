@@ -28,6 +28,7 @@ import { classifyTextToolsClaude } from './helpers/classifier/tool-claude.js';
 import { getApp } from '../apps/apps-store.js';
 import { baseBranchFor } from '../apps/apps.js';
 import { diffBaseFor, sharedBranchFor } from '../sessions/shared-branch.js';
+import { uiuxPromptFor } from './uiux-prompt.js';
 import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { listSessionReferenceDocs, referenceDocsManifest, referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { lightModelFor, nextCodingStepId, planStepEfforts } from './model-routing.js';
@@ -115,7 +116,7 @@ const TOOL_NAMES = [
 // app's prompt override replaces the base prompt.
 const QA_FIX_TEAM_NOTE =
   'You are the lead. Before fixing anything, decide whether these fixes can be split across a coding team: if ' +
-  'they fall into two or more groups that write disjoint files and are each a meaningful chunk, call assign_team ' +
+  'they fall into two or more groups that write disjoint files, call assign_team ' +
   'with a step per fix (or group of related fixes), each with a brief the engineer can act on alone, then end your ' +
   'turn; you review and merge each engineer\'s branch as it finishes. Otherwise call build_solo with a one-line ' +
   'reason and fix them yourself as usual. Your write tools stay locked until you decide. Either way, work only on ' +
@@ -192,9 +193,12 @@ export async function runCodingAgentTurn(
   if (!options.teamLeadTurn && (kickoff || options.qaFix)) {
     // A plan no split can help (split-hint.ts) is built solo without asking.
     // So is a QA fix too small to split (sessions/qa-loop.ts).
-    const solo = options.qaFix
-      ? qaFixSoloReason(await qaRoundsFor(session, app.repoRoot))
-      : soloReason(await planStepFiles(session));
+    const solo =
+      session.kind === 'uiux'
+        ? 'a UI/UX pass is built by one agent, since the views share styles and components'
+        : options.qaFix
+          ? qaFixSoloReason(await qaRoundsFor(session, app.repoRoot))
+          : soloReason(await planStepFiles(session));
     if (solo) {
       qaFixSolo = Boolean(options.qaFix);
       await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Building it solo, no team: ${solo}` });
@@ -297,7 +301,7 @@ export async function runCodingAgentTurn(
 
   const promptTemplate = await fs.readFile(PROMPT_PATH, 'utf8');
   const override = await getPromptOverride(app.id, 'coding');
-  const basePrompt = promptForArchitecture(override ?? promptTemplate, app);
+  const basePrompt = promptForArchitecture(override ?? promptTemplate, app) + (await uiuxPromptFor(session));
   const isFirstTurn = !hasContext || freshReason !== null;
 
   let systemPrompt = basePrompt + helperNotes;
@@ -741,7 +745,7 @@ async function firstTurnSections(session: SessionRecord, repoRoot: string, stepI
     text += session.teamDecisionPending
       ? `\n\n# First: build it yourself, or split it across a team?\n\nYou are the lead engineer. Before writing ` +
         `any code, decide whether this plan can be built by a team of engineers in parallel (assign_team says when ` +
-        `that's worth it and how to split): steps that write disjoint files and don't need each other's code can ` +
+        `that's worth it and how to split): prefer a team. Steps that write disjoint files and don't need each other's code can ` +
         `run at the same time. The files each step's section names are below. Decide from them; read a step's ` +
         `section with read_doc({ path: "${SESSION_PLAN_DOC}", heading: "<step heading>" }) only where they don't ` +
         `tell you which files it writes, and don't read the whole plan for this.\n\n${stepFilesMap(await planStepFiles(session))}\n\n` +

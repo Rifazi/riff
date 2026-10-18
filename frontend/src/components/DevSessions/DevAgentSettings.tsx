@@ -17,7 +17,7 @@ import {
   type Role,
   type RoleModelConfig,
 } from '@/lib/dev-sessions/types';
-import { AGENT_PERSONAS, COORDINATOR_PERSONA } from '@/lib/dev-sessions/agents';
+import { AGENT_PERSONAS, COORDINATOR_PERSONA, UIUX_PERSONA } from '@/lib/dev-sessions/agents';
 import { Badge } from '@/components/ui/badge';
 import { AgentServerBanner } from './AgentServerBanner';
 import { ClassificationToolSettings } from './ClassificationToolSettings/ClassificationToolSettings';
@@ -33,6 +33,11 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 };
 
 const ROLES: { key: Role; label: string; hint: string }[] = [
+  {
+    key: 'uiux',
+    label: `${UIUX_PERSONA.name} — ${UIUX_PERSONA.title}`,
+    hint: 'UI/UX pass. Needs a model that can read images (Claude, OpenAI or Google) to take screenshots.',
+  },
   {
     key: 'requirements',
     label: `${AGENT_PERSONAS.requirements.name} — ${AGENT_PERSONAS.requirements.title}`,

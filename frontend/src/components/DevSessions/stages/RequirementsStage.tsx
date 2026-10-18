@@ -6,9 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/dev-sessions/api';
 import type { AttachmentInput, SessionRecord } from '@/lib/dev-sessions/types';
 import { useAgentTurnStream } from '@/lib/dev-sessions/useAgentTurnStream';
-import { AGENT_PERSONAS } from '@/lib/dev-sessions/agents';
+import { AGENT_PERSONAS, UIUX_PERSONA } from '@/lib/dev-sessions/agents';
 import { sessionHref, stageGroupFor } from '@/lib/dev-sessions/stage';
-import { meetingKickoffMessage, splitKickoffMessage, THEME_MIGRATION_KICKOFF, themeMigrationKickoffMessage } from '@/lib/dev-sessions/meeting';
+import { meetingKickoffMessage, splitKickoffMessage, uiuxKickoffMessage, THEME_MIGRATION_KICKOFF, themeMigrationKickoffMessage } from '@/lib/dev-sessions/meeting';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
 import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { ErrorText, Notice } from '../PageShell';
 import { StageLayout } from './StageLayout';
 
-const AGENT = AGENT_PERSONAS.requirements;
 
 // Module-level: persists across tab-switch remounts so auto-kickoff effects
 // don't fire twice when the user navigates away and back before the server
@@ -28,6 +27,7 @@ const AGENT = AGENT_PERSONAS.requirements;
 const kicked = new Set<string>();
 
 export function RequirementsStage({ session }: { session: SessionRecord }) {
+  const AGENT = session.kind === 'uiux' ? UIUX_PERSONA : AGENT_PERSONAS.requirements;
   const sessionId = session.id;
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -102,6 +102,18 @@ export function RequirementsStage({ session }: { session: SessionRecord }) {
     void handleSend(meetingKickoffMessage(session));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id, session.meetingKickoffPending, streaming]);
+
+  // A UI/UX pass opens by itself: the lead looks at the app and writes
+  // the requirements and the plan. Only into an empty conversation.
+  useEffect(() => {
+    if (session.kind !== 'uiux') return;
+    if (session.transcripts.requirements.length > 0 || streaming) return;
+    const key = `${sessionId}:uiuxKickoff`;
+    if (kicked.has(key)) return;
+    kicked.add(key);
+    void handleSend(uiuxKickoffMessage(session));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id, session.kind, session.transcripts.requirements.length, streaming]);
 
   // Created by accepting a split: open with the part's brief, which the
   // server attaches to the first message and then clears.

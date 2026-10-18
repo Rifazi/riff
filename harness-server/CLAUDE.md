@@ -1801,6 +1801,60 @@ below) — never inside the target repo.
    until `audit_architecture({ regenerate: true })` runs; "Owns data: none"
    and "Mirrors - none" are still accepted, just no longer written.
 
+61. User asked for a UI/UX agent: optional per app, triggered separately from
+   the normal coding flow, an expert in design and color theory that can tell
+   when a UI looks bad, creates the requirements and triggers the coding agent.
+   A session of its own, started from the Apps page.
+   - **Opt-in**: `AppConfig.uiuxPass` (switch on the app card). `POST
+     /api/apps/:id/uiux-session` (`title`, optional `focus`) refuses with 400
+     unless it's on. `createUiuxSession` (`sessions/uiux-session.ts`) makes a
+     session with `kind: 'uiux'` and `uiuxFocus`; the Requirements tab sends
+     the kickoff message itself.
+   - **The agent** (`agents/uiux-agent.ts`, role `uiux` in Settings → Dev Agents
+     with its own model; prompt `prompts/uiux-agent.md`, overridable per app)
+     takes the requirements stage's place: `runRequirementsAgentTurn` hands a
+     `kind: 'uiux'` session to it, so it uses the requirements chat, transcript
+     and documents. It reads the app (docs, code, `audit_theme`), looks at it
+     (`screenshot_app`), measures (`analyze_colors`), writes the requirements
+     (`write_requirements_doc`) and the plan (`write_plan_doc`), may
+     `propose_theme` (human applies, as always) and ends with `start_coding`.
+     The prompt holds the craft: color (lightness first, 60/30/10, harmony,
+     chroma, tinted neutrals, dark mode, measured contrast), type scale,
+     spacing/alignment/hierarchy/Gestalt, Nielsen heuristics, states, forms,
+     touch, motion, a11y, and a 12-point "looks bad" checklist run on every
+     screenshot.
+   - **Seeing**: `tool-defs/screenshot-tool.ts` starts the app's `dev`/`start`/
+     `serve` script (after `ensureDependencies`), reads the local URL from its
+     output, and captures with headless Chrome (`RIFF_CHROME`, else the usual
+     install paths): desktop 1440, tablet 820, phone 390, dark via
+     `--force-dark-mode`, up to 8 a turn. On the Claude engine the image goes
+     back as an MCP image block; on the AI-SDK engine (OpenAI, Google,
+     Anthropic) `toModelOutput` sends it for the current turn, and
+     `historyWithoutImages` strips the pixels from the stored history so later
+     turns don't re-send them. Not on Ollama (local models can't be assumed to
+     read images): there the agent is told it can't see and marks visual
+     judgments "from code, not seen". PNGs are saved under
+     `state/screenshots/<sessionId>/` and `withoutImages` keeps pixels out of
+     transcripts. The dev server is stopped when the turn ends.
+   - **Measuring** (`themes/color-science.ts`, pure): WCAG contrast, OKLCH,
+     harmony naming (monochromatic, analogous, complementary, split,
+     triadic...) and palette faults (too many hue families, chroma above 0.26,
+     several mid-lightness strong colors, glare, page = surface). With no
+     arguments `analyze_colors` checks the app's `theme.json` in both modes;
+     `pairs` and `palette` check colors found in code.
+   - **Hand-off**: `start_coding` (`tool-defs/start-coding-tool.ts`) approves the
+     requirements and the plan through `approveRequirements`/`approvePlan`, the
+     buttons' own code, after syncing the files the turn wrote onto the session.
+     The session page follows it to the Coding tab (as for Bridget), where the
+     coding agent starts on its own. QA, send-back and delivery are the
+     ordinary ones. **The agent approves its own documents**, by the user's choice.
+   - **Coding**: `agents/uiux-prompt.ts` adds `prompts/uiux-coding.md` to the
+     coding prompt for `kind: 'uiux'` sessions (presentation only, behaviour
+     unchanged, never edit `theme/`), and the kickoff never asks about a team.
+   Tests: `uiux-session.test.ts` (color science, every preset's contrast,
+   transcript image stripping). Headless Chrome capture checked live on a local
+   page. Not run with a real agent yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

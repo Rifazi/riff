@@ -1,4 +1,5 @@
 import { Spinner } from "@/components/ui/spinner";
+import { usePhone } from "@/hooks/usePhone";
 
 interface StatusOverlaysProps {
   // Status flags
@@ -21,17 +22,18 @@ function StatusOverlay({
   message,
   sidebarCollapsed,
 }: StatusOverlayProps) {
+  const phone = usePhone();
   if (!show) return null;
 
   return (
     <div className="fixed bottom-4 left-0 right-0 z-10">
       <div
-        className="flex justify-center pl-8 transition-[margin] duration-300"
+        className="flex justify-center pl-8 transition-[margin] duration-300 max-md:pl-0"
         style={{
-          marginLeft: sidebarCollapsed ? "4rem" : "16rem",
+          marginLeft: phone ? 0 : sidebarCollapsed ? "4rem" : "16rem",
         }}
       >
-        <div className="w-2/3 max-w-[750px] flex justify-center">
+        <div className="w-2/3 max-w-[750px] flex justify-center max-md:w-full max-md:px-4">
           <div className="bg-card rounded-lg shadow-lg px-4 py-2 flex items-center space-x-2">
             <Spinner size="sm" className="text-foreground" />
             <span className="text-sm text-muted-foreground">{message}</span>
