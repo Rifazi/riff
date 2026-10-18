@@ -86,6 +86,36 @@ describe('auditWayfinding', () => {
     expect(audit.offMap).toEqual(['src/lib']);
   });
 
+  describe('one copy of each helper', () => {
+    const parse = (name: string) =>
+      `export function parseBody${name}(raw: string | undefined): Record<string, unknown> {\n  if (!raw) {\n    return {};\n  }\n  try {\n    return JSON.parse(raw);\n  } catch {\n    return {};\n  }\n}\n`;
+
+    test('flags a function written in two domains, whatever its formatting', () => {
+      write('src/pricing/promotions/parse.ts', parse(''));
+      write('src/invoice/parse.ts', parse('').replace(/\n {2}/g, '\n    // same job\n  ').replace('{}', '{ }'));
+      const found = messages().filter((m) => m.includes('is also written in'));
+      expect(found.length).toBe(2);
+      expect(found.some((m) => m.startsWith('src/invoice/parse.ts') && m.includes('src/pricing/promotions/parse.ts'))).toBe(true);
+    });
+
+    test('accepts a copy declared under Mirrors in either domain', () => {
+      write('src/pricing/promotions/parse.ts', parse(''));
+      write('src/invoice/parse.ts', parse(''));
+      expect(messages().filter((m) => m.includes('is also written in')).length).toBe(2);
+      write('src/invoice/DOMAIN.md', domainDoc('invoice', { extra: '\n## Mirrors\n- pricing/promotions: separate deploy\n' }));
+      expect(messages().filter((m) => m.includes('is also written in'))).toEqual([]);
+    });
+
+    test('ignores tiny functions, copies in one domain and tests', () => {
+      write('src/invoice/tiny.ts', 'export const id = (x: number) => x\n');
+      write('src/pricing/tiny.ts', 'export const id = (x: number) => x\n');
+      write('src/pricing/a.ts', parse(''));
+      write('src/pricing/b.ts', parse(''));
+      write('src/invoice/parse.test.ts', parse(''));
+      expect(messages().filter((m) => m.includes('is also written in'))).toEqual([]);
+    });
+  });
+
   test("flags an import of another domain's private file", () => {
     write('src/invoice/service.ts', "import { table } from '../pricing/model'\nexport const render = () => table\n");
     expect(messages().some((m) => m.includes('reaches a private file of pricing'))).toBe(true);

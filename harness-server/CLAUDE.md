@@ -1877,6 +1877,31 @@ below) — never inside the target repo.
    `qa-review-areas`; the gate is only exercised by the folder run, not
    against a real repo yet.
 
+63. User saw movie-maker's backend with `parseJsonBody` and `jsonResponse`
+   copied into every domain and asked Wayfinding to minimise repeated code.
+   Cause: a child domain is visible only to its parent and "never depends on
+   its parent", so agents copied each helper into every domain and logged a
+   Mirror; nothing checked for copies.
+   - **Audit** (`architecture/duplicates.ts`, wired into `auditWayfinding`):
+     top-level functions and arrow consts (≥ 30 tokens, compared by token
+     stream so formatting and comments don't hide a copy) that appear in more
+     than one domain are a `structure` problem on every copy, unless either
+     domain's Mirrors section names the other. Tests and copies inside one
+     domain are ignored. On movie-maker: `jsonResponse` ×6, `parseJsonBody` ×6,
+     `callerOwnsProject` ×3, `isValidTypes` ×2.
+   - **Rules** (`wayfinding-docs.ts`: guide, shared text, plan/coding/QA
+     briefings): look for a helper in the Files signatures of every domain
+     before writing it; when a second place needs it, move it into a domain
+     both import in its own step (sibling child under one parent, else a
+     top-level domain on MAP.md) and delete the copies; copy only when copies
+     can't share code, with the reason under Mirrors. QA flags a copied
+     helper in every touched domain.
+   Existing apps get the new guide text when `docs/wayfinding.md` refreshes.
+   movie-maker's copies are untouched: a session that touches those domains
+   sees the problems and consolidates them. Tests: `wayfinding-audit.test.ts`
+   ("one copy of each helper"); the folder passes through the node:test shim
+   except the same 19 cases as before.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

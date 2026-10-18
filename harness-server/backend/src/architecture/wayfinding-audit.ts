@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DOMAIN_DOC, MAP_PATH, interfaceStem, type WayfindingConfig } from './architecture.js';
+import { findDuplicateFunctions } from './duplicates.js';
 import { publicSignatures } from './signatures.js';
 
 // The mechanical guardrails and doc checks of a Wayfinding codebase (paper
@@ -575,6 +576,31 @@ export function auditWayfinding(
       if (!isTest(file)) {
         if (!edges.has(from)) edges.set(from, new Set());
         edges.get(from)!.add(to);
+      }
+    }
+  }
+
+  // ---- one copy of each helper
+  {
+    const sources = codeFiles
+      .filter((f) => !isTest(f) && ownerOf(f))
+      .map((f) => ({ file: rel(f), domain: ownerOf(f)!.id, source: readText(f) }));
+    const byId = new Map(domains.map((d) => [d.id, d]));
+    const declared = (a: string, b: string) =>
+      [[a, b], [b, a]].some(([x, y]) => sectionBody(byId.get(x)!.doc, 'Mirrors').includes(y));
+    for (const copies of findDuplicateFunctions(sources)) {
+      for (const copy of copies) {
+        const others = copies.filter((o) => o.domain !== copy.domain && !declared(copy.domain, o.domain));
+        if (!others.length) continue;
+        const where = [...new Set(others.map((o) => o.file))].slice(0, 4).join(', ');
+        fail(
+          'structure',
+          copy.file,
+          byId.get(copy.domain)!,
+          `${copy.file}: \`${copy.name}\` is also written in ${where}${others.length > 4 ? ', …' : ''}. Keep one copy in a domain every user imports ` +
+            `(a new top-level domain when the users sit in different top-level domains) and delete the others; copy only when the ` +
+            `copies can't share code, and say why under Mirrors in both ${DOMAIN_DOC} files`
+        );
       }
     }
   }
