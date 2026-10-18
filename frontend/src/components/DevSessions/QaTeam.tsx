@@ -9,8 +9,7 @@ import { CodingPlanChecklist, type ChecklistItem } from './CodingPlanChecklist';
 import { EarlierRounds, PathChips, TeamPanel, pastTeamStatus, type TeamStatus } from './AgentTeam';
 
 // Tess's QA team on the shared team board (AgentTeam.tsx): reviewers each
-// check their own acceptance criteria, read only, while lint and the unit
-// tests run alongside them; Tess writes the one report from their findings.
+// check their own acceptance criteria, read only; Tess writes the one report from their findings.
 
 const CHECK_META: Record<QaTeamCheck['status'], { variant: NonNullable<BadgeProps['variant']>; label: string }> = {
   pending: { variant: 'secondary', label: 'waiting' },
@@ -20,6 +19,7 @@ const CHECK_META: Record<QaTeamCheck['status'], { variant: NonNullable<BadgeProp
 };
 
 function ChecksRow({ checks }: { checks: QaTeamCheck[] }) {
+  if (checks.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
       <span>Checks:</span>

@@ -13,6 +13,7 @@ import { loadSplitRoadmap } from './split-roadmap-load.js';
 import { isShipped, keepOnBranch, recordSharedBranchShipped } from './shared-branch.js';
 import type { SessionRecord } from './session.js';
 import { qaReportIsCurrent } from './qa-loop.js';
+import { runPreQaGate } from '../agents/pre-qa-gate.js';
 
 // The approval gates, shared by the stage tabs' buttons (routes/*.ts) and
 // Bridget, the coordinator, who approves on the human's behalf when nothing
@@ -105,8 +106,28 @@ export async function approvePlan(session: SessionRecord, options: { ignoreDepen
   });
 }
 
+/**
+ * Every way into QA ends here, so QA never runs lint or the unit tests: they
+ * pass on this branch first, or it stays in coding. A refusal carries the
+ * failing output as `fixMessage`, which the caller can hand to the coding
+ * lead (the coordinator does, up to its send-back limit).
+ */
 export async function approveCoding(session: SessionRecord): Promise<SessionRecord> {
   if (!session.branch) throw new StageActionError('no commits exist on a branch yet');
+  let gate;
+  try {
+    gate = await runPreQaGate(session, await getApp(session.appId));
+  } catch (err) {
+    throw new StageActionError(`Lint and the unit tests couldn't be run before QA: ${err instanceof Error ? err.message : String(err)}`, 409);
+  }
+  if (gate.status === 'skipped') throw new StageActionError(`Lint and the unit tests can't be run before QA: ${gate.summary}.`, 409);
+  if (gate.status === 'fail') {
+    throw new StageActionError(`Can't start QA yet: ${gate.summary}. The coding lead has to fix this first.`, 409, {
+      code: 'checks_failed',
+      fixMessage: gate.message,
+      details: gate.details,
+    });
+  }
   // The coding agent's notes go over with the branch (qa-agent.ts).
   return updateSession(session.id, {
     stage: 'qa-in-progress',

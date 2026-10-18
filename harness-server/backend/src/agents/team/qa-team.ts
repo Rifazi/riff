@@ -1,14 +1,10 @@
 import { getApp } from '../../apps/apps-store.js';
-import { baseBranchFor } from '../../apps/apps.js';
-import { diffBaseFor } from '../../sessions/shared-branch.js';
 import { appendTeamTranscriptEntry, getSession, listSessions, mutateSession } from '../../sessions/session-store.js';
-import type { QaCheckCommand, QaReviewerStatus, QaTeamCheck } from '../../sessions/session.js';
-import { createQaExecutors, sessionCheckCache } from '../tool-defs/qa-tools.js';
+import type { QaReviewerStatus } from '../../sessions/session.js';
 import type { AgentEvent } from '../sdk-client.js';
 import type { TeamEvent } from './coding-team.js';
 import { runQaReviewerAgent } from './qa-reviewer-agent.js';
 import { onMemberRestart, ROUND_FINISHING, untilAborted } from './team-state.js';
-import { checkSucceeded } from '../pre-qa-gate-core.js';
 
 // Which sessions have a QA team run in flight in this process (see coding-team.ts).
 const running = new Set<string>();
@@ -19,11 +15,11 @@ export function isQaTeamRunning(sessionId: string): boolean {
 
 /**
  * Runs the review the QA lead split (assign_qa_team): every reviewer at
- * once, read-only, in the session's own checkout, with lint and the unit
- * tests running alongside them. Reviewers that didn't submit findings —
- * failed, or cut off by a restart — and checks that never finished are
- * picked up again by calling this again. The lead's next turn gets the
- * results (qa-agent.ts).
+ * once, read-only, in the session's own checkout. Lint and the unit tests
+ * aren't run here: the branch only reaches QA once they pass. Reviewers that
+ * didn't submit findings — failed or cut off by a restart — are picked up
+ * again by calling this again. The lead's next turn gets the results
+ * (qa-agent.ts).
  */
 export async function runQaTeam(sessionId: string, emit: (event: TeamEvent) => void): Promise<void> {
   if (running.has(sessionId)) throw new Error('The QA team is already running for this session.');
@@ -48,7 +44,6 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
     team.status = 'running';
     team.finishedAt = null;
     team.relayed = false;
-    for (const c of team.checks) if (c.status !== 'pass' && c.status !== 'fail') c.status = 'pending';
     // Everyone who hasn't submitted runs again, from a fresh conversation:
     // a reviewer's job is one read-through, not worth resuming.
     for (const m of team.members) {
@@ -174,51 +169,11 @@ async function run(sessionId: string, emit: (event: TeamEvent) => void): Promise
   };
   onMemberRestart('qa', sessionId, restartMember);
 
-  // The checks share the checkout's junit.xml, so they run one after the
-  // other — alongside the reviewers, which only read.
-  const { runCheckedCommandExecute } = createQaExecutors({
-    repoRoot: app.repoRoot,
-    baseBranch: diffBaseFor(session, app),
-    checkCommands: app.checkCommands,
-    // The runner helper may shorten a failing log; it's logged, but has no
-    // chat of its own to show up in.
-    helperContext: { sessionId, stage: 'qa', record: async () => {} },
-    checkCache: sessionCheckCache(session.id),
-    checkRunBy: 'QA',
-    reuseChecks: true,
-  });
-  const setCheck = async (command: QaCheckCommand, status: QaTeamCheck['status'], output: string | null = null) => {
-    await mutateSession(sessionId, (s) => {
-      const c = s.qaTeam?.checks.find((x) => x.command === command);
-      if (c) Object.assign(c, { status, output });
-    });
-    emit({ type: 'team_check', command, status });
-  };
-  const runChecks = async () => {
-    for (const check of team.checks) {
-      if (check.status === 'pass' || check.status === 'fail') continue;
-      await setCheck(check.command, 'running');
-      try {
-        const output = await runCheckedCommandExecute({ command: check.command });
-        await setCheck(check.command, checkSucceeded(output) ? 'pass' : 'fail', output);
-      } catch (err) {
-        await setCheck(check.command, 'fail', err instanceof Error ? err.message : String(err));
-      }
-    }
-  };
-
   for (const m of team.members) launch(m.id);
-  let checksDone = false;
-  const checks = runChecks().finally(() => {
-    checksDone = true;
-  });
   // A restart can add a run while others are going, so this waits until
-  // nothing is in flight rather than on a fixed list. Only unsettled work
-  // goes in the race: a finished `checks` would resolve every race at once
-  // and spin here without yielding until the heap ran out.
+  // nothing is in flight rather than on a fixed list.
   for (;;) {
     const pending = [...inFlight.values()];
-    if (!checksDone) pending.push(checks);
     if (pending.length === 0) break;
     await Promise.race(pending);
   }
@@ -241,7 +196,6 @@ export async function recoverInterruptedQaTeams(): Promise<void> {
     await mutateSession(session.id, (s) => {
       if (!s.qaTeam) return;
       s.qaTeam.status = 'interrupted';
-      for (const c of s.qaTeam.checks) if (c.status === 'running') c.status = 'pending';
       for (const m of s.qaTeam.members) {
         if (m.status === 'running' || m.status === 'waiting') {
           m.status = 'waiting';

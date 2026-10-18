@@ -56,16 +56,13 @@ describe('formatQaTeamFindings', () => {
     status: 'needs_attention',
     round: 2,
     members,
-    checks: [
-      { command: 'lint', status: 'pass', output: 'lint succeeded.' },
-      { command: 'test', status: 'fail', output: 'test:ci failed.\n\n1 tests, 1 failures' },
-    ],
+    checks: [],
     startedAt: '',
     finishedAt: '',
     relayed: false,
   });
 
-  test('lists checks, verdicts and findings, with failing output only', () => {
+  test('lists verdicts and findings, and no check results', () => {
     const text = formatQaTeamFindings(
       team([
         member({
@@ -79,9 +76,7 @@ describe('formatQaTeamFindings', () => {
       ]),
     );
     expect(text).toContain('round 2');
-    expect(text).toContain('- lint: pass');
-    expect(text).not.toContain('lint succeeded.');
-    expect(text).toContain('1 tests, 1 failures');
+    expect(text).not.toContain('Checks');
     expect(text).toContain('[not-met] Totals round to 2dp');
     expect(text).toContain('use toFixed(2)');
     expect(text).toContain('write_qa_report');

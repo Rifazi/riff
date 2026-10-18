@@ -3,8 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   blockingAuditProblems,
   checkSucceeded,
+  gateFingerprint,
   gateMessage,
+  gateStopReason,
+  gateStuck,
   gateSummary,
+  problemKey,
 } from '../../../harness-server/backend/src/agents/pre-qa-gate-core';
 import { closestTestName, type BranchScope, type WayfindingAudit } from '../../../harness-server/backend/src/architecture/wayfinding-audit';
 
@@ -103,5 +107,42 @@ describe('rename', () => {
 
   test('null when nothing is close', () => {
     expect(closestTestName(body, 'caps discount at $50')).toBeNull();
+  });
+});
+
+describe('baseline problems', () => {
+  const problems = [
+    { kind: 'structure' as const, file: 'src/infra/stack.ts', domain: 'infra', message: 'imports src/auth/backend.ts: reaches a private file of auth' },
+    { kind: 'docs' as const, file: 'src/infra/DOMAIN.md', domain: 'infra', message: 'Files section is stale' },
+  ];
+
+  test('a problem the base branch already has never blocks', () => {
+    const baseline = new Set([problemKey(problems[0])]);
+    expect(blockingAuditProblems(audit(problems), null, baseline)).toEqual(['[docs] src/infra/DOMAIN.md: Files section is stale']);
+  });
+
+  test('wrapping differences do not make a problem new', () => {
+    expect(problemKey({ ...problems[0], message: 'imports src/auth/backend.ts:\n  reaches a private file of auth' })).toBe(
+      problemKey({ ...problems[0], message: 'imports src/auth/backend.ts: reaches a private file of auth' })
+    );
+  });
+});
+
+describe('fix passes that change nothing', () => {
+  const failing = (label: string) => ({ label, passed: false, output: 'x' });
+
+  test('the same failures twice is stuck, fewer or different is not', () => {
+    const first = gateFingerprint([failing('lint')], ['[docs] a', '[docs] b']);
+    expect(gateStuck(null, first)).toBe(false);
+    expect(gateStuck(first, gateFingerprint([failing('lint')], ['[docs] b', '[docs] a']))).toBe(true);
+    expect(gateStuck(first, gateFingerprint([failing('lint')], ['[docs] a']))).toBe(false);
+    expect(gateStuck(first, gateFingerprint([], ['[docs] a', '[docs] c']))).toBe(false);
+  });
+
+  test('the stop reason lists the problems', () => {
+    const reason = gateStopReason('audit (2) failed', ['[docs] a', '[docs] b'], 'stuck', 1);
+    expect(reason).toContain('exactly the same way');
+    expect(reason).toContain('- [docs] b');
+    expect(gateStopReason('lint failed', [], 'limit', 2)).toContain('after 2 fix passes');
   });
 });

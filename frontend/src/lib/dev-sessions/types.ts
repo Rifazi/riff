@@ -399,7 +399,7 @@ export interface QaTeamState {
   status: CodingTeamState['status'];
   round: number;
   members: QaTeamMember[];
-  /** Lint and the unit tests, run by the team runner alongside the reviewers. */
+  /** Lint and the unit tests. Empty now: they pass before QA starts; kept for rounds recorded earlier. */
   checks: QaTeamCheck[];
   startedAt: string;
   finishedAt: string | null;

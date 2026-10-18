@@ -22,11 +22,11 @@ export const assignQaTeamDescription =
   'yourself — don\'t call this.\n\n' +
   'For each reviewer: the acceptance criteria it verifies (worded as in the requirements doc; every criterion goes ' +
   'to exactly one reviewer, and "Docs to update" counts as a criterion), the diff paths to focus on, and a brief. ' +
-  'Reviewers are read-only and can\'t run checks or write the report: lint and the unit tests run alongside them, ' +
-  'so don\'t run those yourself first.\n\n' +
+  'Reviewers are read-only and can\'t run checks or write the report. Lint and the unit tests already passed on ' +
+  'this branch before QA started, so nobody runs them.\n\n' +
   'Look before you split: get_diff (no path) and the requirements doc tell you which criteria touch which files. ' +
   'Once it succeeds, end your turn with a few lines to the human on who checks what. The team starts when your ' +
-  'turn ends; when it finishes you get every reviewer\'s findings and the check results, re-check anything that ' +
+  'turn ends; when it finishes you get every reviewer\'s findings, re-check anything that ' +
   'looks doubtful, and write the one QA report.';
 
 /**
@@ -58,10 +58,7 @@ export function createAssignQaTeamExecute(deps: { sessionId: string }) {
         startedAt: new Date().toISOString(),
         finishedAt: null,
         relayed: false,
-        checks: [
-          { command: 'lint', status: 'pending', output: null },
-          { command: 'test', status: 'pending', output: null },
-        ],
+        checks: [],
         members: valid.map(
           (area): QaTeamMember => ({
             ...area,
@@ -80,7 +77,7 @@ export function createAssignQaTeamExecute(deps: { sessionId: string }) {
 
     return (
       `QA team assigned (round ${round}): ${valid.map((r) => `${r.id} → ${r.criteria.length} criteria`).join('; ')}. ` +
-      'Lint and the unit tests run alongside them. End your turn now with a short note to the human on who checks ' +
+      'End your turn now with a short note to the human on who checks ' +
       'what — the team starts when your turn ends.'
     );
   };

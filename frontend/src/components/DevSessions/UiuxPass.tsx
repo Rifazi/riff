@@ -7,7 +7,6 @@ import { Paintbrush } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
@@ -76,28 +75,30 @@ function StartDialog({ app, open, onClose }: { app: AppConfig; open: boolean; on
   );
 }
 
-/** The app card's UI/UX pass row: the opt-in switch, and once on, the button that starts a pass. */
+/** The app card's UI/UX pass button: turns the pass on for the app the first time, then opens the dialog that starts one. */
 export function UiuxPassRow({ app }: { app: AppConfig }) {
   const queryClient = useQueryClient();
   const [starting, setStarting] = useState(false);
-  const toggle = useMutation({
-    mutationFn: (uiuxPass: boolean) => api.updateApp(app.id, { uiuxPass }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps'] }),
+  const enable = useMutation({
+    mutationFn: () => api.updateApp(app.id, { uiuxPass: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['apps'] });
+      setStarting(true);
+    },
   });
 
   return (
     <div className="flex flex-wrap items-center gap-3 pl-[152px]">
-      <label className="flex items-center gap-2 text-sm text-foreground">
-        <Switch checked={app.uiuxPass} disabled={toggle.isPending} onCheckedChange={(on) => toggle.mutate(on)} />
-        UI/UX pass
-      </label>
-      {app.uiuxPass && (
-        <Button size="sm" variant="outline" onClick={() => setStarting(true)}>
-          <Paintbrush />
-          Start a pass
-        </Button>
-      )}
-      <ErrorText>{toggle.error ? (toggle.error as Error).message : null}</ErrorText>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={enable.isPending}
+        onClick={() => (app.uiuxPass ? setStarting(true) : enable.mutate())}
+      >
+        <Paintbrush />
+        Start a UI/UX pass
+      </Button>
+      <ErrorText>{enable.error ? (enable.error as Error).message : null}</ErrorText>
       {starting && <StartDialog app={app} open onClose={() => setStarting(false)} />}
     </div>
   );

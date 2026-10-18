@@ -8,8 +8,8 @@ import { config } from '../../config.js';
 export const writeQaReportSchema = z.object({
   markdownBody: z.string(),
   result: z.enum(['pass', 'fail', 'pass-with-notes']),
-  lint: z.enum(['pass', 'fail']),
-  unitTests: z.enum(['pass', 'fail']),
+  lint: z.enum(['pass', 'fail']).optional().describe('Omit: lint already passed before QA started.'),
+  unitTests: z.enum(['pass', 'fail']).optional().describe('Omit: the unit tests already passed before QA started.'),
   integrationTests: z.enum(['pass', 'fail', 'skipped', 'not-applicable']),
   blockingFindings: z
     .array(z.string())
@@ -46,8 +46,8 @@ export function createWriteQaReportExecute(sessionInfo: {
   return async ({
     markdownBody,
     result,
-    lint,
-    unitTests,
+    lint = 'pass',
+    unitTests = 'pass',
     integrationTests,
     blockingFindings,
     actionableNotes = [],

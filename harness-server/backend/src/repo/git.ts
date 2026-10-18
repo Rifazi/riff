@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -25,6 +25,22 @@ function client(repoRoot: string): SimpleGit {
 export async function currentBranch(repoRoot: string): Promise<string> {
   const status = await client(repoRoot).status();
   return status.current ?? '';
+}
+
+export async function resolveCommit(repoRoot: string, ref: string): Promise<string> {
+  return (await client(repoRoot).raw(['rev-parse', '--verify', `${ref}^{commit}`])).trim();
+}
+
+/** Checks `ref` out detached into a scratch folder for `fn`, then removes it. */
+export async function withDetachedWorktree<T>(repoRoot: string, ref: string, fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'riff-base-'));
+  const git = client(repoRoot);
+  await git.raw(['worktree', 'add', '--detach', dir, ref]);
+  try {
+    return await fn(dir);
+  } finally {
+    await git.raw(['worktree', 'remove', '--force', dir]).catch(() => rmSync(dir, { recursive: true, force: true }));
+  }
 }
 
 export async function assertCleanBaseForNewBranch(repoRoot: string, baseBranch = DEFAULT_BASE_BRANCH): Promise<void> {

@@ -155,7 +155,7 @@ export function parseRules(doc: string): ParsedRule[] {
     .slice(1)
     .map((rule) => {
       const anchor = rule.match(/Enforced by:\s*`?([^\s`]+)`?\s*(?:›|>|»)\s*["“]([^"”]+)["”]/);
-      return { text: rule.split('\n')[0].trim(), anchor: anchor ? { file: anchor[1], test: anchor[2] } : null };
+      return { text: rule.split('\n')[0].trim(), anchor: anchor ? { file: anchor[1], test: anchor[2].replace(/\s+/g, ' ').trim() } : null };
     })
     .filter((r) => r.text && !isPlaceholder(r.text));
 }

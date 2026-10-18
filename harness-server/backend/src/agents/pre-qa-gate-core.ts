@@ -30,9 +30,18 @@ export function checkSucceeded(output: string): boolean {
  * in untouched domains are pre-existing and don't hold the branch back (QA
  * doesn't fail it for them either).
  */
-export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope | null): string[] {
+export function problemKey(p: { kind: string; file: string; message: string }): string {
+  return `${p.kind}|${p.file}|${p.message.replace(/\s+/g, ' ').trim()}`;
+}
+
+/**
+ * `baseline` = the keys of problems the base branch already has: they aren't
+ * this branch's doing, so they never hold it back.
+ */
+export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope | null, baseline?: ReadonlySet<string>): string[] {
   const touched = scope ? new Set(scope.byDomain.map((d) => d.domain)) : null;
   const lines = audit.problems
+    .filter((p) => !baseline?.has(problemKey(p)))
     .filter((p) => !touched || p.domain === null || touched.has(p.domain))
     .map((p) => `[${p.kind}] ${p.message.startsWith(p.file) ? p.message : `${p.file}: ${p.message}`}`);
   for (const o of scope?.offMap ?? []) {
@@ -46,14 +55,11 @@ export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope
 
 const MAX_AUDIT_LINES = 25;
 
-/** The message the lead gets, or null when every check passed. */
-export function gateMessage(checks: GateCheck[], auditProblems: string[]): string | null {
+/** The failing output, one section per failed check and one for the audit problems; null when every check passed. */
+export function gateDetails(checks: GateCheck[], auditProblems: string[]): string | null {
   const failed = checks.filter((c) => !c.passed);
   if (!failed.length && !auditProblems.length) return null;
-  const parts = [
-    'Before QA, I ran the checks QA runs on this branch, and they fail. Fix these on the branch and commit, then stop: ' +
-      "QA starts once they pass. Don't assign a team for this, and don't leave a note asking QA to run or fix them.",
-  ];
+  const parts: string[] = [];
   for (const c of failed) parts.push(`## ${c.label}\n\n${c.output.trim()}`);
   if (auditProblems.length) {
     const shown = auditProblems.slice(0, MAX_AUDIT_LINES).map((l) => `- ${l}`);
@@ -66,9 +72,42 @@ export function gateMessage(checks: GateCheck[], auditProblems: string[]): strin
   return parts.join('\n\n');
 }
 
+/** The message the lead gets, or null when every check passed. */
+export function gateMessage(checks: GateCheck[], auditProblems: string[]): string | null {
+  const details = gateDetails(checks, auditProblems);
+  if (!details) return null;
+  return (
+    'Before QA, I ran lint and the unit tests on this branch, and something fails. Fix these on the branch and commit, then stop: ' +
+    "QA starts once they pass, and QA doesn't run them itself. Don't assign a team for this, and don't leave a note asking QA to run or fix them.\n\n" +
+    details
+  );
+}
+
 /** One line for the coordinator's decision, e.g. "lint, audit (3) failed". */
 export function gateSummary(checks: GateCheck[], auditProblems: string[]): string {
   const failed = checks.filter((c) => !c.passed).map((c) => c.label);
   if (auditProblems.length) failed.push(`audit (${auditProblems.length})`);
   return failed.length ? `${failed.join(', ')} failed` : 'lint, tests and audit pass';
+}
+
+/** What is failing, one entry per failed check and audit problem, to tell whether a fix pass changed anything. */
+export function gateFingerprint(checks: GateCheck[], auditProblems: string[]): string[] {
+  return [...checks.filter((c) => !c.passed).map((c) => `check:${c.label}`), ...auditProblems].sort();
+}
+
+/** A fix pass that leaves exactly the same things failing made no progress; asking again would repeat it. */
+export function gateStuck(previous: readonly string[] | null | undefined, now: readonly string[]): boolean {
+  if (!previous?.length || previous.length !== now.length) return false;
+  const before = new Set(previous);
+  return now.every((item) => before.has(item));
+}
+
+export function gateStopReason(summary: string, auditProblems: string[], why: 'stuck' | 'limit', passes: number): string {
+  const lead =
+    why === 'stuck'
+      ? `The coding lead's last fix pass left the pre-QA checks failing in exactly the same way (${summary}).`
+      : `Pre-QA checks still fail after ${passes} fix passes (${summary}).`;
+  const shown = auditProblems.slice(0, 6).map((l) => `- ${l.length > 220 ? `${l.slice(0, 217)}…` : l}`);
+  if (auditProblems.length > shown.length) shown.push(`- … ${auditProblems.length - shown.length} more`);
+  return `${lead}${shown.length ? `\n\nArchitecture audit:\n${shown.join('\n')}` : ''}\n\nOver to you.`;
 }

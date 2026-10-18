@@ -438,6 +438,8 @@ export interface SessionRecord {
   // gate (lint, unit tests, Wayfinding audit) failed, since it was last
   // turned on. It stops for a human at MAX_GATE_SEND_BACKS.
   coordinatorGateSendBacks: number;
+  // What was failing when the gate last sent coding back: a fix pass that leaves it unchanged stops the run.
+  coordinatorGateLast?: string[] | null;
 
   // Set once, permanently, by coding/send-back-to-requirements — this
   // session's requirements/plan were revised after coding had already

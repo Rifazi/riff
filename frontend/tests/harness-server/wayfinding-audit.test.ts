@@ -345,6 +345,12 @@ describe('parsing', () => {
     ]);
   });
 
+  test('a rule anchor wrapped over two lines is one test name', () => {
+    expect(parseRules('## Rules\n- A rule.\n  Enforced by: a.test.ts › "returns 404 when the script does not belong to\n  the caller"\n')).toEqual([
+      { text: 'A rule.', anchor: { file: 'a.test.ts', test: 'returns 404 when the script does not belong to the caller' } },
+    ]);
+  });
+
   test('map rows skip the header, separator and placeholders', () => {
     expect(parseMapRows('| Domain | Owns |\n| --- | --- |\n| `pricing` | prices |\n<!-- | <domain> | x | -->\n')).toEqual([
       { name: 'pricing', owns: 'prices' },

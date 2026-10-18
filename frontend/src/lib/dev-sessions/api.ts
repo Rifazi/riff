@@ -283,8 +283,15 @@ export const api = {
       json<{ diff: string | null; stat: string | null; commits: { hash: string; message: string; date: string }[] }>(r),
     ),
 
-  approveCoding: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/coding/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  /** Refused while lint or the tests fail; the error then carries `fixMessage`, the failing output for the coding lead. */
+  approveCoding: async (id: string) => {
+    const res = await fetch(apiUrl(`/api/sessions/${id}/coding/approve`), { method: 'POST' });
+    if (res.status === 409) {
+      const body = await res.clone().json().catch(() => null);
+      if (body?.code === 'checks_failed') throw Object.assign(new Error(body.error), { fixMessage: String(body.fixMessage ?? '') });
+    }
+    return json<SessionRecord>(res);
+  },
 
   autoHandoffCoding: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/auto-handoff`), { method: 'POST' }).then((r) =>

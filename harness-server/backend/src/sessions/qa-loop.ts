@@ -261,8 +261,8 @@ export function rereviewBrief(rounds: QaRoundRecord[], fixFiles: string[] | null
     '1. get_diff shows only what the fix changed (scope "fix", the default); the rest of the branch was reviewed last pass.\n' +
     '2. Check every blocking finding of the last pass is fixed in the code, with a test that would catch it coming back.\n' +
     '3. Read the fix itself in full, every changed line above: a fix is where new bugs come from.\n' +
-    '4. Run lint and the unit tests. A check that already passed on this exact working tree is answered from that run.\n' +
-    '5. A blocking finding must break an acceptance criterion or a check; name which. Anything else is a note, ' +
+    '4. Lint and the unit tests passed before this pass started; don\'t run them.\n' +
+    '5. A blocking finding must break an acceptance criterion; name which. Anything else is a note, ' +
     "including a note from an earlier pass that wasn't acted on, unless it breaks a criterion.\n" +
     "6. Last pass's notes: check each was acted on or explained in the coding agent's notes to QA. Repeat the ones " +
     'that were neither, as notes.' +

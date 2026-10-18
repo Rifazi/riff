@@ -1855,6 +1855,28 @@ below) — never inside the target repo.
    transcript image stripping). Headless Chrome capture checked live on a local
    page. Not run with a real agent yet.
 
+62. User said QA was repeating the lint and tests the coder had already run.
+   QA no longer runs them at all; the coder does, and the branch can't reach
+   QA while they fail. `approveCoding` (`sessions/stage-actions.ts`) runs
+   the pre-QA gate (step 47) itself, so the button, Bridget and every other
+   caller go through it. Lint, the unit tests and a Wayfinding branch's audit
+   must pass; a gate that fails, can't run (checkout on another branch) or
+   throws refuses with 409. A failing gate's refusal carries `code:
+   'checks_failed'` and `fixMessage` (the failing output, for the lead);
+   `CodingStage` sends that to the coding lead on its own when the human
+   clicks "Approve diff and start QA", and Bridget does the same up to
+   `MAX_GATE_SEND_BACKS`. Checks the coder just ran on identical content
+   come from `sessionCheckCache`, so the gate costs nothing then.
+   QA lead: no `run_checked_command` (an AI-SDK stub keeps old histories and
+   prompt overrides valid), prompt step 5 says not to run them, and
+   `write_qa_report`'s `lint`/`unitTests` are optional (default `pass`). QA
+   team: `runQaTeam` no longer runs checks, new rounds have `checks: []`, the
+   lead's findings text has no check section and `QaTeam` hides the row when
+   empty (older rounds keep theirs). The QA kickoff messages say they passed.
+   Supersedes step 56's "Checks reused" for QA. Tests: `pre-qa-gate`,
+   `qa-review-areas`; the gate is only exercised by the folder run, not
+   against a real repo yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

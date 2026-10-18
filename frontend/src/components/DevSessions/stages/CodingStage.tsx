@@ -154,6 +154,11 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       refresh();
       router.push(sessionHref(sessionId, 'qa'));
     },
+    // Lint or the tests fail: the coding lead gets the failing output and fixes it before QA.
+    onError: (err) => {
+      const fixMessage = (err as Error & { fixMessage?: string }).fixMessage;
+      if (fixMessage) void handleSend(fixMessage);
+    },
   });
 
   const rejectMutation = useMutation({
@@ -560,6 +565,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 sends this partial implementation to QA.
               </div>
             )}
+            <ErrorText>{approveMutation.error ? (approveMutation.error as Error).message : null}</ErrorText>
             <ApprovalBar
               approveLabel={approved ? 'Approved — QA started' : 'Approve diff and start QA'}
               onApprove={() => approveMutation.mutate()}

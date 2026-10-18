@@ -29,6 +29,7 @@ import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam } from '../agents/team/coding-team.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import { runPreQaGate } from '../agents/pre-qa-gate.js';
+import { gateStopReason, gateStuck } from '../agents/pre-qa-gate-core.js';
 import { getApp } from '../apps/apps-store.js';
 import {
   approveCoding,
@@ -70,12 +71,12 @@ const MAX_GATE_SEND_BACKS = 2;
 const KICKOFF_MESSAGE: Partial<Record<StageGroup, string>> = {
   plan: 'Please break the approved requirements into a concrete, reviewable step-by-step plan.',
   coding: 'Please implement the approved plan.',
-  qa: 'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.',
+  qa: 'Please review this branch against the requirements document and write the QA report. Lint and the unit tests already passed.',
 };
 
 // Keep in sync with QA_RERUN_MESSAGE in QaStage.tsx.
 const QA_RERUN_MESSAGE =
-  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
+  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document and write an updated QA report. Lint and the unit tests already passed.';
 // Keep in sync with QA_TEAM_WRAPUP_MESSAGE in QaStage.tsx.
 const QA_TEAM_WRAPUP_MESSAGE = 'Your reviewers have finished. Write the QA report from their findings.';
 const NEXT_STEP_MESSAGE = 'Continue with the next step on the checklist.';
@@ -116,25 +117,18 @@ async function preQaGate(
   try {
     gate = await runPreQaGate(session, await getApp(session.appId));
   } catch (err) {
-    // A broken gate mustn't hold the branch back: QA runs the same checks.
-    if (mustRun) return { kind: 'stop', reason: mustRun };
-    await appendTranscriptEntry(session.id, 'coding', {
-      role: 'system',
-      text: `Pre-QA checks couldn't run (${err instanceof Error ? err.message : String(err)}); QA will run them.`,
-    });
-    return null;
+    // QA doesn't run the checks, so a gate that can't run holds the branch back.
+    return { kind: 'stop', reason: mustRun ?? `Lint and the unit tests couldn't be run before QA (${err instanceof Error ? err.message : String(err)}).` };
   }
-  if (gate.status !== 'fail') {
-    if (gate.status === 'skipped' && mustRun) return { kind: 'stop', reason: mustRun };
-    if (gate.status === 'skipped') {
-      await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Pre-QA checks skipped: ${gate.summary}. QA will run them.` });
-    }
-    return null;
+  if (gate.status === 'skipped') {
+    return { kind: 'stop', reason: mustRun ?? `Lint and the unit tests can't be run before QA: ${gate.summary}.` };
   }
-  if (session.coordinatorGateSendBacks >= MAX_GATE_SEND_BACKS) {
-    return { kind: 'stop', reason: `Pre-QA checks still fail after ${MAX_GATE_SEND_BACKS} fix passes (${gate.summary}). Over to you.` };
+  if (gate.status !== 'fail') return null;
+  const stuck = gateStuck(session.coordinatorGateLast, gate.fingerprint);
+  if (stuck || session.coordinatorGateSendBacks >= MAX_GATE_SEND_BACKS) {
+    return { kind: 'stop', reason: gateStopReason(gate.summary, gate.auditProblems, stuck ? 'stuck' : 'limit', session.coordinatorGateSendBacks) };
   }
-  await updateSession(session.id, { coordinatorGateSendBacks: session.coordinatorGateSendBacks + 1 });
+  await updateSession(session.id, { coordinatorGateSendBacks: session.coordinatorGateSendBacks + 1, coordinatorGateLast: gate.fingerprint });
   send({ type: 'coordinator_decision', action: 'continue', reason: `Pre-QA checks: ${gate.summary}. Sending it back to the coding lead.` });
   return { kind: 'fix', message: gate.message };
 }
@@ -289,7 +283,7 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     if (!session) return reply.code(404).send({ error: 'session not found' });
     const { enabled } = request.body ?? {};
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) is required' });
-    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0 } : {}) });
+    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0, coordinatorGateLast: null } : {}) });
   });
 
   // A session goes to QA by itself once coding is finished and

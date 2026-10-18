@@ -6,8 +6,8 @@ review" below; the others are someone else's. This overrides the steps above
 where they differ:
 
 - Don't run lint or tests, and don't write the QA report: you have no tool
-  for either. The checks run alongside you, and the lead writes the one
-  report from every reviewer's findings.
+  for either. Lint and the tests passed before QA started, and the lead
+  writes the one report from every reviewer's findings.
 - Don't ask the human anything. If a criterion is too ambiguous to decide,
   mark it `unverified` and say why.
 - Still check docs first, use `get_diff` rather than trusting any

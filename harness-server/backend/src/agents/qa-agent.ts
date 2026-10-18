@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ToolSet } from 'ai';
+import { tool, type ToolSet } from 'ai';
+import { z } from 'zod';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { config } from '../config.js';
 import {
@@ -55,7 +56,7 @@ import { qaHandoffSection } from './tool-defs/qa-notes-tool.js';
 import { createAssignQaTeamTool } from './tool-defs/qa-team-tools.js';
 import { createAssignQaTeamToolClaude } from './tool-defs-claude/qa-team-tools.js';
 import { formatQaTeamFindings } from './team/qa-review-areas.js';
-import { sessionCheckCache, type CheckCommand } from './tool-defs/qa-tools.js';
+import type { CheckCommand } from './tool-defs/qa-tools.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/qa-agent.md');
 // What QA reads the branch with — shared by the QA lead and its reviewers
@@ -72,7 +73,6 @@ export const REVIEW_TOOL_NAMES = [
 ];
 const TOOL_NAMES = [
   ...REVIEW_TOOL_NAMES,
-  'run_checked_command',
   'write_qa_report',
   'assign_qa_team',
   'ask_multiple_choice',
@@ -289,20 +289,10 @@ export async function runQaAgentTurn(
     sinceRef,
   });
   const reportInfo = { sessionKey: session.sessionKey, ticket: session.ticket, sessionId: session.id, branch, requirementsPath };
-  const checkDeps = {
-    repoRoot: app.repoRoot,
-    baseBranch: diffBaseFor(session, app),
-    checkCommands: app.checkCommands,
-    helperContext,
-    checkCache: sessionCheckCache(session.id),
-    checkRunBy: 'QA',
-    reuseChecks: true,
-  };
 
   if (provider === 'claude') {
     const tools = [
       ...reviewTools.claude(),
-      createQaToolsClaude(checkDeps).runCheckedCommandToolClaude,
       createWriteQaReportToolClaude(reportInfo),
       ...(solo ? [] : [createAssignQaTeamToolClaude({ sessionId: session.id })]),
       askMultipleChoiceToolClaude,
@@ -336,7 +326,12 @@ export async function runQaAgentTurn(
       // QA has no delegate: it re-checked every helper answer itself, so the
       // calls only added time. The stub keeps older histories that called it valid.
       ...delegateToolEntry(null, session.histories.qa),
-      run_checked_command: createQaTools(checkDeps).runCheckedCommandTool,
+      // Lint and the tests passed before QA started; the stub keeps older histories and prompt overrides that call it valid.
+      run_checked_command: tool({
+        description: 'Not available in QA: lint and the unit tests already passed on this branch before QA started.',
+        inputSchema: z.object({ command: z.string().optional() }),
+        execute: async () => 'Not available: lint and the unit tests already passed on this branch before QA started. Review the code against the criteria.',
+      }),
       write_qa_report: createWriteQaReportTool(reportInfo),
       ...(solo ? {} : { assign_qa_team: createAssignQaTeamTool({ sessionId: session.id }) }),
       ask_multiple_choice: askMultipleChoiceTool,

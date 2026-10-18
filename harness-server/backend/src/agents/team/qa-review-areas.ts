@@ -79,7 +79,6 @@ export function validateReviewAreas(areas: QaReviewArea[]): QaReviewArea[] {
   return normalized;
 }
 
-const indent = (text: string) => text.replace(/\n/g, '\n  ');
 
 /**
  * What the QA lead's next turn is handed once its team has finished: the
@@ -87,9 +86,6 @@ const indent = (text: string) => text.replace(/\n/g, '\n  ');
  * that didn't submit has its criteria listed for the lead to check itself.
  */
 export function formatQaTeamFindings(team: QaTeamState): string {
-  const checks = team.checks
-    .map((c) => `- ${c.command}: ${c.status}${c.output && c.status === 'fail' ? `\n  ${indent(c.output.trim())}` : ''}`)
-    .join('\n');
   const reviewers = team.members.map((m) => {
     const head = `## ${m.title} (${m.id})`;
     if (!m.findings) {
@@ -106,9 +102,9 @@ export function formatQaTeamFindings(team: QaTeamState): string {
     );
   });
   return (
-    `# Your QA team's findings (round ${team.round})\n\nChecks, run alongside the reviewers:\n${checks}\n\n` +
+    `# Your QA team's findings (round ${team.round})\n\n` +
     `${reviewers.join('\n\n')}\n\n---\n\nYour reviewers have finished. Re-check anything that looks doubtful ` +
-    'or is unverified (and any criteria a reviewer left unchecked), re-run a check only if a result above is ' +
-    'missing or suspect, then call write_qa_report once, covering every acceptance criterion.'
+    'or is unverified (and any criteria a reviewer left unchecked), then call write_qa_report once, covering every ' +
+    'acceptance criterion.'
   );
 }

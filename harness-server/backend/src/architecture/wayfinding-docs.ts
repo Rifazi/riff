@@ -213,6 +213,9 @@ const FINDING_CODE = (c: WayfindingConfig) =>
   `"Hidden behavior", "Recipes"). Its Files section lists every file the domain holds and what each exports, the public ` +
   `file first, marked "(interface)", with the signature of everything it exports (parameters, return types, props, type ` +
   `shapes). Read ${MAP_PATH} and ${DOMAIN_DOC} with read_doc, not read_file.\n` +
+  `Decide first what you need. To learn how something works, what a domain owns, which function to call or what a rule ` +
+  `is, the ${DOMAIN_DOC} answers it (Files signatures, Rules, Hidden behavior, Recipes): stop there and don't open the code ` +
+  `to confirm it. Open code when you will edit it, or when the ${DOMAIN_DOC} doesn't cover the detail you need.\n` +
   `3. Go straight to the file Files names: outline_file it, then read_file only the range you need. To find a call site ` +
   `or a symbol, search_code for it inside the domain's folder (glob "<domain folder>/**"). A search_code without a glob ` +
   `already starts in the domains you're working on and says so.\n` +

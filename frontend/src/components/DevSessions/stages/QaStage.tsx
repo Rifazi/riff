@@ -31,11 +31,11 @@ const AGENT = AGENT_PERSONAS.qa;
 // after a send-back still triggers a new pass even without unmounting.
 const kickedOffForApproval = new Map<string, string>();
 const QA_KICKOFF_MESSAGE =
-  'Please review this branch against the requirements document, run lint and the unit test suite, and write the QA report.';
+  'Please review this branch against the requirements document and write the QA report. Lint and the unit tests already passed.';
 // Sent instead when coding was re-approved after a send-back. Keep in sync
 // with QA_RERUN_MESSAGE in harness-server's routes/coordinator.ts.
 const QA_RERUN_MESSAGE =
-  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document, re-run lint and the unit test suite, and write an updated QA report.';
+  'The coding agent has pushed fixes for your last report. Please re-review the branch against the requirements document and write an updated QA report. Lint and the unit tests already passed.';
 
 // Sent to the QA lead once its team has finished; the server puts every
 // reviewer's findings and the check results ahead of it (qa-agent.ts).
