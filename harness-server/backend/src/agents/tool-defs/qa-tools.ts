@@ -7,6 +7,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { diffAgainstBase, diffStatAgainstBase, worktreeFingerprint } from '../../repo/git.js';
 import { ensureDependencies } from '../../repo/dependencies.js';
+import { runExclusiveCheck } from '../../repo/check-lock.js';
 import { compactDiff, compactOutput, NOISE_PATHSPECS } from './output-compress.js';
 import { reportHelperRun, type HelperContext } from '../helpers/helper.js';
 import { checkSucceeded } from '../pre-qa-gate-core.js';
@@ -36,7 +37,7 @@ const DEFAULT_SCRIPTS: Record<CheckCommand, string> = {
 };
 
 const TIMEOUTS_MS: Record<CheckCommand, number> = {
-  lint: 60_000,
+  lint: 180_000,
   test: 300_000,
   'test:integration': 600_000,
 };
@@ -235,7 +236,7 @@ export function createQaExecutors(deps: QaExecutorDeps) {
       const passed = deps.checkCache!.passedCheck(command, fingerprint);
       if (passed) return reusedCheck(command, passed);
     }
-    const report = await runCheck(command);
+    const report = await runExclusiveCheck(deps.repoRoot, () => runCheck(command));
     if (fingerprint) deps.checkCache!.record(command, fingerprint, checkSucceeded(report), report, deps.checkRunBy);
     return report;
   };

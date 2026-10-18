@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
+import { ChevronDown, GitBranch, GitCommit, Loader2, Play, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -161,6 +161,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
     onSuccess: refresh,
   });
 
+  const [diffOpen, setDiffOpen] = useState(true);
   const [showSendBackForm, setShowSendBackForm] = useState(false);
   const [sendBackNote, setSendBackNote] = useState('');
   const sendBackMutation = useMutation({
@@ -515,16 +516,28 @@ export function CodingStage({ session }: { session: SessionRecord }) {
         )
       }
       document={
-        <div className="flex flex-col flex-1 min-h-0 rounded-lg border border-border bg-card shadow-sm">
-          <div className="px-4 py-3 border-b border-border flex-shrink-0">
-            <h2 className="text-sm font-semibold text-foreground">Diff against the base branch</h2>
-            {diffData?.stat && (
-              <div className="text-xs text-muted-foreground font-mono truncate">
-                {diffData.stat.trim().split('\n').pop()}
-              </div>
-            )}
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
+        <div
+          className={`flex flex-col rounded-lg border border-border bg-card shadow-sm ${diffOpen ? 'flex-1 min-h-0' : 'flex-shrink-0'}`}
+        >
+          <button
+            type="button"
+            onClick={() => setDiffOpen((o) => !o)}
+            aria-expanded={diffOpen}
+            className={`flex items-center gap-2 px-4 py-3 text-left flex-shrink-0 hover:bg-muted transition-colors rounded-t-lg ${diffOpen ? 'border-b border-border' : 'rounded-b-lg'}`}
+          >
+            <ChevronDown
+              className={`w-4 h-4 flex-shrink-0 text-muted-foreground transition-transform ${diffOpen ? '' : '-rotate-90'}`}
+            />
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">Diff against the base branch</h2>
+              {diffData?.stat && (
+                <div className="text-xs text-muted-foreground font-mono truncate">
+                  {diffData.stat.trim().split('\n').pop()}
+                </div>
+              )}
+            </div>
+          </button>
+          <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3 ${diffOpen ? '' : 'hidden'}`}>
             {diffData && diffData.commits.length > 0 && (
               <CollapsibleSection icon={GitCommit} title="Commits" aside={diffData.commits.length} bare className="-mt-2">
                 <ul className="space-y-1">
