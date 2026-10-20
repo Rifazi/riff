@@ -398,6 +398,7 @@ export interface SessionRecord {
   qaRounds: QaRoundRecord[];
   // Which QA pass is running: 1 for the first review, +1 per re-review.
   qaPass: number;
+  qaSendBackAt?: string | null;
   // During a QA fix: the files QA's findings named, which the coder's write
   // tools are fenced to (agents/fix-scope.ts), and every widening with its
   // reason. Set on the fix turn, cleared when coding is approved again.
@@ -417,6 +418,9 @@ export interface SessionRecord {
   // marked reviewed — true until the next coding message is sent, at which
   // point CodingStage has relayed the findings and this clears itself.
   qaFindingsPending: boolean;
+  // Notes the human chose not to send back with the last QA send-back (exact report text). The coder isn't
+  // told them, and the next QA pass is told not to raise them again.
+  qaDeclinedNotes?: string[];
 
   // Set at the start of a coding kickoff or a QA-fix turn: until the lead
   // calls assign_team or build_solo, its write tools refuse, so splitting
@@ -488,7 +492,7 @@ export interface SessionRecord {
   themeProposal: ThemeProposal | null;
   // Which theme (a theme.json fingerprint, or "none") each stage's agent was
   // last briefed on, so a mid-session theme change re-briefs it next turn.
-  themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa', string>>;
+  themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa' | 'uiux', string>>;
   // Likewise for the app's architecture setting (architecture/architecture-context.ts).
   architectureContextSeen: Partial<Record<'requirements' | 'plan' | 'coding' | 'qa', string>>;
 

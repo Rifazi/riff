@@ -479,6 +479,7 @@ export interface SessionRecord {
 
   coordinatorEnabled: boolean;
   qaFindingsPending: boolean;
+  qaSendBackAt?: string | null;
   // During a QA fix: the files QA named that the coder may write, and each widening (harness-server agents/fix-scope.ts).
   fixScope?: { paths: string[]; widened: { paths: string[]; reason: string; at: string }[]; pass: number } | null;
   qaRerunPending: boolean;

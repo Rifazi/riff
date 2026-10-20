@@ -1902,6 +1902,87 @@ below) — never inside the target repo.
    ("one copy of each helper"); the folder passes through the node:test shim
    except the same 19 cases as before.
 
+64. User traced a stuck coding lead on movie-maker to its `backend.ts` files:
+   a hand commit (`cef1d69`) had moved each domain's CDK export out of
+   `service.ts` so the browser bundle wouldn't load CDK, but the audit's one
+   public file per domain is `service.ts`, so every import of a `backend.ts`
+   became "reaches a private file" (22 problems at the pre-QA gate, four of them
+   in domains the branch never touched). The guide had no rule for a domain
+   with both browser and server code. `wayfinding-docs.ts` now says client and
+   server code are never mixed: a domain is wholly one side, each side has its
+   own source folder (`srcDirs`), names are unique across folders
+   (`projects-api` / `projects-ui`), the decision is owned on the server and the
+   client mirrors it, code both sides need goes in a shared domain that imports
+   from neither, and a mixed domain is split in its own segment before it is
+   changed. It is in the generated `docs/wayfinding.md`, the shared briefing
+   every role gets, and QA's findings list. **Docs only: the audit does not
+   check it yet** (the guide says so). Existing apps get the text when
+   `docs/wayfinding.md` refreshes; movie-maker is not migrated by this.
+
+65. User asked why QA kept finding so many issues. Across six recent sessions
+   the first pass caught real bugs, but the coder's fixes often missed them
+   (the same blocker back three times) and notes-only passes ran 4 extra
+   rounds on doc hygiene and "no screenshot tool". Changed:
+   - **Generated sections are the gate's job**: `runPreQaGate` rewrites stale
+     Files/Consumers sections in the domains the branch touched
+     (`auditWayfinding` with `regenerate`) and commits only those DOMAIN.md
+     files, before auditing, so neither the coder nor QA is told about them.
+   - **Fix check** (`agents/fix-check.ts`, in the gate as the `fix check`
+     failure): on a pass after a QA fail, each blocker's file and lines (from
+     `fixScopeFor`) must have a hunk within 10 lines in the diff since that
+     pass's head (`diffWorktreeSince`), and some test file must have changed.
+     Findings that name no file are skipped. A miss goes back to the coder as
+     a gate failure; `FIX_RULES` tells the coder the check exists.
+   - **Notes the coder can't act on** (`isActionableNote` in qa-findings.ts:
+     no screenshot tool, "human should eyeball", app/source-folder setting,
+     truncated audit) are dropped when a report is parsed, and the QA prompt
+     says to put such limits in the report body once.
+   - Not changed: moviemaker's `srcDirs` is already `server/src, client/src,
+     shared/src` and audits clean (142 domains, 0 problems); the config QA
+     complained about was stale. Tests: `fix-check.test.ts`. The regenerate
+     path of the gate hasn't been run against a real repo yet.
+
+66. User said the app was still much slower than the Claude plugin. The
+   `[hop]` lines showed boot (~0.3 s) and first response (~2-5 s) were fine;
+   the time was in the requests after the first (median ~7 s, p90 ~20 s) with
+   ~150 output tokens each. The SDK transcripts showed a thinking block before
+   nearly every tool call (one 6k tokens, ~40 s before an `edit_file`): no
+   `effort` was set, so every role ran at the SDK's default, `high`.
+   `runClaudeAgentTurn` takes `effort` (`claudeEffort` in sdk-client.ts):
+   coding and team engineers pass `low`, every other role gets `medium`, and
+   `RIFF_AGENT_EFFORT` overrides all of them. AI-SDK providers are unchanged.
+   Not compared on a real run yet: check `[hop]` ms/request and requests per
+   step; if QA misses more, raise QA's effort.
+
+67. User said a later UI/UX pass kept resetting things they had already asked
+   for, and wanted the styling remembered by the agents. The theme file holds
+   values, not intent, so a new pass had no record of "the sidebar stays flat".
+   `themes/design-memory.ts` keeps a **design memory** per app
+   (`backend/local-design-memory.json`, gitignored; `HARNESS_DESIGN_MEMORY_PATH`
+   overrides it): short instructions with an area, a source (`human` | `agent`)
+   and the session they came from, deduped, 80 max (agent-made entries are
+   dropped first).
+   - **Writing**: `remember_design` (`tool-defs[-claude]/design-memory-tool.ts`:
+     add / replace / remove, returns the full list) on the UI/UX lead and the
+     coding agent. Both prompts say to record each look request from the human
+     and each design call a later pass could undo, and to replace or remove an
+     entry when a request changes or withdraws it.
+   - **Reading**: `designMemoryBriefing(appId, role)` is appended to the theme
+     briefing for plan, coding, QA (`themeContextForTurn`, whose fingerprint
+     now includes the memory, so an entry added mid-session re-briefs a resumed
+     Claude session in the turn prompt), team engineers and QA reviewers
+     (`themeBriefingFor(..., appId)`), and to the UI/UX lead
+     (`designMemoryForUiux`, tracked in `themeContextSeen.uiux`). Entries outrank
+     the agent's taste and the house style: the lead may not undo one (it asks
+     the human instead), plan steps may not contradict one, the coder checks
+     its diff against the entries for the areas it touched, and QA reports a
+     diff that contradicts one as a finding.
+   - `GET /api/apps/:id/design-memory`, `DELETE /api/apps/:id/design-memory/:entryId`.
+     No UI for the list yet.
+   Tests: `design-memory.test.ts`. Not run with real agents yet: check on a
+   second pass that the lead cites the entries and `remember_design` is called
+   when the human asks for a style change.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

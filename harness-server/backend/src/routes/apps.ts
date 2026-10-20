@@ -5,6 +5,7 @@ import { docsDirFor, readRepoUrl, validateRepoRoot, describeSetup, baseBranchFor
 import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-index.js';
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
+import { changeDesignMemory, listDesignMemory } from '../themes/design-memory.js';
 import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts-store.js';
 import { readBasePrompt } from '../agents/prompts.js';
 import { listIntegrations } from '../repo/integrations.js';
@@ -143,6 +144,17 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     const title = request.body?.title?.trim() || 'UI/UX pass';
     const session = await createUiuxSession(target, { title, focus: request.body?.focus });
     return reply.code(201).send(session);
+  });
+
+  // What the human asked for about the app's look, remembered across sessions and passes (themes/design-memory.ts).
+  app.get<{ Params: { id: string } }>('/api/apps/:id/design-memory', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return listDesignMemory(request.params.id);
+  });
+
+  app.delete<{ Params: { id: string; entryId: string } }>('/api/apps/:id/design-memory/:entryId', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return changeDesignMemory(request.params.id, null, { remove: [request.params.entryId] });
   });
 
   app.delete<{ Params: { id: string } }>('/api/apps/:id', async (request, reply) => {

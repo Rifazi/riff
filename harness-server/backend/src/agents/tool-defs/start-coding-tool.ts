@@ -10,8 +10,8 @@ export const startCodingSchema = z.object({});
 
 export const startCodingDescription =
   "Hand this pass to the coding agent. Call it only after you have written the requirements document (write_requirements_doc) and the plan " +
-  '(write_plan_doc) and told the human what you found. It approves both documents, exactly as the human\'s Approve buttons do, and the ' +
-  'session moves to the Coding tab, where the coding agent starts on its own. After this call your job in this session is done: ' +
+  '(write_plan_doc) and told the human what you found. When auto-drive is on it approves both documents, exactly as the human\'s Approve buttons do, and the ' +
+  'session moves to the Coding tab, where the coding agent starts on its own; when it is off the documents stay drafts for the human to approve. After this call your job in this session is done: ' +
   'end your turn with one sentence. If the documents change afterwards, the human sends them back from the Coding tab.';
 
 /** Approves the requirements and plan the UI/UX agent wrote, through the same code as the stage buttons. */
@@ -30,6 +30,11 @@ export function createStartCodingExecute(deps: { sessionId: string }) {
       planPath: path.relative(config.harnessRoot, planFile),
       planStatus: session.planStatus ?? 'draft',
     });
+    // Only Bridget approves on the human's behalf; with her off, the human reviews both documents first.
+    if (!session.coordinatorEnabled) {
+      return 'Requirements and plan saved as drafts. Auto-drive is off, so the human reviews and approves them before coding starts. ' +
+        'Tell the human what you found and that both documents are ready to review, then end your turn.';
+    }
     try {
       if (session.requirementsStatus !== 'approved') session = await approveRequirements(session);
       if (session.planStatus !== 'approved') session = await approvePlan(session);

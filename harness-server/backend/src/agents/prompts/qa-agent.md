@@ -114,6 +114,10 @@ full; read the sections you need.
 - Do not call `run_generate_paths` or `run_generate_openapi` — if generated
   output is stale, that is itself a finding ("the coding
   agent didn't regenerate X"), not something to quietly fix.
+- Do not write notes the coding agent can't act on: "no screenshot tool, the
+  human should eyeball it", the app's source-folder setting, or a truncated
+  audit. Say a limit like that once, in the report body, not as an
+  actionable note. Notes are for code, tests and docs the coder can change.
 - Do not mark something "pass" because it's probably fine — if you didn't
   verify it, say it's unverified.
 

@@ -74,6 +74,24 @@ Every change answers three questions:
 | Map | \`${MAP_PATH}\` at the repo root: one line per top-level domain and junction. |
 | Segment | A bounded step of a change: one decision through one domain's boundary, validated and revertible on its own. |
 
+## Client and server code are never mixed
+
+A domain is wholly client or wholly server. Browser code (pages, components, hooks, anything that runs in the browser) and server
+code (handlers, tables, CDK constructs, anything that runs on the server or at deploy time) never share a domain, a folder or a
+file, and a domain's public file never serves both sides. The browser bundle must never load server-only code.
+
+- Each side has its own source folder (for example \`server/src\` and \`client/src\`), and a domain lives under exactly one of them.
+- Domain names are unique across source folders, so name each side's domain for what it is: \`projects-api\` and
+  \`projects-ui\`, never \`projects\` twice.
+- A decision is owned by one domain, on the server. The client reaches it through the server's contract (an HTTP API or a
+  generated client), never by importing server code. Where the client computes the same thing on purpose, for responsiveness
+  or a preview, it declares a Mirror in its \`${DOMAIN_DOC}\` and names the server domain that owns the decision.
+- Code both sides need (a type, a validation function, a contract) goes in a domain of its own in a shared source folder that
+  imports from neither side. A client domain never imports a server domain, and a server domain never imports a client domain.
+- An existing domain that mixes both sides is split before you change it, in its own segment: move the server code and the
+  rules it implements into a server domain, leave the client code and its rules in a client domain, and change no behavior.
+  Do one domain at a time and finish with its checkpoint and the audit before the next.
+
 ## Before writing code
 
 1. Read \`${MAP_PATH}\` and find the domain that owns the decision you are changing.
@@ -96,6 +114,7 @@ Every change answers three questions:
 ## While changing code
 
 - Change a decision only in its owning domain.
+- Keep client and server code in separate domains (see "Client and server code are never mixed"); never add browser code to a server domain or server code to a client domain.
 - Reach other domains only through their public file (\`${config.interfaceFile}\`, or the file named after the folder). Never import another domain's other files.
 - From outside a parent domain, never import its child domains.
 - Never re-implement another domain's decision; call it.
@@ -156,7 +175,7 @@ the audit reports a section that has nothing in it only as stale, never as missi
 **Splitting a domain.** Give each file or module that does its own job its own child domain folder, not a group of them
 (a page, a form, a hook, a handler, a table, a crypto helper are each one). Code the children share goes in a sibling child domain
 of its own, so the dependency runs child to sibling, never to the parent. What stays at the parent is its public file, its
-entry point or route table, and any composition of its children into one deployable unit (a CDK construct, say), plus the
+entry point or route table, and any composition of its children into one deployable unit (a CDK construct, say; server side only), plus the
 rules that are about the combination. Move every existing rule to the child whose code implements it, with its test, and change
 no behavior. Do one domain at a time and finish with its checkpoint and the audit before the next.
 
@@ -175,7 +194,8 @@ In Riff Dev Sessions the agents run \`audit_architecture\`, which checks: other 
 their public file; child domains visible only inside their parent; no child depending on its parent; no dependency
 cycles; every rule anchored to a test that exists; no rule in two domains; no function written in two domains unless both declare it under Mirrors; files named in Recipes exist; the generated Files and
 Consumers sections match the code; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
-entities, one writer per table with the domain's prefix, listed under "Owns data". The reference repo's
+entities, one writer per table with the domain's prefix, listed under "Owns data". It does not yet check that a domain is
+wholly client or wholly server; QA does. The reference repo's
 \`example/tools/check.ts\` is a standalone version of the same checks to wire into CI.
 
 ## ${DOMAIN_DOC} template
@@ -204,7 +224,9 @@ const SHARED = (c: WayfindingConfig) =>
   `visible only inside its parent, and every folder of code inside a domain is a child domain with its own ${DOMAIN_DOC}, so ` +
   `each ${DOMAIN_DOC} describes only its own folder. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading), and ` +
   `search_docs searches them along with docs/. The full procedure, with the ${DOMAIN_DOC} template, is ${WAYFINDING_GUIDE_PATH}. ` +
-  `audit_architecture runs the mechanical checks and lists the domains with their folders. Every helper has one copy: look for it ` +
+  `audit_architecture runs the mechanical checks and lists the domains with their folders. Client and server code are never mixed: ` +
+  `a domain is wholly browser code or wholly server code (handlers, tables, CDK), each side has its own source folder, and a ` +
+  `domain's public file never serves both, so the browser bundle never loads server code. Every helper has one copy: look for it ` +
   `in the Files sections before writing it, and when a second domain needs code, move it into a domain both import instead of copying it.`;
 
 // How to find code here. It replaces the base prompt's general guidance on
@@ -329,7 +351,7 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `it reports the structural and doc checks, which domains the branch touched and any ownership or structural edits. Flag ` +
       `as findings: an audit problem in MAP.md or a domain the branch touched; a changed business rule without a matching ` +
       `change in that domain's Rules, anchored to a test that exists; Owns, Does not own or Mirrors changed without being its ` +
-      `own commit/step, or inconsistent with the guardrails; a new domain not logged in ${MAP_PATH}; code changed in a folder with no ${DOMAIN_DOC}, top-level or inside a domain, or a code file added loose in a source folder or in a folder shared by two domains (the audit reports the first two), and domain documentation put in docs/ instead of the domain's ${DOMAIN_DOC}; a parent ` +
+      `own commit/step, or inconsistent with the guardrails; a domain, or a public file, that mixes client and server code, or a client domain importing a server one (or the reverse); a new domain not logged in ${MAP_PATH}; code changed in a folder with no ${DOMAIN_DOC}, top-level or inside a domain, or a code file added loose in a source folder or in a folder shared by two domains (the audit reports the first two), and domain documentation put in docs/ instead of the domain's ${DOMAIN_DOC}; a parent ` +
       `${DOMAIN_DOC} that describes a child domain's behavior instead of leaving it to the child's; duplicate authority (logic ` +
       `outside the owning domain that re-implements its decision), a helper the branch wrote that already exists in another domain ` +
       `or that it copied into a second domain instead of moving it into one both import (the audit reports identical functions: a ` +

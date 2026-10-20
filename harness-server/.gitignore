@@ -11,6 +11,7 @@ local-settings.json
 # per-role prompt overrides, written by the Apps UI.
 local-apps.json
 local-prompts.json
+local-design-memory.json
 
 # Session/transcript cache — disposable UI convenience, safe to lose.
 state/

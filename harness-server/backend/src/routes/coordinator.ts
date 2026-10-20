@@ -172,18 +172,14 @@ async function tryAdvance(
         !session.teamDecisionPending &&
         !session.codingReconciliationPending;
       if (!finished) return { kind: 'not-ready' };
-      if (latestChecksFailed(transcript)) {
-        return { kind: 'stop', reason: 'Every step is done, but the latest lint or test run failed. Look at it before the branch goes to QA.' };
-      }
-      const concern = concernInLastMessage(transcript);
-      const concernReason = concern
-        ? `Every step is done, but the coding agent's summary mentions "${concern}". Check it before the branch goes to QA.`
-        : undefined;
-      // A failure word is settled by running lint and the tests; anything else (skipped, unverified) only a human can judge.
-      if (concern && !isFailureWord(concern)) return { kind: 'stop', reason: concernReason! };
-      const checks = await preQaGate(session, send, concernReason);
+      const checks = await preQaGate(session, send);
       if (checks) return checks;
-      return gate(() => approveCoding(session), 'Every step is done and nothing needs you: sent the branch to QA.');
+      try {
+        await approveCoding(session);
+      } catch (err) {
+        return { kind: 'stop', reason: err instanceof Error ? err.message : String(err) };
+      }
+      return { kind: 'advanced', reason: 'Every step is done and lint and the tests pass: sent the branch to QA.' };
     }
     case 'qa':
       return tryShip(session);
@@ -292,13 +288,17 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/auto-handoff', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
-    if (!['coding-in-progress', 'coding-review'].includes(session.stage) || session.coordinatorEnabled) {
+    if (!['coding-in-progress', 'coding-review'].includes(session.stage) || session.coordinatorEnabled || session.qaFindingsPending) {
       return { advanced: false, reason: null };
     }
     const outcome = await tryAdvance(session, 'coding', session.transcripts.coding, () => {});
     if (outcome.kind === 'advanced') return { advanced: true, reason: outcome.reason };
     const reason = outcome.kind === 'stop' ? outcome.reason : outcome.kind === 'fix' ? `lint, tests or the audit failed on the branch.\n${outcome.message}` : null;
-    if (reason) await appendTranscriptEntry(session.id, 'coding', { role: 'system', text: `Not sent to QA automatically: ${reason}` });
+    if (reason) {
+      const text = `Not sent to QA automatically: ${reason}`;
+      const last = session.transcripts.coding.at(-1);
+      if (!(last?.role === 'system' && last.text === text)) await appendTranscriptEntry(session.id, 'coding', { role: 'system', text });
+    }
     return { advanced: false, reason };
   });
 

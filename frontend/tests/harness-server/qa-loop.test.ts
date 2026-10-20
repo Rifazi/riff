@@ -155,6 +155,15 @@ describe('what the agents get', () => {
     expect(text).toContain('This branch keeps coming back from QA.');
     expect(text.indexOf(loopBrief(loop))).toBeLessThan(text.indexOf('Fix:'));
   });
+
+  test('declined notes stay out of the send-back; blocking findings always go', () => {
+    const raw = ['---', 'result: fail', 'blocking-findings:', '  - fix a', 'actionable-notes:', '  - note b', '  - note c', '---', 'body'].join('\n');
+    const text = compactQaFindings(raw, null, ['note b']);
+    expect(text).toContain('- fix a');
+    expect(text).toContain('1. note c');
+    expect(text).not.toContain('note b');
+    expect(compactQaFindings(raw, null, ['note b', 'note c'])).not.toContain('Also address');
+  });
 });
 
 describe('qaReportIsCurrent', () => {

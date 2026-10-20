@@ -70,7 +70,7 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
   const referenceDocs = referenceDocsManifest(await listSessionReferenceDocs(session));
   const systemPrompt =
     base +
-    themeBriefingFor(app.repoRoot, 'qa') +
+    themeBriefingFor(app.repoRoot, 'qa', app.id) +
     architectureBriefingFor(app, 'qa') +
     repoInstructionsNote(app.repoRoot) +
     `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirements}` +

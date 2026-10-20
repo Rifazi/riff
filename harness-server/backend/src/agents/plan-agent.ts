@@ -284,6 +284,7 @@ export async function runPlanAgentTurn(
   const patch: Partial<SessionRecord> = { planPath, planStatus };
   if (session.planStatus === 'approved' && planStatus === 'draft') {
     patch.stage = 'plan-in-progress';
+    if (session.branch) patch.reopenedFromCoding = true;
   }
 
   return updateSession(session.id, patch);

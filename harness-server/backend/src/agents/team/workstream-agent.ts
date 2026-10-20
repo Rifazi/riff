@@ -185,7 +185,7 @@ export async function runWorkstreamAgent({
     base +
     (delegateDeps ? DELEGATE_NOTE : '') +
     (memoryDeps ? MEMORY_NOTE : '') +
-    themeBriefingFor(worktreePath, 'coding') +
+    themeBriefingFor(worktreePath, 'coding', app.id) +
     architectureBriefingFor(app, 'coding') +
     repoInstructionsNote(worktreePath) +
     approvedDocs +
@@ -390,6 +390,7 @@ export async function runWorkstreamAgent({
     ];
 
     const { sdkSessionId } = await runClaudeAgentTurn({
+      effort: 'low',
       systemPrompt,
       createMcpServer: () => createSdkMcpServer({ name: 'harness-tools', version: '1.0.0', tools }),
       toolNames,

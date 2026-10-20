@@ -456,6 +456,20 @@ export interface RunClaudeAgentTurnParams {
   compaction?: CompactionOptions;
   // Same as RunAgentTurnParams.abortSignal: stops the CLI subprocess.
   abortSignal?: AbortSignal;
+  // How hard the model thinks before each request. The SDK's own default is
+  // 'high', which put a thinking block (sometimes 6k tokens) before nearly
+  // every tool call.
+  effort?: ClaudeEffort;
+}
+
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const EFFORT_LEVELS: ClaudeEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+function claudeEffort(requested: ClaudeEffort | undefined): ClaudeEffort {
+  const fromEnv = process.env.RIFF_AGENT_EFFORT as ClaudeEffort | undefined;
+  if (fromEnv && EFFORT_LEVELS.includes(fromEnv)) return fromEnv;
+  return requested ?? 'medium';
 }
 
 export interface RunClaudeAgentTurnResult {
@@ -561,6 +575,7 @@ async function runClaudeAgentTurnOnce(params: RunClaudeAgentTurnParams & HopPara
       allowDangerouslySkipPermissions: true,
       permissionPrompts: 'none',
       ...CLAUDE_ISOLATION,
+      effort: claudeEffort(params.effort),
       ...(model ? { model } : {}),
       ...(resumeSessionId ? { resume: resumeSessionId } : {}),
       abortController,

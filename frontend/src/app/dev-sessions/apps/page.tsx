@@ -179,6 +179,7 @@ function AppCard({ app }: { app: AppConfig }) {
               Handbook
             </ExternalAnchor>
           </Button>
+          <UiuxPassRow app={app} />
           <AppReferenceDocsButton appId={app.id} appName={app.name} />
         </div>
       </CardHeader>
@@ -209,7 +210,6 @@ function AppCard({ app }: { app: AppConfig }) {
             </>
           )}
         </div>
-        <UiuxPassRow app={app} />
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button size="sm" variant="default" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
             {saveMutation.isPending ? 'Saving…' : 'Save'}

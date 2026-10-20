@@ -594,3 +594,8 @@ export async function mergeBranch(
     return { ok: false, stage: 'merge', error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/** Zero-context diff of the working tree (uncommitted work included) against `ref`, node_modules left out. */
+export async function diffWorktreeSince(repoRoot: string, ref: string): Promise<string> {
+  return client(repoRoot).raw(['diff', '--unified=0', '--no-color', ref, '--', '.', ':(exclude)node_modules']);
+}

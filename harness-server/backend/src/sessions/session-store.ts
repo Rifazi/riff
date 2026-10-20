@@ -52,6 +52,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.coordinatorEnabled ??= false;
   session.coordinatorGateSendBacks ??= 0;
   session.qaFindingsPending ??= false;
+  session.qaDeclinedNotes ??= [];
   session.qaRerunPending ??= false;
   session.reopenedFromCoding ??= false;
   session.pendingRequirementsRelayNote ??= null;

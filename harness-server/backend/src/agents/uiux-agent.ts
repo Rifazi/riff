@@ -16,6 +16,10 @@ import { applyAttachments, type ParsedAttachment } from './attachments.js';
 import { referenceDocsTurnNote } from '../sessions/reference-docs.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { uiuxStylePrompt } from './uiux-prompt.js';
+import { designMemoryForUiux } from '../themes/theme-context.js';
+import { createRememberDesignTool } from './tool-defs/design-memory-tool.js';
+import { createRememberDesignToolClaude } from './tool-defs-claude/design-memory-tool.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from './tool-defs/outline-tool.js';
@@ -52,6 +56,7 @@ const TOOL_NAMES = [
   'audit_theme',
   'analyze_colors',
   'propose_theme',
+  'remember_design',
   'write_requirements_doc',
   'write_plan_doc',
   'start_coding',
@@ -89,6 +94,7 @@ export async function runUiuxAgentTurn(
 
   const override = await getPromptOverride(app.id, 'uiux');
   let systemPrompt = override ?? (await fs.readFile(PROMPT_PATH, 'utf8'));
+  systemPrompt += await uiuxStylePrompt();
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     try {
@@ -99,11 +105,14 @@ export async function runUiuxAgentTurn(
     const theme = summarizeAppTheme(app.repoRoot);
     systemPrompt += `\n\n# This app's theme\n\n${theme ? `The app's UI theme is "${theme.name}" (theme/theme.json).` : 'The app has no UI theme yet.'}`;
   }
+  const memory = await designMemoryForUiux(session, isFirstTurn);
+  systemPrompt += memory.system;
   if (!sees) systemPrompt += NO_SCREENSHOTS_NOTE;
   else if (!screenshots) systemPrompt += NO_CHROME_NOTE;
 
   const referenceNote = await referenceDocsTurnNote(session, 'requirements', isFirstTurn);
   if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
+  prompt = memory.turnPrefix + prompt;
 
   const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {
@@ -135,6 +144,7 @@ export async function runUiuxAgentTurn(
             createAuditThemeToolClaude({ repoRoot: app.repoRoot }),
             createAnalyzeColorsToolClaude({ repoRoot: app.repoRoot }),
             createProposeThemeToolClaude({ sessionId: session.id, repoRoot: app.repoRoot }),
+            createRememberDesignToolClaude({ appId: app.id, sessionId: session.id }),
             createWriteRequirementsToolClaude(docInfo),
             createWritePlanToolClaude({ ...docInfo, requirementsPath }),
             createStartCodingToolClaude({ sessionId: session.id }),
@@ -175,6 +185,7 @@ export async function runUiuxAgentTurn(
         audit_theme: createAuditThemeTool({ repoRoot: app.repoRoot }),
         analyze_colors: createAnalyzeColorsTool({ repoRoot: app.repoRoot }),
         propose_theme: createProposeThemeTool({ sessionId: session.id, repoRoot: app.repoRoot }),
+        remember_design: createRememberDesignTool({ appId: app.id, sessionId: session.id }),
         write_requirements_doc: createWriteRequirementsTool(docInfo),
         write_plan_doc: createWritePlanTool({ ...docInfo, requirementsPath }),
         start_coding: createStartCodingTool({ sessionId: session.id }),

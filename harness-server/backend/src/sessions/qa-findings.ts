@@ -28,6 +28,20 @@ export function reportCriteria(body: string): QaCriterionRecord[] {
   return out;
 }
 
+// Notes the coder can't act on: they describe what QA couldn't do or what the
+// human should look at, and coming back every pass they only cost a round.
+const NOT_FOR_CODER = [
+  /no screenshot tool|screenshot tool (?:was )?(?:not )?available|verified from (?:css|code|jsx)[^.]*only/i,
+  /(?:human|you|someone) should (?:eyeball|check visually|look at|review visually)|eyeball /i,
+  /\b(?:app|apps page) configuration\b|source[- ]folder setting|\bsrcDirs?\b setting/i,
+  /audit_architecture'?s? output was truncated/i,
+];
+
+/** Whether the coding agent can do anything about a note. */
+export function isActionableNote(note: string): boolean {
+  return !NOT_FOR_CODER.some((re) => re.test(note));
+}
+
 /** The parts of a QA report that need acting on: result, failing checks, blocking findings and notes. */
 export function parseQaReport(raw: string): ParsedQaReport {
   const parsed = matter(raw);
@@ -55,13 +69,15 @@ export function parseQaReport(raw: string): ParsedQaReport {
 
   // Older reports have no actionable-notes field: their [nit] lines are the
   // nearest thing.
-  const notes = Array.isArray(d['actionable-notes'])
-    ? (d['actionable-notes'] as unknown[]).map(String)
-    : parsed.content
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => /^- \[(note|nit)\]/i.test(l))
-        .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''));
+  const notes = (
+    Array.isArray(d['actionable-notes'])
+      ? (d['actionable-notes'] as unknown[]).map(String)
+      : parsed.content
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => /^- \[(note|nit)\]/i.test(l))
+          .map((l) => l.replace(/^- \[(?:note|nit)\]\s*/i, ''))
+  ).filter(isActionableNote);
 
   return {
     result: typeof d.result === 'string' ? d.result : null,
@@ -74,11 +90,14 @@ export function parseQaReport(raw: string): ParsedQaReport {
 
 /**
  * The part of a QA report that needs acting on: result, failing checks, the
- * blocking findings and the non-blocking notes QA still wants acted on. Used for the send-back relay to the coding agent.
+ * blocking findings and the non-blocking notes the human sent back (all of them unless some were declined). Used for the send-back relay to the coding agent.
  * With `loop`, it opens with how this branch has been going back and forth.
  */
-export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = null): string {
-  const { result, failedChecks, blocking, notes } = parseQaReport(raw);
+export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = null, declinedNotes: string[] = []): string {
+  const parsed = parseQaReport(raw);
+  const { result, failedChecks, blocking } = parsed;
+  // Blocking findings always go back; the human picks which non-blocking notes do.
+  const notes = parsed.notes.filter((n) => !declinedNotes.includes(n));
 
   let text = `QA result: ${result ?? '?'}`;
   if (failedChecks.length > 0) text += ` — failing checks: ${failedChecks.join(', ')}`;
@@ -96,4 +115,5 @@ export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = nul
 // pass made blocking.
 export const FIX_RULES =
   'For each blocking finding, fix it and add or change a test that fails without the fix. For each note, act on ' +
-  "it or call note_for_qa saying why you didn't: QA re-checks every note, and one skipped without a reason comes back.";
+  "it or call note_for_qa saying why you didn't: QA re-checks every note, and one skipped without a reason comes back. " +
+  'Before you finish, check each blocker yourself: the lines QA names must be among the lines you changed, and your new test must fail without your change. The pre-QA check refuses a fix that changed none of them.';

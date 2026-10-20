@@ -75,7 +75,7 @@ function StartDialog({ app, open, onClose }: { app: AppConfig; open: boolean; on
   );
 }
 
-/** The app card's UI/UX pass button: turns the pass on for the app the first time, then opens the dialog that starts one. */
+/** The app card header's UI/UX pass button: turns the pass on for the app the first time, then opens the dialog that starts one. */
 export function UiuxPassRow({ app }: { app: AppConfig }) {
   const queryClient = useQueryClient();
   const [starting, setStarting] = useState(false);
@@ -88,7 +88,7 @@ export function UiuxPassRow({ app }: { app: AppConfig }) {
   });
 
   return (
-    <div className="flex flex-wrap items-center gap-3 pl-[152px]">
+    <>
       <Button
         size="sm"
         variant="outline"
@@ -100,6 +100,6 @@ export function UiuxPassRow({ app }: { app: AppConfig }) {
       </Button>
       <ErrorText>{enable.error ? (enable.error as Error).message : null}</ErrorText>
       {starting && <StartDialog app={app} open onClose={() => setStarting(false)} />}
-    </div>
+    </>
   );
 }

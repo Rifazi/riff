@@ -123,7 +123,7 @@ export async function registerPlanRoutes(app: FastifyInstance): Promise<void> {
     await fs.writeFile(filePath, fileContents, 'utf8');
 
     if (wasApproved) {
-      await updateSession(session.id, { planStatus: 'draft', stage: 'plan-in-progress' });
+      await updateSession(session.id, { planStatus: 'draft', stage: 'plan-in-progress', ...(session.branch ? { reopenedFromCoding: true } : {}) });
     }
 
     return { markdown: fileContents };

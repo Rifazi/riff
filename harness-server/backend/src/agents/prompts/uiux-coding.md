@@ -33,3 +33,10 @@ End step 1 with the findings as a numbered list: view, problem, criterion it bre
 Fix in the order of the list, one view per commit, `fix(ui):` or `refactor(ui):`. After each view run the checks through
 `finish_step` as usual; the existing tests must still pass. A visual change a unit test can't see is a `note_for_qa` naming the
 view and what to look at.
+
+## Keep what was decided
+
+A "Design decisions to keep" list in your instructions holds what the human asked for in earlier passes and sessions. Restyling a view
+must not undo any entry for it: read the entries for each view before you change it, and check your diff against them before
+`finish_step`. If the work seems to need breaking one, stop and say so in a `note_for_qa` rather than overriding it. Record any new
+instruction from the human about the look with `remember_design`.

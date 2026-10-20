@@ -225,7 +225,12 @@ export function soloRereview(rounds: QaRoundRecord[], fixFiles: string[] | null)
  * findings, what the fix changed, which criteria carry forward, and how to
  * re-review without starting over.
  */
-export function rereviewBrief(rounds: QaRoundRecord[], fixFiles: string[] | null, pass: number): string {
+export function rereviewBrief(
+  rounds: QaRoundRecord[],
+  fixFiles: string[] | null,
+  pass: number,
+  declinedNotes: string[] = [],
+): string {
   const passes = rounds
     .map((r) => {
       let s = `## Pass ${r.pass} (${r.result ?? 'no result'})`;
@@ -254,10 +259,16 @@ export function rereviewBrief(rounds: QaRoundRecord[], fixFiles: string[] | null
           : '\n\n## Re-check\n\nNothing beyond the last pass\'s blocking findings and notes.')
       : '';
 
+  const declined =
+    declinedNotes.length > 0
+      ? '\n\n## Notes the human chose not to fix\n\nDon\'t raise these again, and don\'t count them as skipped in rule 6:\n\n' +
+        declinedNotes.map((n) => `- ${n}`).join('\n')
+      : '';
+
   const solo = soloRereview(rounds, fixFiles);
   return (
     `\n\n# Earlier QA passes on this branch\n\nThis is pass ${pass}. The coding agent has pushed fixes since the last ` +
-    `pass.\n\n${passes}\n\n## Files the fix changed\n\n${delta}${carry}\n\n## How to re-review\n\n` +
+    `pass.\n\n${passes}\n\n## Files the fix changed\n\n${delta}${carry}${declined}\n\n## How to re-review\n\n` +
     '1. get_diff shows only what the fix changed (scope "fix", the default); the rest of the branch was reviewed last pass.\n' +
     '2. Check every blocking finding of the last pass is fixed in the code, with a test that would catch it coming back.\n' +
     '3. Read the fix itself in full, every changed line above: a fix is where new bugs come from.\n' +

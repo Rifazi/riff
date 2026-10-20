@@ -2,9 +2,11 @@ import { baseBranchFor, type AppConfig } from '../apps/apps.js';
 import { diffBaseFor } from '../sessions/shared-branch.js';
 import { DOMAIN_DOC } from '../architecture/architecture.js';
 import { auditWayfinding, branchScope } from '../architecture/wayfinding-audit.js';
-import { branchChanges, currentBranch, resolveCommit, withDetachedWorktree } from '../repo/git.js';
+import { branchChanges, commitAll, currentBranch, diffWorktreeSince, resolveCommit, withDetachedWorktree } from '../repo/git.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { createQaExecutors, sessionCheckCache } from './tool-defs/qa-tools.js';
+import { fixCheckProblems } from './fix-check.js';
+import { fixScopeFor } from './fix-scope.js';
 import { blockingAuditProblems, checkSucceeded, gateDetails, gateFingerprint, gateMessage, gateSummary, problemKey, type GateCheck } from './pre-qa-gate-core.js';
 
 export type PreQaGateResult =
@@ -31,6 +33,17 @@ async function baselineProblems(app: AppConfig, base: string): Promise<Set<strin
   } catch {
     return null;
   }
+}
+
+/** On a QA fix pass: whether the changes since QA's last pass reach the lines its blockers name. */
+async function qaFixProblems(session: SessionRecord, app: AppConfig): Promise<string[]> {
+  const last = session.qaRounds?.[session.qaRounds.length - 1];
+  if (!last?.head || last.blocking.length === 0) return [];
+  const head = await resolveCommit(app.repoRoot, 'HEAD');
+  const diff = await diffWorktreeSince(app.repoRoot, last.head);
+  // Nothing changed at all since that pass: not a fix pass in progress.
+  if (!diff.trim() && head === last.head) return [];
+  return fixCheckProblems(await fixScopeFor(app.repoRoot, last), diff);
 }
 
 /**
@@ -67,16 +80,32 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
     checks.push({ label, passed: checkSucceeded(output), output });
   }
 
+  const fixProblems = await qaFixProblems(session, app).catch(() => [] as string[]);
+  if (fixProblems.length) checks.push({ label: 'fix check', passed: false, output: fixProblems.map((p) => `- ${p}`).join('\n') });
+
   let auditProblems: string[] = [];
+  let regenerated: string[] = [];
   if (app.architecture) {
-    const audit = auditWayfinding(app.repoRoot, app.architecture);
     const base = diffBaseFor(session, app);
+    // Generated Files/Consumers sections are mechanical, so the gate rewrites
+    // the stale ones in the domains this branch touched and commits them,
+    // instead of sending the coder (or QA) a note about them.
+    const first = auditWayfinding(app.repoRoot, app.architecture);
+    const touched = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
+    const domains = touched ? new Set(branchScope(first, base, touched.files, touched.docDiff).byDomain.map((d) => d.domain)) : new Set<string>();
+    const touchedDirs = first.domains.filter((d) => domains.has(d.id)).map((d) => `${d.dir}/${DOMAIN_DOC}`);
+    if (touchedDirs.length) {
+      const fixed = auditWayfinding(app.repoRoot, app.architecture, { regenerate: (docPath) => touchedDirs.includes(docPath) });
+      regenerated = fixed.regenerated;
+      if (regenerated.length) await commitAll(app.repoRoot, 'docs: regenerate DOMAIN.md generated sections', regenerated).catch(() => null);
+    }
+    const audit = auditWayfinding(app.repoRoot, app.architecture);
     const changes = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
     const baseline = await baselineProblems(app, base);
     auditProblems = blockingAuditProblems(audit, changes ? branchScope(audit, base, changes.files, changes.docDiff) : null, baseline ?? undefined);
   }
 
-  const summary = gateSummary(checks, auditProblems);
+  const summary = gateSummary(checks, auditProblems) + (regenerated.length ? ` (regenerated ${regenerated.length} DOMAIN.md)` : '');
   const message = gateMessage(checks, auditProblems);
   const details = gateDetails(checks, auditProblems);
   return message && details ? { status: 'fail', summary, message, details, fingerprint: gateFingerprint(checks, auditProblems), auditProblems } : { status: 'pass', summary };

@@ -112,8 +112,16 @@ export async function approvePlan(session: SessionRecord, options: { ignoreDepen
  * failing output as `fixMessage`, which the caller can hand to the coding
  * lead (the coordinator does, up to its send-back limit).
  */
+const approvalEpoch = new Map<string, number>();
+
+/** A send-back during the pre-QA gate's run would otherwise be undone when the gate finishes and approves. */
+export function cancelPendingApproval(sessionId: string): void {
+  approvalEpoch.set(sessionId, (approvalEpoch.get(sessionId) ?? 0) + 1);
+}
+
 export async function approveCoding(session: SessionRecord): Promise<SessionRecord> {
   if (!session.branch) throw new StageActionError('no commits exist on a branch yet');
+  const epoch = approvalEpoch.get(session.id) ?? 0;
   let gate;
   try {
     gate = await runPreQaGate(session, await getApp(session.appId));
@@ -127,6 +135,9 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
       fixMessage: gate.message,
       details: gate.details,
     });
+  }
+  if ((approvalEpoch.get(session.id) ?? 0) !== epoch) {
+    throw new StageActionError('The session was sent back to coding while the checks ran, so it was not sent to QA.', 409);
   }
   // The coding agent's notes go over with the branch (qa-agent.ts).
   return updateSession(session.id, {

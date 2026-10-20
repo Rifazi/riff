@@ -61,6 +61,8 @@ import { createFinishStepToolClaude } from './tool-defs-claude/finish-step-tool.
 import { runPrettierToolEntry } from './tool-defs/format-tool.js';
 import { createRunNpmInstallTool } from './tool-defs/npm-install-tool.js';
 import { createNoteForQaTool } from './tool-defs/qa-notes-tool.js';
+import { createRememberDesignTool } from './tool-defs/design-memory-tool.js';
+import { createRememberDesignToolClaude } from './tool-defs-claude/design-memory-tool.js';
 import { createDocsSearchToolsClaude } from './tool-defs-claude/docs-search-tool.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
 import { createOutlineFileToolClaude } from './tool-defs-claude/outline-tool.js';
@@ -107,6 +109,7 @@ const TOOL_NAMES = [
   'run_checked_command',
   'run_npm_install',
   'note_for_qa',
+  'remember_design',
   'widen_fix_scope',
   'finish_step',
 ];
@@ -139,7 +142,7 @@ const ESCALATION_PROMPT = (stepTitle: string, lightModel: string) =>
 // keeps the average request small: measured on the Claude engine, a
 // conversation starts near 29k and grows ~3.5k per request, so a 55k cut
 // lands every 7-8 requests at ~42k on average, where a 20-request hop used
-// to run to 90-118k. hopLimits only sets the turn's request budget (80 on
+// to run to 90-118k. hopLimits only sets the turn's request budget (120 on
 // either engine) and how often a step-budget hop checks in; on the Claude
 // engine every hop is a new query(), which boots a Claude Code subprocess
 // and reconnects the MCP server, so it takes hops of 20.
@@ -147,7 +150,7 @@ const FRESH_CONTEXT_AT_TOKENS = 50_000;
 export const COMPACT_AT_TOKENS = 55_000;
 
 export function hopLimits(provider: Provider): { stepsPerHop: number; maxHops: number } {
-  return provider === 'claude' ? { stepsPerHop: 20, maxHops: 3 } : { stepsPerHop: 10, maxHops: 7 };
+  return provider === 'claude' ? { stepsPerHop: 20, maxHops: 5 } : { stepsPerHop: 10, maxHops: 11 };
 }
 
 export interface CodingTurnOptions {
@@ -454,7 +457,7 @@ export async function runCodingAgentTurn(
         systemPrompt:
           basePrompt +
           helperNotes +
-          themeBriefingFor(app.repoRoot, 'coding') +
+          themeBriefingFor(app.repoRoot, 'coding', app.id) +
           architectureBriefingFor(app, 'coding') +
           (await firstTurnSections(fresh, app.repoRoot, currentStepId(fresh) ?? targetStepId)) +
           (reference ? `\n\n${reference}` : ''),
@@ -581,6 +584,7 @@ export async function runCodingAgentTurn(
             runCheckedCommandToolClaude,
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
+            createRememberDesignToolClaude({ appId: app.id, sessionId: session.id }),
             createWidenFixScopeToolClaude({ sessionId: session.id }),
             createFinishStepToolClaude(finishDeps),
             ...architectureToolsClaude(architectureDeps),
@@ -594,6 +598,7 @@ export async function runCodingAgentTurn(
         isError,
         contextTokens: tokens,
       } = await runClaudeAgentTurn({
+        effort: 'low',
         systemPrompt,
         createMcpServer,
         toolNames: [
@@ -681,6 +686,7 @@ export async function runCodingAgentTurn(
         ...runPrettierToolEntry({ repoRoot: app.repoRoot }, session.histories.coding),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
+        remember_design: createRememberDesignTool({ appId: app.id, sessionId: session.id }),
         widen_fix_scope: createWidenFixScopeTool({ sessionId: session.id }),
         finish_step: createFinishStepTool(finishDeps),
         ...classifyTextToolEntry(classifierOn, helperContext, session.histories.coding),

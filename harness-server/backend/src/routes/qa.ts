@@ -7,7 +7,7 @@ import { getSession, updateSession } from '../sessions/session-store.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
 import { parseAttachments, saveAsReferenceDocs, type AttachmentInput } from '../agents/attachments.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
-import { compactQaFindings } from '../sessions/qa-findings.js';
+import { compactQaFindings, parseQaReport } from '../sessions/qa-findings.js';
 import { qaLoopFor } from '../sessions/qa-rounds.js';
 import { qaReportIsCurrent } from '../sessions/qa-loop.js';
 import type { SessionRecord } from '../sessions/session.js';
@@ -15,7 +15,7 @@ import { getApp } from '../apps/apps-store.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
-import { approveQa, deliverSession, keepSessionOnBranch, planDelivery } from '../sessions/stage-actions.js';
+import { approveQa, cancelPendingApproval, deliverSession, keepSessionOnBranch, planDelivery } from '../sessions/stage-actions.js';
 import { isShipped } from '../sessions/shared-branch.js';
 import { sendStageActionError } from './stage-action-reply.js';
 
@@ -119,7 +119,10 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       const markdown = (await read(round?.reportPath)) ?? (await read(fallback));
       return { markdown, current: current && wanted === session.qaPass, pass: wanted, passes };
     }
-    return { markdown: await read(session.qaReportPath), current, pass: session.qaPass, passes };
+    const markdown = await read(session.qaReportPath);
+    // The non-blocking notes of this pass's report, for the send-back checklist.
+    const notes = markdown && current ? parseQaReport(markdown).notes : [];
+    return { markdown, current, pass: session.qaPass, passes, notes };
   });
 
   // What the coding agent gets when QA sends a branch back: only the things
@@ -136,7 +139,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       return { text: null };
     }
     const loop = await loopFor(session);
-    return { text: compactQaFindings(raw, loop) };
+    return { text: compactQaFindings(raw, loop, session.qaDeclinedNotes ?? []) };
   });
 
   // Why the latest QA pass failed compared with the earlier ones (sessions/qa-loop.ts),
@@ -161,17 +164,21 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   // exist. qaFindingsPending only gets set when there's an actual report to
   // relay; otherwise CodingStage just reopens with nothing auto-injected.
   //
+  // Body `declinedNotes`: non-blocking notes the human unchecked; they stay out of the relay (blocking
+  // findings always go back).
+  //
   // Also undoes an earlier "Mark reviewed" (stage 'done') — the report goes
   // back to pending-review so the branch can't be shipped until a fresh QA
   // pass is reviewed. Refused once the branch has actually been merged or
   // an MR opened, since fixes on the branch would no longer reach anything.
-  app.post<{ Params: { id: string } }>('/api/sessions/:id/qa/send-back', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body?: { declinedNotes?: unknown } }>('/api/sessions/:id/qa/send-back', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     if (isShipped(session.delivery)) {
       return reply.code(400).send({ error: `already delivered: ${session.delivery!.detail}` });
     }
     if (isQaTeamRunning(session.id)) return reply.code(409).send({ error: 'the QA team is still reviewing' });
+    cancelPendingApproval(session.id);
     if (session.qaStatus === 'reviewed' && session.qaReportPath) {
       const filePath = path.join(config.harnessRoot, session.qaReportPath);
       const raw = await fs.readFile(filePath, 'utf8');
@@ -188,6 +195,11 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       // A report from an earlier pass would send the coder findings it may
       // already have fixed: then coding reopens with nothing relayed.
       qaFindingsPending: qaReportIsCurrent(session),
+      qaSendBackAt: new Date().toISOString(),
+      // Notes left unchecked in the QA tab; none declined = all go back.
+      qaDeclinedNotes: Array.isArray(request.body?.declinedNotes)
+        ? request.body.declinedNotes.filter((n): n is string => typeof n === 'string')
+        : [],
       qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
       ...(retireTeam && {
         codingTeam: null,

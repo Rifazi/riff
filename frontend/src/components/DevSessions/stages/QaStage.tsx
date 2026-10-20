@@ -65,7 +65,7 @@ const VERDICT: Record<string, { tone: 'green' | 'amber' | 'red'; icon: typeof Ch
     tone: 'amber',
     icon: TriangleAlert,
     title: 'QA passed with notes',
-    hint: 'Nothing blocks, but there are notes to act on — send it back so they get fixed, or mark it reviewed as is.',
+    hint: 'Nothing blocks. Tick the notes you want fixed and send it back, or mark it reviewed as is.',
   },
   fail: { tone: 'red', icon: XCircle, title: 'QA failed', hint: 'Send it back for fixes, or reject the session.' },
 };
@@ -139,6 +139,47 @@ function QaLoopNotice({ sessionId, version }: { sessionId: string; version: stri
   );
 }
 
+// The non-blocking notes as a checklist: ticked ones go back to coding with the blocking findings
+// (those always go back), unticked ones are dropped and QA is told not to raise them again.
+function QaNotesChecklist({
+  notes,
+  declined,
+  onToggle,
+  disabled,
+}: {
+  notes: string[];
+  declined: string[];
+  onToggle: (note: string) => void;
+  disabled: boolean;
+}) {
+  if (notes.length === 0) return null;
+  const sending = notes.length - declined.length;
+  return (
+    <Notice tone="neutral">
+      <div className="font-semibold">Non-blocking notes</div>
+      <div className="mt-1 text-xs">
+        Blocking findings always go back. Choose which notes go with them ({sending} of {notes.length} selected).
+      </div>
+      <ul className="mt-2 space-y-1.5 text-sm">
+        {notes.map((note, i) => (
+          <li key={i}>
+            <label className="flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0"
+                checked={!declined.includes(note)}
+                disabled={disabled}
+                onChange={() => onToggle(note)}
+              />
+              <span>{note}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </Notice>
+  );
+}
+
 const RESULT_LABEL: Record<string, string> = { pass: 'passed', 'pass-with-notes': 'passed with notes', fail: 'failed' };
 
 function passLabel(p: QaPassSummary): string {
@@ -192,6 +233,12 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // A new pass starting goes back to its own (empty) report.
   useEffect(() => setViewPass(null), [report?.pass]);
 
+  // Notes unticked in the checklist, by text. A new pass's report starts with every note ticked.
+  const [declinedNotes, setDeclinedNotes] = useState<string[]>([]);
+  useEffect(() => setDeclinedNotes([]), [report?.pass, session.qaReportPath]);
+  const toggleNote = (note: string) =>
+    setDeclinedNotes((d) => (d.includes(note) ? d.filter((n) => n !== note) : [...d, note]));
+
   const { withOverlay, streaming, runningTool, error, send, runCoordinator } = useAgentTurnStream();
 
   const refresh = () =>
@@ -225,7 +272,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
   // Distinct from Reject: reopens Coding for fixes instead of abandoning the
   // session. The QA report stays as the record of what was found.
   const sendBackMutation = useMutation({
-    mutationFn: () => api.sendQaBack(sessionId),
+    mutationFn: () => api.sendQaBack(sessionId, declinedNotes),
     onSuccess: () => {
       refresh();
       router.push(sessionHref(sessionId, 'coding'));
@@ -282,6 +329,9 @@ export function QaStage({ session }: { session: SessionRecord }) {
   const staleReport = Boolean(report?.markdown) && report?.current === false;
   const markdown = staleReport ? null : (report?.markdown ?? null);
   const qaResult = markdown ? parseFrontmatterField(markdown, 'result') : null;
+  const reportNotes = staleReport ? [] : (report?.notes ?? []);
+  // A pass with notes only: sending back with every note unticked would send nothing.
+  const nothingToSend = qaResult === 'pass-with-notes' && reportNotes.every((n) => declinedNotes.includes(n));
   const earlierPasses = (report?.passes ?? [])
     .filter((p) => p.hasReport && !(report?.current && p.pass === report.pass))
     .reverse();
@@ -379,6 +429,12 @@ export function QaStage({ session }: { session: SessionRecord }) {
               markdown && (
                 <div className="space-y-2">
                   <QaVerdict markdown={markdown} />
+                  <QaNotesChecklist
+                    notes={reportNotes}
+                    declined={declinedNotes}
+                    onToggle={toggleNote}
+                    disabled={busy || reviewed || sendBackMutation.isPending}
+                  />
                   <QaLoopNotice sessionId={sessionId} version={session.updatedAt} />
                 </div>
               )
@@ -403,9 +459,11 @@ export function QaStage({ session }: { session: SessionRecord }) {
                       <Button
                         variant="outline"
                         onClick={() => sendBackMutation.mutate()}
-                        disabled={busy || sendBackMutation.isPending}
+                        disabled={busy || sendBackMutation.isPending || nothingToSend}
                         title={
-                          reviewed
+                          nothingToSend
+                            ? 'Tick at least one note to send back, or mark it reviewed.'
+                            : reviewed
                             ? `Undo "Mark reviewed" and reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`
                             : session.qaReportPath
                               ? `Reopen Coding so ${AGENT_PERSONAS.coding.name} can fix what ${AGENT.name} found.`

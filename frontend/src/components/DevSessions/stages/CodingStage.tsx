@@ -229,14 +229,14 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // Clear the qaFix guard when the server confirms the flag was processed, so
   // the next QA send-back cycle can fire correctly.
   useEffect(() => {
-    if (!session.qaFindingsPending) kicked.delete(`${sessionId}:qaFix`);
-  }, [session.qaFindingsPending, sessionId]);
+    if (!session.qaFindingsPending) kicked.delete(`${sessionId}:qaFix:${session.qaSendBackAt ?? ''}`);
+  }, [session.qaFindingsPending, session.qaSendBackAt, sessionId]);
 
   // QA sent this back for fixes — relay the report as the next message.
   useEffect(() => {
     if (!session.qaFindingsPending) return;
     if (streaming) return;
-    const key = `${sessionId}:qaFix`;
+    const key = `${sessionId}:qaFix:${session.qaSendBackAt ?? ''}`;
     if (kicked.has(key)) return;
     kicked.add(key);
     void (async () => {
@@ -259,7 +259,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       );
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, session.qaFindingsPending, streaming]);
+  }, [session.id, session.qaFindingsPending, session.qaSendBackAt, streaming]);
 
   useEffect(() => {
     if (!session.codingReconciliationPending) kicked.delete(`${sessionId}:reconciliation`);
@@ -365,7 +365,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   const lastCodingEntry = session.transcripts.coding.at(-1)?.id ?? 'none';
   useEffect(() => {
     if (session.coordinatorEnabled) return;
-    if (!plan?.length || !allStepsDone || approved || busy || !hasCommits) return;
+    if (!plan?.length || !allStepsDone || approved || busy || !hasCommits || session.qaFindingsPending) return;
     const key = `${sessionId}:autoHandoff:${lastCodingEntry}`;
     if (kicked.has(key)) return;
     kicked.add(key);
@@ -378,7 +378,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.coordinatorEnabled, plan, allStepsDone, approved, busy, hasCommits, lastCodingEntry]);
+  }, [session.coordinatorEnabled, session.qaFindingsPending, plan, allStepsDone, approved, busy, hasCommits, lastCodingEntry]);
   const canStartTeam =
     teamMode &&
     !teamActive &&

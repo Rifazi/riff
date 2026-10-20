@@ -310,7 +310,7 @@ export const api = {
 
   getQaReport: (id: string, pass?: number) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/report${pass === undefined ? '' : `?pass=${pass}`}`)).then((r) =>
-      json<{ markdown: string | null; current?: boolean; pass?: number; passes?: QaPassSummary[] }>(r),
+      json<{ markdown: string | null; current?: boolean; pass?: number; passes?: QaPassSummary[]; notes?: string[] }>(r),
     ),
 
   getQaFindings: (id: string) =>
@@ -325,8 +325,12 @@ export const api = {
   rejectQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/reject`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
-  sendQaBack: (id: string) =>
-    fetch(apiUrl(`/api/sessions/${id}/qa/send-back`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+  sendQaBack: (id: string, declinedNotes: string[] = []) =>
+    fetch(apiUrl(`/api/sessions/${id}/qa/send-back`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ declinedNotes }),
+    }).then((r) => json<SessionRecord>(r)),
 
   getSettings: () => fetch(apiUrl('/api/settings')).then((r) => json<SettingsResponse>(r)),
 

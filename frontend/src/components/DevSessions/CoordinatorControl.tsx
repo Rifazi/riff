@@ -32,16 +32,18 @@ export function CoordinatorControl({ session, streaming }: { session: SessionRec
     >
       <Switch
         checked={enabled}
-        disabled={toggleMutation.isPending || streaming}
+        disabled={toggleMutation.isPending}
         onCheckedChange={(checked) => toggleMutation.mutate(checked)}
       />
       <span className="font-medium">Auto-drive with {COORDINATOR_PERSONA.name}</span>
       <span className="text-muted-foreground hidden lg:inline">
         {streaming && enabled
-          ? `— ${COORDINATOR_PERSONA.name} is driving this stage…`
-          : enabled
-            ? '— approves each stage and opens the MR, stopping for questions or issues'
-            : '— you drive every message'}
+          ? `— ${COORDINATOR_PERSONA.name} is driving this stage; turn off to stop after this turn`
+          : streaming
+            ? `— ${COORDINATOR_PERSONA.name} takes over when this turn ends`
+            : enabled
+              ? '— approves each stage and opens the MR, stopping for questions or issues'
+              : '— you drive every message'}
       </span>
     </label>
   );
