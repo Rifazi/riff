@@ -721,3 +721,57 @@ export interface QaLoopAnalysis {
   reasons: string[];
   smallFix: boolean;
 }
+
+// harness-server retrospective/: what a finished session's QA history taught.
+export type SuggestionStatus = 'open' | 'done' | 'dismissed' | 'muted';
+export type EffectVerdict = 'unproven' | 'working' | 'mixed' | 'not-working';
+
+export interface RetroSuggestion {
+  key: string;
+  status: SuggestionStatus;
+  verdict: 'open' | 'unproven' | 'effective' | 'not-effective';
+  code: string | null;
+  title: string;
+  detail: string;
+  seenIn: number;
+}
+
+export interface RetroFacts {
+  passes: number;
+  failedPasses: number;
+  byCategory: Record<string, number>;
+  byKind: Record<string, number>;
+  docsOnlyPasses: number[];
+  unchangedResends: number[];
+  hotFiles: string[];
+}
+
+export interface Retrospective {
+  sessionId: string;
+  appId: string;
+  title: string;
+  at: string;
+  facts: RetroFacts;
+  summary: string;
+  lessonsAdded: number;
+  lessons: { id: string; text: string }[];
+  suggestions: RetroSuggestion[];
+  modelUsed: boolean;
+  lessonsRetired: { id: string; text: string; reason: string }[];
+  suggestionsMuted: { key: string; title: string; reason: string }[];
+}
+
+export interface AppLesson {
+  id: string;
+  text: string;
+  category: string;
+  area: string | null;
+  source: 'rule' | 'model';
+  status: 'active' | 'dismissed' | 'retired';
+  retiredReason?: string;
+  verdict: EffectVerdict;
+  exposedSessionIds: string[];
+  recurredSessionIds: string[];
+  seen: number;
+  lastAt: string;
+}

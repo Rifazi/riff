@@ -37,6 +37,7 @@ import {
   approveQa,
   approveRequirements,
   deliverSession,
+  sendBackToCoding,
   keepSessionOnBranch,
   planDelivery,
   readQaResult,
@@ -64,6 +65,8 @@ const TEAM_START_GRACE_MS = 10_000;
 const TEAM_POLL_MS = 5_000;
 // Fix passes the pre-QA gate asks for before it hands the branch to a human.
 const MAX_GATE_SEND_BACKS = 2;
+// QA failures in a row Bridget sends back by herself before she stops for the human.
+const MAX_QA_SEND_BACKS = 8;
 
 // The message that kicks off a stage's very first turn when the coordinator
 // finds it with an empty transcript. QA's already exists client-side in
@@ -197,9 +200,18 @@ async function tryShip(session: SessionRecord): Promise<Outcome> {
     if (!qaReportIsCurrent(session)) return { kind: 'not-ready' };
     const result = await readQaResult(session);
     if (result === 'fail') {
+      // A failed pass goes straight back to the coder; only a runaway stops for the human.
       const loop = await qaLoopFor(session, (await getApp(session.appId)).repoRoot).catch(() => null);
-      if (loop?.looping) return { kind: 'stop', reason: loopStopReason(loop) };
-      return { kind: 'stop', reason: 'QA failed the branch. Look at the report, then send it back for fixes or decide what to do.' };
+      if (loop && loop.failedInARow >= MAX_QA_SEND_BACKS) {
+        return { kind: 'stop', reason: `QA has failed ${loop.failedInARow} passes in a row, so I've stopped sending it back. ${loopStopReason(loop)}` };
+      }
+      try {
+        await sendBackToCoding(session);
+      } catch (err) {
+        return { kind: 'stop', reason: `QA failed the branch, but sending it back failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      const why = loop?.looping ? ` It keeps coming back (${loop.reasons.join(' ')}), so the coder gets each blocker with why.` : '';
+      return { kind: 'advanced', reason: `QA failed the branch (pass ${session.qaPass}). Sent it back to the coder with the findings.${why}` };
     }
     if (result === 'pass-with-notes') {
       return { kind: 'stop', reason: 'QA passed with notes. Decide whether to send them back for fixes or ship as is.' };
@@ -332,9 +344,14 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     try {
       let selfHeals = 0;
       let failedTurns = 0;
+      let stepsDone = 0;
       for (let turns = 0; ; ) {
         const session = await getSession(sessionId);
         if (!session) break;
+        // The cap is for turns that get nowhere: a long plan finishing a step per turn isn't stuck.
+        const doneNow = (session.codingPlan ?? []).filter((s) => s.status === 'done').length;
+        if (doneNow > stepsDone) turns = 0;
+        stepsDone = doneNow;
         if (!session.coordinatorEnabled) {
           send({ type: 'coordinator_decision', action: 'ready', reason: 'Coordinator was turned off.' });
           break;

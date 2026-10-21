@@ -275,7 +275,7 @@ below) — never inside the target repo.
    only fits single-shot calls. The coordinator's continue/ready decision
    is the only one of those; every agent role is a tool-calling loop and
    stays on its configured model. The coordinator tries local first
-   (`models.coordinator.useLocalModel`, unset = on) and falls back to its
+   (`models.coordinator.useLocalModel`, unset = off since step 71) and falls back to its
    configured model on any error or unparseable reply. On a 12-case
    decision set run 3 times, Qwen 4B scored 34/36 and Haiku 11/12, but
    only after two changes that fixed failures seen first on Qwen:
@@ -1932,7 +1932,13 @@ below) — never inside the target repo.
      `fixScopeFor`) must have a hunk within 10 lines in the diff since that
      pass's head (`diffWorktreeSince`), and some test file must have changed.
      Findings that name no file are skipped. A miss goes back to the coder as
-     a gate failure; `FIX_RULES` tells the coder the check exists.
+     a gate failure; `FIX_RULES` tells the coder the check exists. A pending
+     `note_for_qa` that names a blocker's file (or its basename) answers that
+     blocker, and the "changed no test" rule applies only while some blocker
+     is unanswered: the error always offered the note as a way out, but the
+     gate never read notes, so a stale blocker (one pointing at reverted or
+     out-of-scope code) failed it forever and the coder looped on green
+     lint/tests. QA re-checks the note.
    - **Notes the coder can't act on** (`isActionableNote` in qa-findings.ts:
      no screenshot tool, "human should eyeball", app/source-folder setting,
      truncated audit) are dropped when a report is parsed, and the QA prompt
@@ -1982,6 +1988,109 @@ below) — never inside the target repo.
    Tests: `design-memory.test.ts`. Not run with real agents yet: check on a
    second pass that the lead cites the entries and `remember_design` is called
    when the human asks for a style change.
+
+68. User said most failures were QA bouncing tickets back to the coder, and
+   asked for Bridget to look at past failures at the end of every merge and
+   suggest optimizations and error corrections. The 18 sessions with a failed
+   pass in `state/sessions` (102 blockers): 67 plain logic bugs, 19 docs the
+   requirements said to update, 8 a case missed in one of several places that
+   list the cases, 3 missing tests, 3 unrelated files touched; about a third
+   came back after a fix (`repeated`), session `Cleanup` failed five passes on
+   one untouched DOMAIN.md, and five sessions were sent back with no new
+   commit between passes. `retrospective/`:
+   - **When**: `deliverSession` and `keepSessionOnBranch` call
+     `scheduleRetrospective` (background, never blocks or throws, one at a
+     time per session). `POST /api/sessions/:id/retrospective` reruns it
+     (older sessions); `GET` reads it. The result is `state/retrospectives/<id>.json`
+     and, when something failed, one system line in the QA chat.
+   - **Facts** (`core.ts`, pure, no model): from `qaRoundsFor` and
+     `analyzeQaLoop` per pass: every blocker with its mistake
+     (`categorizeBlocker`: missing-test, docs-not-updated, scope-drift,
+     incomplete-coverage, red-checks, else logic-bug) and how it came back,
+     passes that failed on docs alone, send-backs whose head didn't change,
+     files blocked in two passes, pre-QA gate send-backs. A session that
+     passed first time and never failed the gate gets no lessons.
+   - **Lessons** go to the agents: rule-made ones per category (a fixed line
+     each) plus up to 4 app-specific ones from one single-shot call to the
+     coordinator's configured model (`model.ts`, not the local Qwen: it has to
+     read findings and generalise; JSON validated with zod, any failure means
+     rules only). Stored per app in `backend/local-lessons.json` (gitignored;
+     `HARNESS_LESSONS_PATH`), merged by `findingSimilarity` ≥ `SAME_FINDING`
+     so the same lesson from another session counts as another sighting
+     (`seen`), a dismissed one stays dismissed, 60 max. The active ones, most
+     seen first (8 lines, 2.4k chars), are appended to the plan, coding and QA
+     briefings next to the design memory (`lessons-briefing.ts`, wired in
+     `themes/theme-context.ts`, whose fingerprint now includes them, and
+     `themeBriefingFor` for team members and reviewers). QA is told to check
+     them first.
+   - **Suggestions for Riff itself** are only recorded, never applied: from the
+     rules (`docs-check-before-qa`, `send-back-changed-nothing`,
+     `same-file-blocked-repeatedly`, `gate-sent-back-repeatedly`,
+     `many-failed-passes`, each counted across the app's earlier
+     retrospectives as `seenIn`) and from the model (at most 3, about the
+     pipeline, not the app's code). Bridget doesn't edit prompts, gates or
+     code.
+   - **API/UI**: `GET /api/apps/:id/lessons`, `PATCH`/`DELETE
+     .../lessons/:lessonId`, `GET /api/apps/:id/retrospectives`;
+     `components/DevSessions/RetrospectivePanel.tsx` on the QA tab once a
+     branch is delivered (summary, per-category counts, each lesson with
+     Turn off, suggestions).
+   Tests: `retrospective.test.ts` (findings taken from sessions `Cleanup`, EDI
+   856 and Script breakdown). Not run with real agents yet: deliver one branch
+   and read `state/retrospectives/`; check on the next session of that app that
+   the briefing has the lessons and that first-pass QA failures fall. The
+   categories leave logic bugs (66% of blockers) to the model's summary.
+
+69. User said Bridget was flaky about continuing: a QA fail must go straight
+   back to the coder, and only non-critical items (pass-with-notes) need the
+   human. `sendBackToCoding` (`sessions/stage-actions.ts`) is the send-back
+   route's logic, now shared; `tryShip` calls it on a `fail` and reports it as
+   advanced (the coding tab relays the findings by itself). The loop-stop at
+   3 failures (step 56) no longer stops her; a looping branch still gets
+   `loopBrief` in the fix message. Backstop: 8 failed passes in a row
+   (`MAX_QA_SEND_BACKS`) stops for the human. Not run with real agents yet.
+
+70. User said Bridget's recommendations looked like a static list and asked
+   that they be acted on in the models, and that she learn whether they help
+   and stop making the useless ones (`retrospective/`, extends step 68).
+   - **Acted on**: a model suggestion has a `target`. `plan`/`coding`/`qa`
+     becomes a lesson in that role's briefing (`roles` on a lesson filters
+     `pickBriefingLessons`), not a list entry; only `pipeline` ones, which
+     need a code change, stay suggestions for the human. Bridget still never
+     edits Riff's code or prompts files.
+   - **Lessons are measured** (`scoreLessons`): every retrospective, clean
+     sessions included, marks each lesson that was active when the session
+     started (`firstAt <= session.createdAt`) as exposed, and as recurred if
+     this session's drafts repeated it (same match as merging). After
+     `MIN_EXPOSED` (3) sessions: recurred in >= 60% = `not-working`, <= 20% =
+     `working`, else `mixed`. A not-working lesson is **retired** (out of the
+     briefings, kept on file so it isn't relearned) and becomes a pipeline
+     suggestion (`lesson-ignored:<id>`): a prompt line can't prevent it, so it
+     needs a check. Turning a lesson back on resets its record.
+   - **Suggestions are tracked** (`suggestion-tracker.ts`,
+     `backend/local-suggestions.json`, gitignored): per app, with the sessions
+     that raised them. Raised in 4 sessions with no action = **muted** (Bridget
+     stops showing it, the chat says so); "Stop suggesting this" = dismissed;
+     "I did this" = done, after which sessions that don't raise it count as
+     evidence it helped and sessions that do as recurrence (>= 50% over 3 =
+     `not-effective`, shown on the suggestion). Model suggestions match by
+     wording (`SAME_FINDING`). The model prompt lists each lesson's verdict
+     and every earlier suggestion's status so it doesn't repeat them.
+   - API: `GET /api/apps/:id/suggestions`, `PATCH .../suggestions/:key`
+     (open|done|dismissed|muted); lessons now carry `verdict`. The Retrospective
+     panel shows each lesson's record, retired/muted notices and the two
+     buttons.
+   Tests: `retrospective.test.ts` (19). Not run with real agents yet; the
+   verdicts need 3+ later sessions per app before they say anything.
+
+71. User said Bridget seemed stuck and asked for a frontier model, not a
+   local one, for her decisions. `decideNextAction` and `decideGate` now try
+   the built-in Qwen only when `models.coordinator.useLocalModel` is `true`
+   (it was on unless `false`), so they run on the coordinator's configured
+   model; the default coordinator model is `claude-sonnet-5` (was Haiku), and
+   the Settings switch says it's opt-in. Handoff notes, delivery text and
+   the retrospective are unchanged (the retrospective already used the
+   coordinator model).
 
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the

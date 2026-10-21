@@ -12,6 +12,9 @@ import type {
   DeliveryPlan,
   Integration,
   QaLoopAnalysis,
+  AppLesson,
+  SuggestionStatus,
+  Retrospective,
   JiraSettingsFields,
   AttachmentInput,
   MeetingSourceInput,
@@ -318,6 +321,28 @@ export const api = {
 
   getQaLoop: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/loop`)).then((r) => json<{ loop: QaLoopAnalysis | null }>(r)),
+
+  getRetrospective: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/retrospective`)).then((r) => json<{ retrospective: Retrospective | null; running: boolean }>(r)),
+
+  runRetrospective: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/retrospective`), { method: 'POST' }).then((r) => json<{ retrospective: Retrospective }>(r)),
+
+  getAppLessons: (appId: string) => fetch(apiUrl(`/api/apps/${appId}/lessons`)).then((r) => json<AppLesson[]>(r)),
+
+  setAppLessonStatus: (appId: string, lessonId: string, status: 'active' | 'dismissed') =>
+    fetch(apiUrl(`/api/apps/${appId}/lessons/${lessonId}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).then((r) => json<AppLesson[]>(r)),
+
+  setSuggestionStatus: (appId: string, key: string, status: SuggestionStatus) =>
+    fetch(apiUrl(`/api/apps/${appId}/suggestions/${encodeURIComponent(key)}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).then((r) => json<unknown>(r)),
 
   approveQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),

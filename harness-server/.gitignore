@@ -20,3 +20,5 @@ state/
 artifacts/
 
 .DS_Store
+local-lessons.json
+local-suggestions.json

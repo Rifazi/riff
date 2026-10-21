@@ -113,6 +113,13 @@ export async function runUiuxAgentTurn(
   const referenceNote = await referenceDocsTurnNote(session, 'requirements', isFirstTurn);
   if (referenceNote) prompt = `${referenceNote}\n\n---\n\n${prompt}`;
   prompt = memory.turnPrefix + prompt;
+  if (screenshots) {
+    prompt =
+      'Tool update: screenshot_app now takes a `login` argument ({ username, password, path? }). It signs in through the app\'s own login form ' +
+      'before capturing. Whatever you believed earlier about it not accepting credentials is out of date: check the tool\'s current schema, ' +
+      'and for any screen behind a login call it with the credentials the user gave.\n\n---\n\n' +
+      prompt;
+  }
 
   const toolNames = new Map<string, string>();
   const wrappedOnEvent = (event: AgentEvent) => {

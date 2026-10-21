@@ -6,6 +6,9 @@ import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-i
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
 import { changeDesignMemory, listDesignMemory } from '../themes/design-memory.js';
+import { deleteLesson, listLessons, listRetrospectives, listTrackedSuggestions, setLessonStatus, updateSuggestionStatus } from '../retrospective/store.js';
+import { lessonVerdict } from '../retrospective/core.js';
+import { suggestionVerdict, type SuggestionStatus } from '../retrospective/suggestion-tracker.js';
 import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts-store.js';
 import { readBasePrompt } from '../agents/prompts.js';
 import { listIntegrations } from '../repo/integrations.js';
@@ -155,6 +158,42 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
   app.delete<{ Params: { id: string; entryId: string } }>('/api/apps/:id/design-memory/:entryId', async (request, reply) => {
     if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
     return changeDesignMemory(request.params.id, null, { remove: [request.params.entryId] });
+  });
+
+  // What finished sessions taught, and what goes into every agent's briefing for this app (retrospective/).
+  app.get<{ Params: { id: string } }>('/api/apps/:id/lessons', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return listLessons(request.params.id).map((l) => ({ ...l, verdict: lessonVerdict(l) }));
+  });
+
+  app.patch<{ Params: { id: string; lessonId: string }; Body: { status?: string } }>('/api/apps/:id/lessons/:lessonId', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    const status = request.body?.status;
+    if (status !== 'active' && status !== 'dismissed') return reply.code(400).send({ error: 'status must be "active" or "dismissed"' });
+    return setLessonStatus(request.params.id, request.params.lessonId, status).map((l) => ({ ...l, verdict: lessonVerdict(l) }));
+  });
+
+  app.delete<{ Params: { id: string; lessonId: string } }>('/api/apps/:id/lessons/:lessonId', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return deleteLesson(request.params.id, request.params.lessonId);
+  });
+
+  // Bridget's suggestions for the pipeline, with whether acting on them helped (retrospective/suggestion-tracker.ts).
+  app.get<{ Params: { id: string } }>('/api/apps/:id/suggestions', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return listTrackedSuggestions(request.params.id).map((t) => ({ ...t, verdict: suggestionVerdict(t) }));
+  });
+
+  app.patch<{ Params: { id: string; key: string }; Body: { status?: string } }>('/api/apps/:id/suggestions/:key', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    const status = request.body?.status as SuggestionStatus | undefined;
+    if (!status || !['open', 'done', 'dismissed', 'muted'].includes(status)) return reply.code(400).send({ error: 'status must be open, done, dismissed or muted' });
+    return updateSuggestionStatus(request.params.id, request.params.key, status).map((t) => ({ ...t, verdict: suggestionVerdict(t) }));
+  });
+
+  app.get<{ Params: { id: string } }>('/api/apps/:id/retrospectives', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    return listRetrospectives(request.params.id);
   });
 
   app.delete<{ Params: { id: string } }>('/api/apps/:id', async (request, reply) => {

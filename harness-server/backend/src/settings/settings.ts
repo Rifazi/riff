@@ -145,7 +145,7 @@ export const DEFAULT_SETTINGS: HarnessSettings = {
     plan: { provider: 'claude', model: 'claude-sonnet-5' },
     coding: { provider: 'claude', model: 'claude-sonnet-5' },
     qa: { provider: 'claude', model: 'claude-sonnet-5' },
-    coordinator: { provider: 'claude', model: 'claude-haiku-4-5' },
+    coordinator: { provider: 'claude', model: 'claude-sonnet-5' },
     uiux: { provider: 'claude', model: 'claude-sonnet-5' },
   },
   ollamaEndpoint: DEFAULT_OLLAMA_ENDPOINT,

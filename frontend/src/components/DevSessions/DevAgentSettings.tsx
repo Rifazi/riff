@@ -819,14 +819,15 @@ function LocalCoordinatorRow({
   onSave: (config: RoleModelConfig) => void;
   saving: boolean;
 }) {
-  const enabled = value.useLocalModel !== false;
+  const enabled = value.useLocalModel === true;
   return (
     <div className="py-4 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3 items-center">
       <div>
         <div className="font-medium text-foreground">Coordinator on the built-in local model</div>
         <div className="text-xs text-muted-foreground">
-          The continue-or-ready decisions run on Riff&apos;s own summary model — free and on this machine. If it&apos;s
-          unavailable or gives an unusable answer, the coordinator model above decides instead.
+          Off by default: Bridget&apos;s decisions use the coordinator model above. Turn on to try Riff&apos;s own summary
+          model first — free and on this machine — falling back to the coordinator model if it&apos;s unavailable or
+          gives an unusable answer. A small local model can stall auto-drive.
         </div>
       </div>
       <div className="flex gap-3 items-center">

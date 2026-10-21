@@ -14,6 +14,7 @@ import { isShipped, keepOnBranch, recordSharedBranchShipped } from './shared-bra
 import type { SessionRecord } from './session.js';
 import { qaReportIsCurrent } from './qa-loop.js';
 import { runPreQaGate } from '../agents/pre-qa-gate.js';
+import { scheduleRetrospective } from '../retrospective/service.js';
 
 // The approval gates, shared by the stage tabs' buttons (routes/*.ts) and
 // Bridget, the coordinator, who approves on the human's behalf when nothing
@@ -172,6 +173,34 @@ export async function approveQa(session: SessionRecord): Promise<SessionRecord> 
   return updateSession(session.id, { qaStatus: 'reviewed', stage: 'done' });
 }
 
+/**
+ * Reopens coding with this pass's QA findings (the human's "Send back for
+ * fixes", and Bridget's reaction to a failed pass). The report and QA chat
+ * stay as the record; a fresh pass starts when coding is approved again.
+ */
+export async function sendBackToCoding(session: SessionRecord, declinedNotes: string[] = []): Promise<SessionRecord> {
+  if (isShipped(session.delivery)) throw new StageActionError(`already delivered: ${session.delivery!.detail}`);
+  cancelPendingApproval(session.id);
+  if (session.qaStatus === 'reviewed' && session.qaReportPath) {
+    const filePath = path.join(config.harnessRoot, session.qaReportPath);
+    const raw = await fs.readFile(filePath, 'utf8');
+    await fs.writeFile(filePath, raw.replace(/^status:\s*\S+/m, 'status: pending-review'), 'utf8');
+  }
+  // The team that built what QA reviewed is done: it moves to history so the fix pass starts with Jack alone.
+  const retireTeam = session.codingTeam && session.codingTeam.status !== 'assigned';
+  return updateSession(session.id, {
+    codingApprovedAt: null,
+    ...(session.delivery?.kind === 'kept' && { delivery: null }),
+    stage: 'coding-review',
+    // A report from an earlier pass would send the coder findings it may already have fixed.
+    qaFindingsPending: qaReportIsCurrent(session),
+    qaSendBackAt: new Date().toISOString(),
+    qaDeclinedNotes: declinedNotes,
+    qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
+    ...(retireTeam && { codingTeam: null, codingTeamHistory: [...session.codingTeamHistory, session.codingTeam!] }),
+  });
+}
+
 /** What shipping this branch would do, worked out from the repo (repo/delivery.ts). */
 export async function planDelivery(session: SessionRecord): Promise<DeliveryPlan> {
   if (!session.branch) throw new StageActionError('no branch to deliver yet');
@@ -192,6 +221,7 @@ export async function deliverSession(session: SessionRecord, plan?: DeliveryPlan
   const result = await deliver(app.repoRoot, delivery, text);
   const updated = await updateSession(session.id, { delivery: result });
   await recordSharedBranchShipped(updated);
+  scheduleRetrospective(updated);
   return updated;
 }
 
@@ -209,7 +239,9 @@ async function sharedBranchFeature(session: SessionRecord): Promise<{ title: str
 /** A split part's alternative to shipping: stays on its branch, and the next part continues on it. Only after QA is reviewed. */
 export async function keepSessionOnBranch(session: SessionRecord): Promise<SessionRecord> {
   try {
-    return await keepOnBranch(session);
+    const kept = await keepOnBranch(session);
+    scheduleRetrospective(kept);
+    return kept;
   } catch (err) {
     throw new StageActionError(err instanceof Error ? err.message : String(err));
   }

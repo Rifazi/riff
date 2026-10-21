@@ -823,8 +823,8 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
  * needs an MCP server, streamed events, or a resumable session, just one
  * plain text response per decision.
  */
-export async function runClaudeSingleShot(params: { systemPrompt: string; prompt: string; model?: string }): Promise<string> {
-  const { systemPrompt, prompt, model } = params;
+export async function runClaudeSingleShot(params: { systemPrompt: string; prompt: string; model?: string; effort?: ClaudeEffort }): Promise<string> {
+  const { systemPrompt, prompt, model, effort } = params;
   let resultText = '';
   let sawError = false;
   let errorText = '';
@@ -837,6 +837,7 @@ export async function runClaudeSingleShot(params: { systemPrompt: string; prompt
       maxTurns: 1,
       ...CLAUDE_ISOLATION,
       ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
     },
   })) {
     if (message.type !== 'result') continue;

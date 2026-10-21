@@ -15,9 +15,11 @@ import { getApp } from '../apps/apps-store.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import type { TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
-import { approveQa, cancelPendingApproval, deliverSession, keepSessionOnBranch, planDelivery } from '../sessions/stage-actions.js';
+import { approveQa, cancelPendingApproval, deliverSession, keepSessionOnBranch, planDelivery, sendBackToCoding } from '../sessions/stage-actions.js';
 import { isShipped } from '../sessions/shared-branch.js';
 import { sendStageActionError } from './stage-action-reply.js';
+import { isRetrospectiveRunning, runRetrospectiveOnce } from '../retrospective/service.js';
+import { readRetrospective } from '../retrospective/store.js';
 
 export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { message: string; attachments?: AttachmentInput[] } }>(
@@ -178,34 +180,14 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: `already delivered: ${session.delivery!.detail}` });
     }
     if (isQaTeamRunning(session.id)) return reply.code(409).send({ error: 'the QA team is still reviewing' });
-    cancelPendingApproval(session.id);
-    if (session.qaStatus === 'reviewed' && session.qaReportPath) {
-      const filePath = path.join(config.harnessRoot, session.qaReportPath);
-      const raw = await fs.readFile(filePath, 'utf8');
-      await fs.writeFile(filePath, raw.replace(/^status:\s*\S+/m, 'status: pending-review'), 'utf8');
+    try {
+      return await sendBackToCoding(
+        session,
+        Array.isArray(request.body?.declinedNotes) ? request.body.declinedNotes.filter((n): n is string => typeof n === 'string') : [],
+      );
+    } catch (err) {
+      return sendStageActionError(reply, err);
     }
-    // The team that built what QA reviewed is done: it moves to history so
-    // the fix pass starts with Jack alone, until he assigns a new round.
-    const retireTeam = session.codingTeam && session.codingTeam.status !== 'assigned';
-    return updateSession(session.id, {
-      codingApprovedAt: null,
-      // A part kept on its branch for the next part is back in progress.
-      ...(session.delivery?.kind === 'kept' && { delivery: null }),
-      stage: 'coding-review',
-      // A report from an earlier pass would send the coder findings it may
-      // already have fixed: then coding reopens with nothing relayed.
-      qaFindingsPending: qaReportIsCurrent(session),
-      qaSendBackAt: new Date().toISOString(),
-      // Notes left unchecked in the QA tab; none declined = all go back.
-      qaDeclinedNotes: Array.isArray(request.body?.declinedNotes)
-        ? request.body.declinedNotes.filter((n): n is string => typeof n === 'string')
-        : [],
-      qaStatus: session.qaStatus === 'reviewed' ? 'pending-review' : session.qaStatus,
-      ...(retireTeam && {
-        codingTeam: null,
-        codingTeamHistory: [...session.codingTeamHistory, session.codingTeam!],
-      }),
-    });
   });
 
   // Marks QA reviewed (the human, or Bridget on a clean pass). Reaching
@@ -244,6 +226,24 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       return await deliverSession(session);
     } catch (err) {
       return sendStageActionError(reply, err);
+    }
+  });
+
+  // Bridget's look back at how QA went once the branch was delivered (retrospective/).
+  // The POST reruns it on demand, e.g. for a session delivered before it existed.
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/retrospective', async (request, reply) => {
+    if (!(await getSession(request.params.id))) return reply.code(404).send({ error: 'session not found' });
+    return { retrospective: readRetrospective(request.params.id), running: isRetrospectiveRunning(request.params.id) };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/retrospective', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    if (session.qaRounds.length === 0 && session.transcripts.qa.length === 0) return reply.code(400).send({ error: 'QA has not run on this session yet' });
+    try {
+      return { retrospective: await runRetrospectiveOnce(session) };
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

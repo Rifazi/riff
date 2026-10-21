@@ -142,12 +142,12 @@ export async function decideNextAction(params: {
   const systemPrompt = override ?? DECISION_INSTRUCTIONS;
   const prompt = `Stage: ${stageLabel}\n\nConversation so far:\n${transcriptText || '(nothing yet)'}\n\nDecide: continue, ready or blocked?`;
 
-  // Riff's built-in local model first — free, and on the decision set in
+  // Opt-in (Settings → Dev Agents): the built-in local model first — free, and on the decision set in
   // CLAUDE.md step 12 it matched Haiku, with its misses all on the safe side
   // (stopping early). Anything wrong with it (not downloaded, helper
   // missing, timeout, unparseable reply) falls through to the configured
   // model below.
-  if (coordinatorConfig.useLocalModel !== false) {
+  if (coordinatorConfig.useLocalModel === true) {
     try {
       const decision = tryParseDecision(await generateLocal({ system: systemPrompt, prompt }));
       if (decision) return decision;
@@ -209,7 +209,7 @@ export async function decideGate(params: { stageLabel: string; transcriptText: s
   const prompt = `Stage: ${params.stageLabel}\n\nEnd of the conversation:\n${params.transcriptText || '(nothing)'}\n\nApprove or stop?`;
   const stop = (reason: string): GateDecision => ({ action: 'stop', reason });
 
-  if (coordinatorConfig.useLocalModel !== false) {
+  if (coordinatorConfig.useLocalModel === true) {
     try {
       const decision = tryParseGate(await generateLocal({ system: GATE_INSTRUCTIONS, prompt, maxTokens: 120 }));
       if (decision) return decision;

@@ -7,6 +7,7 @@ import { tool, type ModelMessage } from 'ai';
 import { z } from 'zod';
 import { config } from '../../config.js';
 import { ensureDependencies } from '../../repo/dependencies.js';
+import { captureWithChrome, type PageLogin } from './chrome-session.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +23,17 @@ export const screenshotSchema = z.object({
   dark: z.boolean().optional().describe('Render with prefers-color-scheme: dark.'),
   height: z.number().int().min(300).max(4000).optional().describe('Capture this many pixels of page height, to see below the fold. Default is the viewport height.'),
   url: z.string().optional().describe('A server that is already running, e.g. "http://localhost:5173". Leave out to start the app\'s own dev server.'),
+  login: z
+    .object({
+      path: z.string().optional().describe('The login page, e.g. "/login". Default "/login".'),
+      username: z.string(),
+      password: z.string(),
+    })
+    .optional()
+    .describe(
+      'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you. ' +
+        'Remembered for the rest of this turn, so later screenshots sign in again without it.'
+    ),
 });
 export type ScreenshotInput = z.infer<typeof screenshotSchema>;
 
@@ -30,8 +42,9 @@ export const screenshotDescription =
   'viewport and color scheme, and returns the screenshot as an image you can see, plus the file it was saved to. This is how you tell ' +
   'whether a screen looks good: judge hierarchy, spacing rhythm, alignment, density, contrast and balance from what you see, not from the ' +
   'markup. Take the desktop and phone views of each screen you assess, and dark mode if the app supports it. Costs a few seconds and a few ' +
-  'thousand tokens per image, so take only the screens that matter (at most 8 a turn). Screens behind a login or needing data may show ' +
-  'an error or empty state: that is worth noting too, but say you could not see the real screen.';
+  'thousand tokens per image, so take only the screens that matter (at most 8 a turn). Screens behind a login: pass `login` ' +
+  'with the credentials you were given and the tool fills in and submits the form for you. Without credentials such screens show the login ' +
+  'page or an empty state: note that, and say you could not see the real screen.';
 
 export interface ScreenshotResult {
   text: string;
@@ -119,6 +132,7 @@ export async function stopScreenshotServer(sessionId: string): Promise<void> {
 
 export function createScreenshotExecute(deps: { sessionId: string; repoRoot: string }) {
   let taken = 0;
+  let rememberedLogin: PageLogin | undefined;
   return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
     if (taken >= MAX_PER_TURN) throw new Error(`That is ${MAX_PER_TURN} screenshots this turn. Work from the ones you have.`);
     const chrome = findChrome();
@@ -142,6 +156,23 @@ export function createScreenshotExecute(deps: { sessionId: string; repoRoot: str
     await fs.mkdir(dir, { recursive: true });
     taken += 1;
     const file = path.join(dir, `${Date.now()}-${input.viewport ?? 'desktop'}${input.dark ? '-dark' : ''}.png`);
+    const login = input.login ?? rememberedLogin;
+    if (input.login) rememberedLogin = input.login;
+    const signedIn = login ? ', signed in' : '';
+    if (login) {
+      try {
+        await captureWithChrome({ chrome, url: target, width: view.width, height: input.height ?? view.height, dark: Boolean(input.dark), login, file });
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+      const shot = (await fs.readFile(file)).toString('base64');
+      const rel = path.relative(config.harnessRoot, file);
+      return {
+        text: `${target} at ${view.width}x${input.height ?? view.height}${input.dark ? ', dark' : ''}${signedIn}. Saved to ${rel}.`,
+        image: { data: shot, mediaType: 'image/png' },
+        file: rel,
+      };
+    }
     const args = [
       '--headless=new',
       '--disable-gpu',

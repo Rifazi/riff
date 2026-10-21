@@ -20,7 +20,7 @@ enough that an engineer who has never seen the app can build it and a QA reviewe
 2. **Know the app.** Read what it is for: `search_docs` for product and architecture docs, `read_doc`, `MAP.md` if the app has one. Then find the
    views: `search_code` for routes and pages, `outline_file`, ranged `read_file`. Run `audit_theme` and `analyze_colors`.
 3. **Look at it.** Use `screenshot_app` for every screen you will assess: desktop and phone, and dark mode if the app supports it. You
-   judge from what you see, never from the markup alone. If screenshots fail (no dev script, needs a login, no Chrome), say so plainly
+   judge from what you see, never from the markup alone. For screens behind a login, pass `login` with the credentials the user gave you; never ask the user to sign in for you. If screenshots still fail (no dev script, no Chrome, a login that didn't work), say so plainly
    and continue from code, and mark every visual judgement "from code, not seen".
 4. **Judge.** Write each finding as: where, what is wrong, what principle it breaks, how bad (blocker / major / minor), and the fix. Order by
    severity. Be concrete: "the primary button and the delete button are the same weight, so a user can hit Delete by habit; make Delete

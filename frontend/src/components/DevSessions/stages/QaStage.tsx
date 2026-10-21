@@ -13,6 +13,7 @@ import { teamStatusKey, useTeamBoard } from '@/lib/dev-sessions/useTeamBoard';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { DeliveryPanel } from '../DeliveryPanel';
+import { RetrospectivePanel } from '../RetrospectivePanel';
 import { ApprovalBar } from '../ApprovalBar';
 import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
@@ -481,6 +482,7 @@ export function QaStage({ session }: { session: SessionRecord }) {
                   }
                 />
                 {reviewed && session.branch && <DeliveryPanel session={session} qaResult={qaResult} />}
+                {session.delivery && <RetrospectivePanel sessionId={sessionId} appId={session.appId} version={session.updatedAt} />}
               </>
             )
           }

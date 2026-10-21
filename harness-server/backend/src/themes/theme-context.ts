@@ -4,6 +4,7 @@ import path from 'node:path';
 import { updateSession } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { summarizeAppTheme } from './apply-theme.js';
+import { lessonsBriefingFor, lessonsFingerprintFor } from '../retrospective/lessons-briefing.js';
 import { designMemoryBriefing, designMemoryFingerprint } from './design-memory.js';
 import { THEME_DEFINITION_PATH, themeBriefing, type ThemeBriefingRole } from './theme-docs.js';
 
@@ -11,8 +12,12 @@ import { THEME_DEFINITION_PATH, themeBriefing, type ThemeBriefingRole } from './
 // theme.json does (a new pick, an edit, or a hand edit).
 function themeFingerprint(repoRoot: string, appId?: string): { name: string | null; fingerprint: string } {
   const memory = appId ? designMemoryFingerprint(appId) : 'none';
+  const lessons = appId ? lessonsFingerprintFor(appId) : 'none';
   const theme = themeOnlyFingerprint(repoRoot);
-  return { name: theme.name, fingerprint: memory === 'none' ? theme.fingerprint : `${theme.fingerprint}+${memory}` };
+  let fingerprint = theme.fingerprint;
+  if (memory !== 'none') fingerprint += `+${memory}`;
+  if (lessons !== 'none') fingerprint += `+lessons:${lessons}`;
+  return { name: theme.name, fingerprint };
 }
 
 function themeOnlyFingerprint(repoRoot: string): { name: string | null; fingerprint: string } {
@@ -44,20 +49,20 @@ export async function themeContextForTurn(
   const seen = session.themeContextSeen[role];
   if (!isFirstTurn && seen === fingerprint) return { system: '', turnPrefix: '' };
 
-  const briefing = themeBriefing(role, name) + designMemoryBriefing(session.appId, role);
+  const briefing = themeBriefing(role, name) + designMemoryBriefing(session.appId, role) + lessonsBriefingFor(session.appId, role);
   await updateSession(session.id, { themeContextSeen: { ...session.themeContextSeen, [role]: fingerprint } });
   if (isFirstTurn) return { system: briefing, turnPrefix: '' };
   if (!briefing.trim()) return { system: '', turnPrefix: '' };
   const heading =
     seen === undefined
       ? '# UI theme context for this app'
-      : "# The app's UI theme changed since your last turn\n\nWhat follows replaces anything you were told earlier about the theme.";
+      : "# This app's briefing changed since your last turn (theme, design decisions, lessons)\n\nWhat follows replaces anything you were told earlier about them.";
   return { system: '', turnPrefix: `${heading}${briefing}\n\n---\n\n` };
 }
 
 /** For a coding-team member, which always starts a fresh conversation. */
 export function themeBriefingFor(repoRoot: string, role: ThemeBriefingRole, appId?: string): string {
-  return themeBriefing(role, themeOnlyFingerprint(repoRoot).name) + designMemoryBriefing(appId, role);
+  return themeBriefing(role, themeOnlyFingerprint(repoRoot).name) + designMemoryBriefing(appId, role) + lessonsBriefingFor(appId, role);
 }
 
 /**
