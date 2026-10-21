@@ -34,6 +34,13 @@ describe('fixCheckProblems', () => {
     expect(out[0]).toContain('src/Panel.tsx:56-63');
   });
 
+  test('a note_for_qa that names the blocker\'s file answers it, with no test needed', () => {
+    const d = diff('src/Other.ts', '@@ -1 +1 @@');
+    expect(fixCheckProblems(s, d)).not.toEqual([]);
+    expect(fixCheckProblems(s, d, ['src/Panel.tsx lines 56-63 hold no such code; that spot is wrong'])).toEqual([]);
+    expect(fixCheckProblems(s, d, ['unrelated note about src/Elsewhere.ts'])).not.toEqual([]);
+  });
+
   test('flags a fix that changed no test', () => {
     const out = fixCheckProblems(s, diff('src/Panel.tsx', '@@ -60 +60 @@'));
     expect(out.join('\n')).toContain('changed no test');

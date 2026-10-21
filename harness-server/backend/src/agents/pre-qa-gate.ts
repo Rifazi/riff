@@ -43,7 +43,7 @@ async function qaFixProblems(session: SessionRecord, app: AppConfig): Promise<st
   const diff = await diffWorktreeSince(app.repoRoot, last.head);
   // Nothing changed at all since that pass: not a fix pass in progress.
   if (!diff.trim() && head === last.head) return [];
-  return fixCheckProblems(await fixScopeFor(app.repoRoot, last), diff);
+  return fixCheckProblems(await fixScopeFor(app.repoRoot, last), diff, session.qaNotes.map((n) => n.text));
 }
 
 /**

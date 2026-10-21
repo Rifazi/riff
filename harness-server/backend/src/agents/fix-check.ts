@@ -1,4 +1,4 @@
-import type { FixScopeInfo } from './fix-scope.js';
+import type { FixScopeInfo, ScopedFinding } from './fix-scope.js';
 
 export interface Hunk {
   oldStart: number;
@@ -51,13 +51,19 @@ const clip = (s: string, n = 160) => (s.length > n ? `${s.slice(0, n - 1)}…` :
  * no test change is how a fix breaks the line it fixed. Findings that name no
  * file are skipped, since nothing can be checked against them.
  */
-export function fixCheckProblems(scope: FixScopeInfo | null, diff: string): string[] {
+export function fixCheckProblems(scope: FixScopeInfo | null, diff: string, notes: string[] = []): string[] {
   if (!scope) return [];
   const hunks = parseHunks(diff);
   const blockers = scope.findings.filter((f) => f.kind === 'blocking');
   const problems: string[] = [];
+  // The error tells the coder it can say in note_for_qa why a spot is wrong,
+  // so a note that names the blocker's file answers it (QA then re-checks).
+  const answered = (f: ScopedFinding) => f.refs.length > 0 && notes.some((n) => f.refs.some((r) => n.includes(r.path) || n.includes(r.path.split('/').pop()!)));
+  let unanswered = 0;
   blockers.forEach((f, i) => {
     if (f.refs.length === 0) return;
+    if (answered(f)) return;
+    unanswered++;
     const hit = f.refs.some((r) => {
       const h = hunks.get(r.path);
       return Boolean(h && (r.lines ? touches(h, r.lines) : true));
@@ -70,7 +76,7 @@ export function fixCheckProblems(scope: FixScopeInfo | null, diff: string): stri
     );
   });
   const changed = [...hunks.keys()];
-  if (blockers.length > 0 && changed.length > 0 && !changed.some((f) => TEST_FILE.test(f))) {
+  if (unanswered > 0 && changed.length > 0 && !changed.some((f) => TEST_FILE.test(f))) {
     problems.push('The fix changed no test. Add or change a test that fails without each blocking fix.');
   }
   return problems;
