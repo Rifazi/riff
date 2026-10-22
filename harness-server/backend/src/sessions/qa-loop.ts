@@ -5,6 +5,8 @@
  * session side is in qa-rounds.ts.
  */
 
+import type { QaResponse } from './session.js';
+
 export interface QaCriterionRecord {
   text: string;
   verdict: 'met' | 'not-met' | 'unverified';
@@ -230,6 +232,7 @@ export function rereviewBrief(
   fixFiles: string[] | null,
   pass: number,
   declinedNotes: string[] = [],
+  responses: QaResponse[] = [],
 ): string {
   const passes = rounds
     .map((r) => {
@@ -265,10 +268,11 @@ export function rereviewBrief(
         declinedNotes.map((n) => `- ${n}`).join('\n')
       : '';
 
+  const answers = responses.length > 0 ? coderAnswersSection(responses) : '';
   const solo = soloRereview(rounds, fixFiles);
   return (
     `\n\n# Earlier QA passes on this branch\n\nThis is pass ${pass}. The coding agent has pushed fixes since the last ` +
-    `pass.\n\n${passes}\n\n## Files the fix changed\n\n${delta}${carry}${declined}\n\n## How to re-review\n\n` +
+    `pass.\n\n${passes}\n\n## Files the fix changed\n\n${delta}${carry}${declined}${answers}\n\n## How to re-review\n\n` +
     '1. get_diff shows only what the fix changed (scope "fix", the default); the rest of the branch was reviewed last pass.\n' +
     '2. Check every blocking finding of the last pass is fixed in the code, with a test that would catch it coming back.\n' +
     '3. Read the fix itself in full, every changed line above: a fix is where new bugs come from.\n' +
@@ -280,6 +284,27 @@ export function rereviewBrief(
     (solo
       ? '\n\nThe fix is small: review it yourself. assign_qa_team isn\'t available this pass.'
       : '\n\nIf you split it across reviewers, give them only the re-check criteria and the files the fix changed.')
+  );
+}
+
+/**
+ * The coder's answer to each blocker, and how QA has to treat them. A blocker
+ * that comes back unchanged teaches the coder nothing, so a kept one must say
+ * what is still wrong, and a dispute that holds is withdrawn out loud.
+ */
+export function coderAnswersSection(responses: QaResponse[]): string {
+  const lines = responses
+    .sort((a, b) => a.blocker - b.blocker)
+    .map((r) => `### Blocking ${r.blocker} (${r.status}): ${r.finding}\n\nCoder: ${r.explanation}\n\nEvidence: ${r.evidence}`)
+    .join('\n\n');
+  return (
+    '\n\n## The coder\'s answers to your blocking findings\n\n' +
+    'Read each before the code. Judge the claim on its evidence, then write the outcome in the report body for every one:\n\n' +
+    '- fixed: open the file:line or test given. If it holds, the blocker is gone. If not, keep it and say exactly what is still wrong: the input, the expected and actual result, the line, and why the coder\'s change does not cover it.\n' +
+    '- disputed: check the line or behaviour the coder cites. If the coder is right, write "Withdrawn: <why>" and do not list it as a blocker or a note. If not, keep it as a blocker that starts "Re: your dispute —" and answers the explanation point by point, with a concrete case that shows it (file:line, or input and result).\n' +
+    '- blocked: the coder could not do it. Work out why from its error. If the criterion cannot be met as written, say so plainly and grade it against what is achievable. If another route exists, name it step by step.\n\n' +
+    'A blocker that comes back to the coder must carry something the last one did not: a repeat of the same sentence is not feedback.\n\n' +
+    lines
   );
 }
 

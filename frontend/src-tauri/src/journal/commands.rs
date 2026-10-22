@@ -1,7 +1,7 @@
 //! Tauri commands for the Journal view.
 
 use super::repository::{
-    JournalRepository, MeetingJournalStatus, MeetingJournalTag, Notebook, NotebookEntry, NotebookOverview,
+    JournalRepository, NewEntry, STATUS_FILED, MeetingJournalStatus, MeetingJournalTag, Notebook, NotebookEntry, NotebookOverview,
 };
 use super::service::{self, AskAnswer, AskTurn};
 use crate::state::AppState;
@@ -164,10 +164,98 @@ pub async fn journal_move_entry<R: Runtime>(
     JournalRepository::prune_empty_auto_notebooks(pool)
         .await
         .map_err(|e| e.to_string())?;
-    service::refresh_meeting_status(&app, pool, &meeting_id).await?;
+    if let Some(meeting_id) = meeting_id {
+        service::refresh_meeting_status(&app, pool, &meeting_id).await?;
+    }
     service::emit_updated(&app, None, "notebooks-changed", None);
     service::spawn_compile_journals(app, vec![notebook_id.clone()]);
     Ok(notebook_id)
+}
+
+/// Adds a note the user typed to a journal. It belongs to no meeting.
+#[tauri::command]
+pub async fn journal_add_note<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    notebook_id: String,
+    text: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("Write something to add".into());
+    }
+    let pool = state.db_manager.pool();
+    JournalRepository::get_notebook(pool, &notebook_id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Journal not found")?;
+    let title = title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            // First non-empty line, minus markdown markers like `#` or `-`.
+            let line = text
+                .lines()
+                .map(|l| l.trim().trim_start_matches(|c: char| matches!(c, '#' | '-' | '*' | '>' | ' ')))
+                .find(|l| !l.is_empty())
+                .unwrap_or(text);
+            if line.chars().count() > 60 {
+                format!("{}…", line.chars().take(60).collect::<String>().trim_end())
+            } else {
+                line.to_string()
+            }
+        });
+    JournalRepository::insert_entry(
+        pool,
+        &NewEntry {
+            notebook_id: Some(notebook_id.clone()),
+            meeting_id: String::new(),
+            title,
+            summary: text.to_string(),
+            key_points: Vec::new(),
+            start_time: None,
+            end_time: None,
+            status: STATUS_FILED,
+            confidence: None,
+            question: None,
+            suggestions: Vec::new(),
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    service::emit_updated(&app, None, "notebooks-changed", None);
+    service::spawn_compile_journals(app, vec![notebook_id]);
+    Ok(())
+}
+
+/// Edits a note's title and text.
+#[tauri::command]
+pub async fn journal_update_note<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    entry_id: String,
+    title: String,
+    text: String,
+) -> Result<(), String> {
+    let (title, text) = (title.trim(), text.trim());
+    if text.is_empty() {
+        return Err("A note can't be empty".into());
+    }
+    if title.is_empty() {
+        return Err("A note needs a title".into());
+    }
+    let notebook_id = JournalRepository::update_entry_text(state.db_manager.pool(), &entry_id, title, text)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("Note not found")?;
+    service::emit_updated(&app, None, "notebooks-changed", None);
+    if let Some(notebook_id) = notebook_id {
+        service::spawn_compile_journals(app, vec![notebook_id]);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -183,7 +271,7 @@ pub async fn journal_delete_entry<R: Runtime>(
     JournalRepository::delete_entry(pool, &entry_id)
         .await
         .map_err(|e| e.to_string())?;
-    if let Some(meeting_id) = meeting_id {
+    if let Some(meeting_id) = meeting_id.flatten() {
         service::refresh_meeting_status(&app, pool, &meeting_id).await?;
     }
     service::emit_updated(&app, None, "notebooks-changed", None);

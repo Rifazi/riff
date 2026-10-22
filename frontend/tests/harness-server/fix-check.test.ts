@@ -28,6 +28,11 @@ describe('fixCheckProblems', () => {
     expect(fixCheckProblems(s, diff('src/Panel.tsx', '@@ -60,1 +60,2 @@') + test1)).toEqual([]);
   });
 
+  test('a test added next to the named file answers a blocker that asks for a test', () => {
+    const ask: FixScopeInfo = { paths: [], fenced: true, findings: [{ kind: 'blocking', text: 'add a test for the label', refs: [{ path: 'src/Panel.tsx', lines: [56, 63] }] }] };
+    expect(fixCheckProblems(ask, test1)).toEqual([]);
+  });
+
   test('flags a fix elsewhere in the named file', () => {
     const out = fixCheckProblems(s, diff('src/Panel.tsx', '@@ -200,1 +200,2 @@') + test1);
     expect(out).toHaveLength(1);
@@ -63,5 +68,34 @@ describe('non-actionable notes', () => {
     const raw = `---\nresult: pass\nactionable-notes:\n  - "no screenshot tool available; human should eyeball it"\n  - "src/a.ts:4 add a test"\n---\nbody`;
     expect(parseQaReport(raw).notes).toEqual(['src/a.ts:4 add a test']);
     expect(compactQaFindings(raw)).not.toContain('screenshot');
+  });
+});
+
+describe('respond_to_qa answers', () => {
+  const s = scope('autosave loop', 'src/Panel.tsx', [56, 63]);
+  const resp = (status: 'fixed' | 'disputed' | 'blocked') => [{ blocker: 1, status }];
+
+  test('a blocker with no answer is flagged even when nothing else is wrong', () => {
+    const out = fixCheckProblems(s, '', [], []);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('respond_to_qa');
+  });
+
+  test('a dispute or blocked answer needs no diff: QA rules on it', () => {
+    expect(fixCheckProblems(s, '', [], resp('disputed'))).toEqual([]);
+    expect(fixCheckProblems(s, '', [], resp('blocked'))).toEqual([]);
+  });
+
+  test('a claimed fix is still checked against the diff', () => {
+    expect(fixCheckProblems(s, '', [], resp('fixed'))).toHaveLength(1);
+  });
+
+  test('the send-back shows the coder its own earlier answer beside the blocker', () => {
+    const report = '---\nresult: fail\nblocking-findings:\n  - "src/Panel.tsx:56-63 autosave loop never stops"\n---\nbody';
+    const text = compactQaFindings(report, null, [], [
+      { pass: 1, blocker: 1, finding: 'src/Panel.tsx:56-63 autosave loop never stops', status: 'disputed', explanation: 'the effect cleans up on unmount', evidence: 'Panel.tsx:70', at: '' },
+    ]);
+    expect(text).toContain('1. src/Panel.tsx:56-63 autosave loop never stops');
+    expect(text).toContain('You answered this (disputed): the effect cleans up on unmount');
   });
 });

@@ -151,6 +151,11 @@ export const journalApi = {
     invoke<{ covers: string; notes_markdown: string }>('journal_requirements_brief', { notebookId }),
   getMeetingTags: () => invoke<MeetingJournalTag[]>('journal_meeting_tags'),
   getMeetingEntries: (meetingId: string) => invoke<NotebookEntry[]>('journal_get_meeting_entries', { meetingId }),
+  /** Adds a note the user typed; it belongs to no meeting. */
+  addNote: (notebookId: string, text: string, title?: string) =>
+    invoke<void>('journal_add_note', { notebookId, text, title }),
+  updateNote: (entryId: string, title: string, text: string) =>
+    invoke<void>('journal_update_note', { entryId, title, text }),
   deleteEntry: (entryId: string) => invoke<void>('journal_delete_entry', { entryId }),
   organizeMeeting: (meetingId: string) => invoke<void>('journal_organize_meeting', { meetingId }),
   organizePending: () => invoke<number>('journal_organize_pending'),

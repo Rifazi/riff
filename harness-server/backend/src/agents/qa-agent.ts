@@ -202,7 +202,7 @@ export async function runQaAgentTurn(
     review = await rereviewContext(session, app.repoRoot);
     const { rounds, fixFiles } = review;
     const pass = (rounds[rounds.length - 1]?.pass ?? session.qaPass) + 1;
-    if (rounds.length > 0) previousPasses = rereviewBrief(rounds, fixFiles, pass, session.qaDeclinedNotes ?? []);
+    if (rounds.length > 0) previousPasses = rereviewBrief(rounds, fixFiles, pass, session.qaDeclinedNotes ?? [], session.qaResponses.filter((r) => r.pass === rounds[rounds.length - 1]?.pass));
     // Rounds rebuilt from older sessions are frozen now, with the report they ended on.
     session.qaRounds = rounds;
     session.qaPass = pass;

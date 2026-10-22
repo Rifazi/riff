@@ -75,6 +75,8 @@ import { createBuildSoloToolClaude, createTeamLeadToolsClaude } from './tool-def
 import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createRunNpmInstallToolClaude } from './tool-defs-claude/npm-install-tool.js';
 import { createNoteForQaToolClaude } from './tool-defs-claude/qa-notes-tool.js';
+import { createRespondToQaTool } from './tool-defs/qa-response-tool.js';
+import { createRespondToQaToolClaude } from './tool-defs-claude/qa-response-tool.js';
 import { createWidenFixScopeTool } from './tool-defs/fix-scope-tool.js';
 import { createWidenFixScopeToolClaude } from './tool-defs-claude/fix-scope-tool.js';
 import { fixContext, fixScopeFor } from './fix-scope.js';
@@ -109,6 +111,7 @@ const TOOL_NAMES = [
   'run_checked_command',
   'run_npm_install',
   'note_for_qa',
+  'respond_to_qa',
   'remember_design',
   'widen_fix_scope',
   'finish_step',
@@ -584,6 +587,7 @@ export async function runCodingAgentTurn(
             runCheckedCommandToolClaude,
             createRunNpmInstallToolClaude({ repoRoot: app.repoRoot }),
             createNoteForQaToolClaude({ sessionId: session.id, from: null }),
+            createRespondToQaToolClaude({ sessionId: session.id }),
             createRememberDesignToolClaude({ appId: app.id, sessionId: session.id }),
             createWidenFixScopeToolClaude({ sessionId: session.id }),
             createFinishStepToolClaude(finishDeps),
@@ -686,6 +690,7 @@ export async function runCodingAgentTurn(
         ...runPrettierToolEntry({ repoRoot: app.repoRoot }, session.histories.coding),
         run_npm_install: createRunNpmInstallTool({ repoRoot: app.repoRoot }),
         note_for_qa: createNoteForQaTool({ sessionId: session.id, from: null }),
+        respond_to_qa: createRespondToQaTool({ sessionId: session.id }),
         remember_design: createRememberDesignTool({ appId: app.id, sessionId: session.id }),
         widen_fix_scope: createWidenFixScopeTool({ sessionId: session.id }),
         finish_step: createFinishStepTool(finishDeps),

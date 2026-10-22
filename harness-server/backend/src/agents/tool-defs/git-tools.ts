@@ -148,7 +148,7 @@ export function createGitExecutors(deps: GitToolDeps) {
     if (problem) {
       throw new Error(`Not committed: ${problem}. Message was: "${message.split('\n')[0]}"`);
     }
-    const formatted = await formatFiles(deps.repoRoot, formattable(deps.repoRoot, files, deps.writablePaths), deps.helperContext);
+    const formatted = await formatFiles(deps.repoRoot, formattable(deps.repoRoot, files, deps.writablePaths), deps.helperContext, deps.baseBranch);
     if (!formatted.ok) return `Nothing committed: prettier failed (usually a syntax error).\n\n${formatted.output}`;
     const hash = await stageAndCommit(deps.repoRoot, branchName, message, files, deps.writablePaths);
     return `Committed ${hash.slice(0, 8)}: ${message.split('\n')[0]}${note ? ` (${note}.)` : ''}`;

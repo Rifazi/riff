@@ -928,6 +928,8 @@ pub fn run() {
             journal::commands::journal_delete_notebook,
             journal::commands::journal_merge_notebooks,
             journal::commands::journal_move_entry,
+            journal::commands::journal_add_note,
+            journal::commands::journal_update_note,
             journal::commands::journal_delete_entry,
             journal::commands::journal_organize_meeting,
             journal::commands::journal_organize_pending,

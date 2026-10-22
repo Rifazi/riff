@@ -1,10 +1,20 @@
 'use client';
 
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Combine, MessageCircleQuestion, MoreHorizontal, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  Combine,
+  MessageCircleQuestion,
+  NotebookPen,
+  Upload,
+  MoreHorizontal,
+  Pencil,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { BackButton } from '@/components/BackButton';
@@ -59,6 +69,13 @@ function NotebookView() {
   const [merging, setMerging] = useState(false);
   const [mergeTarget, setMergeTarget] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const mdFileInput = useRef<HTMLInputElement>(null);
+  const [editingEntry, setEditingEntry] = useState<NotebookEntry | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editText, setEditText] = useState('');
   const [movingEntry, setMovingEntry] = useState<NotebookEntry | null>(null);
   const [moveTarget, setMoveTarget] = useState('');
   const [removingEntry, setRemovingEntry] = useState<NotebookEntry | null>(null);
@@ -119,6 +136,25 @@ function NotebookView() {
     },
     onError,
   });
+  const editNoteMutation = useMutation({
+    mutationFn: () => journalApi.updateNote(editingEntry!.id, editTitle, editText),
+    onSuccess: () => {
+      setEditingEntry(null);
+      invalidate();
+      toast.success('Note updated');
+    },
+    onError,
+  });
+  const addNoteMutation = useMutation({
+    mutationFn: () => journalApi.addNote(notebookId, noteText),
+    onSuccess: () => {
+      setAddingNote(false);
+      setNoteText('');
+      invalidate();
+      toast.success('Note added');
+    },
+    onError,
+  });
   const refileMutation = useMutation({
     mutationFn: (meetingId: string) => journalApi.organizeMeeting(meetingId),
     onError,
@@ -170,6 +206,18 @@ function NotebookView() {
         }
         actions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setNoteText('');
+                setAddingNote(true);
+              }}
+              title="Type a note straight into this journal"
+            >
+              <NotebookPen />
+              Add to journal
+            </Button>
             <RequirementsButton source={requirementsSource} disabled={entries.length === 0} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -205,26 +253,129 @@ function NotebookView() {
           </>
         }
       />
+      <Dialog open={!!editingEntry} onOpenChange={(open) => !open && setEditingEntry(null)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Edit note</DialogTitle>
+            <DialogDescription>
+              {editingEntry?.meeting_id
+                ? 'Re-filing this meeting later will replace your edits.'
+                : 'Markdown is supported.'}
+            </DialogDescription>
+          </DialogHeader>
+          <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Title" />
+          <Textarea
+            rows={10}
+            className="font-mono text-xs"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingEntry(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editNoteMutation.mutate()}
+              disabled={!editTitle.trim() || !editText.trim() || editNoteMutation.isPending}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={addingNote} onOpenChange={setAddingNote}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Add to “{notebook.title}”</DialogTitle>
+            <DialogDescription>
+              Markdown is supported: paste it or load a .md file. It's filed as a note, and the overview and Ask include
+              it.
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            ref={mdFileInput}
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              try {
+                const text = await file.text();
+                setNoteText((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${text}` : text));
+              } catch {
+                toast.error('Could not read that file');
+              }
+            }}
+          />
+          <Textarea
+            autoFocus
+            rows={10}
+            className="font-mono text-xs"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="What should this journal remember?"
+          />
+          <DialogFooter className="sm:justify-between">
+            <Button variant="ghost" onClick={() => mdFileInput.current?.click()}>
+              <Upload /> Load .md file
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setAddingNote(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => addNoteMutation.mutate()} disabled={!noteText.trim() || addNoteMutation.isPending}>
+                Add note
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PageBody wide>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
           {/* Notes timeline */}
           <div className="min-w-0 space-y-8">
             {entries.length === 0 && (
               <Card className="border-dashed py-12 text-center text-sm text-muted-foreground shadow-none">
-                No notes yet. Parts of meetings that discuss this topic will be filed here.
+                No notes yet. Parts of meetings that discuss this topic will be filed here, or add one yourself.
               </Card>
             )}
             {groups.map(([day, dayEntries]) => (
               <section key={day}>
-                <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span className={`h-2 w-2 rounded-full ${color.dot}`} />
-                  {day}
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <button
+                    type="button"
+                    aria-expanded={!collapsedDays.has(day)}
+                    onClick={() =>
+                      setCollapsedDays((prev) => {
+                        const next = new Set(prev);
+                        if (!next.delete(day)) next.add(day);
+                        return next;
+                      })
+                    }
+                    className="flex w-full items-center gap-2 text-left uppercase hover:text-foreground"
+                  >
+                    <span className={`h-2 w-2 rounded-full ${color.dot}`} />
+                    {day}
+                    <span className="font-normal normal-case">
+                      {collapsedDays.has(day) && `· ${dayEntries.length} ${dayEntries.length === 1 ? 'note' : 'notes'}`}
+                    </span>
+                    <ChevronDown
+                      className={`ml-auto h-3.5 w-3.5 transition-transform ${collapsedDays.has(day) ? '-rotate-90' : ''}`}
+                    />
+                  </button>
                 </h2>
-                <div className="space-y-3 border-l border-border pl-4">
+                <div className={`space-y-3 border-l border-border pl-4 ${collapsedDays.has(day) ? 'hidden' : ''}`}>
                   {dayEntries.map((entry) => (
                     <EntryCard
                       key={entry.id}
                       entry={entry}
+                      onEdit={() => {
+                        setEditTitle(entry.title);
+                        setEditText(entry.summary);
+                        setEditingEntry(entry);
+                      }}
                       onMove={() => {
                         setMoveTarget('');
                         setMovingEntry(entry);

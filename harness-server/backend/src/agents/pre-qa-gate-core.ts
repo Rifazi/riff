@@ -102,6 +102,21 @@ export function gateStuck(previous: readonly string[] | null | undefined, now: r
   return now.every((item) => before.has(item));
 }
 
+/**
+ * The lead's message for a fix pass after the first. A pass that left the same
+ * things failing gets told so, and told to find out why instead of repeating it.
+ */
+export function gateRetryMessage(message: string, pass: number, stuck: boolean): string {
+  if (!stuck) return message;
+  return (
+    `Fix attempt ${pass + 1}: your last pass left exactly the same things failing, so what you changed didn't address them. ` +
+    'Do not repeat it. For each failure below, run the check or audit_architecture yourself, read the exact output, and work out why it still fails ' +
+    '(a stale generated section needs audit_architecture({ regenerate: true }); a missing DOMAIN.md has to be created and committed; ' +
+    'a problem in code you did not touch is not yours, so say so with note_for_qa). Commit the fix and confirm the check passes before you stop.\n\n' +
+    message
+  );
+}
+
 export function gateStopReason(summary: string, auditProblems: string[], why: 'stuck' | 'limit', passes: number): string {
   const lead =
     why === 'stuck'

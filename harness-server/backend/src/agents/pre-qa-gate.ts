@@ -10,11 +10,19 @@ import { fixScopeFor } from './fix-scope.js';
 import { blockingAuditProblems, checkSucceeded, gateDetails, gateFingerprint, gateMessage, gateSummary, problemKey, type GateCheck } from './pre-qa-gate-core.js';
 
 export type PreQaGateResult =
-  | { status: 'pass'; summary: string }
+  // `advisory`: fix-check problems the coder was already told about once; QA gets them as a note instead of the branch being held.
+  | { status: 'pass'; summary: string; advisory?: string[] }
   // The checks can't run here (no branch, or the checkout is on another
   // branch): QA doesn't run them either, so the branch can't go on.
   | { status: 'skipped'; summary: string }
   | { status: 'fail'; summary: string; message: string; details: string; fingerprint: string[]; auditProblems: string[] };
+
+// How many times the fix check has held a QA pass's fix back. It can't tell a
+// fix that is wrong from one it can't see (a revert the formatter undid, a
+// blocker fixed somewhere QA didn't name), so it asks once and then hands what
+// is left to QA, who looks at the real code, instead of holding the branch.
+const fixCheckHolds = new Map<string, number>();
+const MAX_FIX_CHECK_HOLDS = 1;
 
 const baselineCache = new Map<string, Set<string>>();
 
@@ -39,11 +47,13 @@ async function baselineProblems(app: AppConfig, base: string): Promise<Set<strin
 async function qaFixProblems(session: SessionRecord, app: AppConfig): Promise<string[]> {
   const last = session.qaRounds?.[session.qaRounds.length - 1];
   if (!last?.head || last.blocking.length === 0) return [];
-  const head = await resolveCommit(app.repoRoot, 'HEAD');
   const diff = await diffWorktreeSince(app.repoRoot, last.head);
-  // Nothing changed at all since that pass: not a fix pass in progress.
-  if (!diff.trim() && head === last.head) return [];
-  return fixCheckProblems(await fixScopeFor(app.repoRoot, last), diff, session.qaNotes.map((n) => n.text));
+  return fixCheckProblems(
+    await fixScopeFor(app.repoRoot, last),
+    diff,
+    session.qaNotes.map((n) => n.text),
+    (session.qaResponses ?? []).filter((r) => r.pass === last.pass),
+  );
 }
 
 /**
@@ -81,7 +91,17 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
   }
 
   const fixProblems = await qaFixProblems(session, app).catch(() => [] as string[]);
-  if (fixProblems.length) checks.push({ label: 'fix check', passed: false, output: fixProblems.map((p) => `- ${p}`).join('\n') });
+  let advisory: string[] = [];
+  if (fixProblems.length) {
+    const key = `${session.id}:${session.qaRounds?.[session.qaRounds.length - 1]?.pass ?? 0}`;
+    const holds = fixCheckHolds.get(key) ?? 0;
+    if (holds < MAX_FIX_CHECK_HOLDS) {
+      fixCheckHolds.set(key, holds + 1);
+      checks.push({ label: 'fix check', passed: false, output: fixProblems.map((p) => `- ${p}`).join('\n') });
+    } else {
+      advisory = fixProblems;
+    }
+  }
 
   let auditProblems: string[] = [];
   let regenerated: string[] = [];
@@ -108,5 +128,5 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
   const summary = gateSummary(checks, auditProblems) + (regenerated.length ? ` (regenerated ${regenerated.length} DOMAIN.md)` : '');
   const message = gateMessage(checks, auditProblems);
   const details = gateDetails(checks, auditProblems);
-  return message && details ? { status: 'fail', summary, message, details, fingerprint: gateFingerprint(checks, auditProblems), auditProblems } : { status: 'pass', summary };
+  return message && details ? { status: 'fail', summary, message, details, fingerprint: gateFingerprint(checks, auditProblems), auditProblems } : { status: 'pass', summary, ...(advisory.length ? { advisory } : {}) };
 }

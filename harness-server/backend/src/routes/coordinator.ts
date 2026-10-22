@@ -29,7 +29,7 @@ import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam } from '../agents/team/coding-team.js';
 import { isQaTeamRunning, runQaTeam } from '../agents/team/qa-team.js';
 import { runPreQaGate } from '../agents/pre-qa-gate.js';
-import { gateStopReason, gateStuck } from '../agents/pre-qa-gate-core.js';
+import { gateRetryMessage, gateStopReason, gateStuck } from '../agents/pre-qa-gate-core.js';
 import { getApp } from '../apps/apps-store.js';
 import {
   approveCoding,
@@ -64,7 +64,7 @@ const PERSONA = 'Bridget';
 const TEAM_START_GRACE_MS = 10_000;
 const TEAM_POLL_MS = 5_000;
 // Fix passes the pre-QA gate asks for before it hands the branch to a human.
-const MAX_GATE_SEND_BACKS = 2;
+const MAX_GATE_SEND_BACKS = 5;
 // QA failures in a row Bridget sends back by herself before she stops for the human.
 const MAX_QA_SEND_BACKS = 8;
 
@@ -128,12 +128,12 @@ async function preQaGate(
   }
   if (gate.status !== 'fail') return null;
   const stuck = gateStuck(session.coordinatorGateLast, gate.fingerprint);
-  if (stuck || session.coordinatorGateSendBacks >= MAX_GATE_SEND_BACKS) {
-    return { kind: 'stop', reason: gateStopReason(gate.summary, gate.auditProblems, stuck ? 'stuck' : 'limit', session.coordinatorGateSendBacks) };
+  if (session.coordinatorGateSendBacks >= MAX_GATE_SEND_BACKS) {
+    return { kind: 'stop', reason: gateStopReason(gate.summary, gate.auditProblems, 'limit', session.coordinatorGateSendBacks) };
   }
   await updateSession(session.id, { coordinatorGateSendBacks: session.coordinatorGateSendBacks + 1, coordinatorGateLast: gate.fingerprint });
   send({ type: 'coordinator_decision', action: 'continue', reason: `Pre-QA checks: ${gate.summary}. Sending it back to the coding lead.` });
-  return { kind: 'fix', message: gate.message };
+  return { kind: 'fix', message: gateRetryMessage(gate.message, session.coordinatorGateSendBacks, stuck) };
 }
 
 /**

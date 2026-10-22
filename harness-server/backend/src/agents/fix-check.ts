@@ -1,4 +1,4 @@
-import type { FixScopeInfo, ScopedFinding } from './fix-scope.js';
+import { inFixScope, type FixScopeInfo, type ScopedFinding } from './fix-scope.js';
 
 export interface Hunk {
   oldStart: number;
@@ -51,7 +51,13 @@ const clip = (s: string, n = 160) => (s.length > n ? `${s.slice(0, n - 1)}…` :
  * no test change is how a fix breaks the line it fixed. Findings that name no
  * file are skipped, since nothing can be checked against them.
  */
-export function fixCheckProblems(scope: FixScopeInfo | null, diff: string, notes: string[] = []): string[] {
+export function fixCheckProblems(
+  scope: FixScopeInfo | null,
+  diff: string,
+  notes: string[] = [],
+  // The coder's respond_to_qa answers for this pass; undefined skips the rule that every blocker needs one.
+  responses?: { blocker: number; status: 'fixed' | 'disputed' | 'blocked' }[],
+): string[] {
   if (!scope) return [];
   const hunks = parseHunks(diff);
   const blockers = scope.findings.filter((f) => f.kind === 'blocking');
@@ -61,12 +67,24 @@ export function fixCheckProblems(scope: FixScopeInfo | null, diff: string, notes
   const answered = (f: ScopedFinding) => f.refs.length > 0 && notes.some((n) => f.refs.some((r) => n.includes(r.path) || n.includes(r.path.split('/').pop()!)));
   let unanswered = 0;
   blockers.forEach((f, i) => {
+    const response = responses?.find((r) => r.blocker === i + 1);
+    if (responses && !response) {
+      problems.push(
+        `Blocking ${i + 1} has no answer: "${clip(f.text)}". Call respond_to_qa for it: fixed (with the test or file:line that proves it), ` +
+          'disputed (why QA is wrong, with the exact line or behaviour) or blocked (what you tried and the exact error).',
+      );
+      return;
+    }
+    // A dispute or a blocked fix is QA's to rule on; only a claimed fix is checked against the diff.
+    if (response && response.status !== 'fixed') return;
     if (f.refs.length === 0) return;
     if (answered(f)) return;
     unanswered++;
+    // A blocker that asks for a test is fixed in the test next to the file it names, not at those lines.
     const hit = f.refs.some((r) => {
       const h = hunks.get(r.path);
-      return Boolean(h && (r.lines ? touches(h, r.lines) : true));
+      if (h && (r.lines ? touches(h, r.lines) : true)) return true;
+      return /\btests?\b/i.test(f.text) && [...hunks.keys()].some((file) => file !== r.path && TEST_FILE.test(file) && inFixScope(file, [r.path]));
     });
     if (hit) return;
     const where = f.refs.map((r) => `${r.path}${r.lines ? `:${r.lines[0]}${r.lines[1] !== r.lines[0] ? `-${r.lines[1]}` : ''}` : ''}`).join(', ');

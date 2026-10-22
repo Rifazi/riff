@@ -54,15 +54,15 @@ pub struct Suggestion {
 struct EntryRow {
     id: String,
     notebook_id: Option<String>,
-    meeting_id: String,
+    meeting_id: Option<String>,
     title: String,
     summary: String,
     key_points: Option<String>,
     start_time: Option<f64>,
     end_time: Option<f64>,
     created_at: String,
-    meeting_title: String,
-    meeting_created_at: String,
+    meeting_title: Option<String>,
+    meeting_created_at: Option<String>,
     meeting_duration: Option<f64>,
     status: String,
     confidence: Option<f64>,
@@ -77,6 +77,7 @@ pub struct NotebookEntry {
     pub id: String,
     /// `None` while the part waits for the user to pick a journal.
     pub notebook_id: Option<String>,
+    /// Empty for a note the user typed into the journal.
     pub meeting_id: String,
     pub title: String,
     pub summary: String,
@@ -197,6 +198,8 @@ impl From<EntryRow> for NotebookEntry {
             .as_deref()
             .and_then(|s| serde_json::from_str::<Vec<Suggestion>>(s).ok())
             .unwrap_or_default();
+        // A note typed into the journal has no meeting: it carries its own date.
+        let saved_at = row.meeting_created_at.unwrap_or_else(|| row.created_at.clone());
         NotebookEntry {
             status: row.status,
             confidence: row.confidence,
@@ -204,18 +207,18 @@ impl From<EntryRow> for NotebookEntry {
             suggestions,
             notebook_title: row.notebook_title,
             notebook_color: row.notebook_color,
-            meeting_date: normalize_timestamp(&row.meeting_created_at),
-            meeting_started_at: started_at(&row.meeting_created_at, row.meeting_duration),
+            meeting_date: normalize_timestamp(&saved_at),
+            meeting_started_at: started_at(&saved_at, row.meeting_duration),
             id: row.id,
             notebook_id: row.notebook_id,
-            meeting_id: row.meeting_id,
+            meeting_id: row.meeting_id.unwrap_or_default(),
             title: row.title,
             summary: row.summary,
             key_points,
             start_time: row.start_time,
             end_time: row.end_time,
             created_at: row.created_at,
-            meeting_title: row.meeting_title,
+            meeting_title: row.meeting_title.unwrap_or_else(|| "Added note".into()),
         }
     }
 }
@@ -226,7 +229,7 @@ const ENTRY_SELECT: &str = "SELECT e.id, e.notebook_id, e.meeting_id, e.title, e
         m.title AS meeting_title, CAST(m.created_at AS TEXT) AS meeting_created_at,
         (SELECT MAX(COALESCE(t.audio_end_time, t.audio_start_time)) FROM transcripts t WHERE t.meeting_id = m.id) AS meeting_duration
      FROM notebook_entries e
-     JOIN meetings m ON m.id = e.meeting_id
+     LEFT JOIN meetings m ON m.id = e.meeting_id
      LEFT JOIN notebooks n ON n.id = e.notebook_id";
 
 pub struct JournalRepository;
@@ -260,7 +263,7 @@ impl JournalRepository {
             .into_iter()
             .map(|notebook| {
                 let entries = by_notebook.remove(notebook.id.as_str()).unwrap_or_default();
-                let mut meetings: Vec<&str> = entries.iter().map(|e| e.meeting_id.as_str()).collect();
+                let mut meetings: Vec<&str> = entries.iter().map(|e| e.meeting_id.as_str()).filter(|id| !id.is_empty()).collect();
                 meetings.sort_unstable();
                 meetings.dedup();
                 let last_meeting_at = entries.iter().map(|e| e.meeting_date.clone()).max();
@@ -294,7 +297,7 @@ impl JournalRepository {
         pool: &SqlitePool,
         notebook_id: Option<&str>,
     ) -> Result<Vec<NotebookEntry>, sqlx::Error> {
-        let order = " ORDER BY m.created_at DESC, COALESCE(e.start_time, 0) ASC";
+        let order = " ORDER BY COALESCE(m.created_at, e.created_at) DESC, COALESCE(e.start_time, 0) ASC";
         let rows = match notebook_id {
             Some(id) => {
                 sqlx::query_as::<_, EntryRow>(&format!("{ENTRY_SELECT} WHERE e.status = 'filed' AND e.notebook_id = ?{order}"))
@@ -314,7 +317,7 @@ impl JournalRepository {
     /// Parts waiting for the user to pick a journal, newest meeting first.
     pub async fn list_review_entries(pool: &SqlitePool) -> Result<Vec<NotebookEntry>, sqlx::Error> {
         let rows = sqlx::query_as::<_, EntryRow>(&format!(
-            "{ENTRY_SELECT} WHERE e.status = 'needs_review' ORDER BY m.created_at DESC, COALESCE(e.start_time, 0) ASC"
+            "{ENTRY_SELECT} WHERE e.status = 'needs_review' ORDER BY COALESCE(m.created_at, e.created_at) DESC, COALESCE(e.start_time, 0) ASC"
         ))
         .fetch_all(pool)
         .await?;
@@ -332,8 +335,9 @@ impl JournalRepository {
         Ok(rows.into_iter().map(NotebookEntry::from).collect())
     }
 
-    pub async fn entry_meeting_id(pool: &SqlitePool, entry_id: &str) -> Result<Option<String>, sqlx::Error> {
-        let row: Option<(String,)> = sqlx::query_as("SELECT meeting_id FROM notebook_entries WHERE id = ?")
+    /// `None` when there is no such note; `Some(None)` for a note typed into a journal.
+    pub async fn entry_meeting_id(pool: &SqlitePool, entry_id: &str) -> Result<Option<Option<String>>, sqlx::Error> {
+        let row: Option<(Option<String>,)> = sqlx::query_as("SELECT meeting_id FROM notebook_entries WHERE id = ?")
             .bind(entry_id)
             .fetch_optional(pool)
             .await?;
@@ -476,6 +480,32 @@ impl JournalRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Rewrites a note's title and text. Returns the note's journal id (`None` if the note doesn't exist).
+    pub async fn update_entry_text(
+        pool: &SqlitePool,
+        entry_id: &str,
+        title: &str,
+        summary: &str,
+    ) -> Result<Option<Option<String>>, sqlx::Error> {
+        let result = sqlx::query("UPDATE notebook_entries SET title = ?, summary = ? WHERE id = ?")
+            .bind(title)
+            .bind(summary)
+            .bind(entry_id)
+            .execute(pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        let row: (Option<String>,) = sqlx::query_as("SELECT notebook_id FROM notebook_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_one(pool)
+            .await?;
+        if let Some(id) = &row.0 {
+            Self::touch_notebook(pool, id).await?;
+        }
+        Ok(Some(row.0))
+    }
+
     pub async fn delete_entry(pool: &SqlitePool, entry_id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query("DELETE FROM notebook_entries WHERE id = ?")
             .bind(entry_id)
@@ -493,7 +523,7 @@ impl JournalRepository {
         )
         .bind(format!("entry-{}", Uuid::new_v4()))
         .bind(&entry.notebook_id)
-        .bind(&entry.meeting_id)
+        .bind(Some(&entry.meeting_id).filter(|id| !id.is_empty()))
         .bind(&entry.title)
         .bind(&entry.summary)
         .bind(serde_json::to_string(&entry.key_points).unwrap_or_else(|_| "[]".into()))
@@ -604,7 +634,7 @@ impl JournalRepository {
         let rows: Vec<(String, String, String, String)> = sqlx::query_as(
             "SELECT e.meeting_id, n.id, n.title, n.color FROM notebook_entries e
              JOIN notebooks n ON n.id = e.notebook_id
-             WHERE e.status = 'filed'
+             WHERE e.status = 'filed' AND e.meeting_id IS NOT NULL
              GROUP BY e.meeting_id, n.id
              ORDER BY MIN(COALESCE(e.start_time, 0))",
         )

@@ -979,7 +979,7 @@ pub async fn requirements_brief(pool: &SqlitePool, notebook_id: &str) -> Result<
         brief.push('\n');
     }
 
-    let meetings: HashSet<&str> = entries.iter().map(|e| e.meeting_id.as_str()).collect();
+    let meetings: HashSet<&str> = entries.iter().map(|e| e.meeting_id.as_str()).filter(|id| !id.is_empty()).collect();
     let first = format_local_date(&entries[0].meeting_started_at);
     let last = format_local_date(&entries[entries.len() - 1].meeting_started_at);
     let range = if first == last { first } else { format!("{first} to {last}") };
@@ -988,10 +988,15 @@ pub async fn requirements_brief(pool: &SqlitePool, notebook_id: &str) -> Result<
 }
 
 fn entry_block(entry: &NotebookEntry) -> String {
+    let source = if entry.meeting_id.is_empty() {
+        "note added by hand".to_string()
+    } else {
+        format!("meeting \"{}\"", entry.meeting_title)
+    };
     let mut block = format!(
-        "### {} - meeting \"{}\"\n**{}**\n{}\n",
+        "### {} - {}\n**{}**\n{}\n",
         format_local_date(&entry.meeting_started_at),
-        entry.meeting_title,
+        source,
         entry.title,
         entry.summary
     );

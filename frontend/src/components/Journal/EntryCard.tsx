@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ExternalLink,
   FolderInput,
+  Pencil,
   MoreHorizontal,
   RefreshCw,
   Trash2,
@@ -19,10 +20,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { meetingHref, type NotebookEntry } from "@/lib/journal/api";
+import { JournalMarkdown } from "./JournalMarkdown";
 import { formatClock, formatOffset } from "@/lib/journal/format";
 
 interface EntryCardProps {
   entry: NotebookEntry;
+  onEdit: () => void;
   onMove: () => void;
   onRefile: () => void;
   onDelete: () => void;
@@ -31,6 +34,7 @@ interface EntryCardProps {
 /** One meeting's notes on the journal's topic. */
 export function EntryCard({
   entry,
+  onEdit,
   onMove,
   onRefile,
   onDelete,
@@ -50,13 +54,19 @@ export function EntryCard({
               {formatClock(entry.meeting_started_at, entry.start_time)}
             </span>
             {range && <span>· {range} in recording</span>}
-            <span>·</span>
-            <Link
-              href={meetingHref(entry.meeting_id)}
-              className="inline-flex items-center gap-0.5 truncate hover:text-primary hover:underline"
-            >
-              {entry.meeting_title} <ExternalLink className="h-3 w-3" />
-            </Link>
+            {entry.meeting_id ? (
+              <>
+                <span>·</span>
+                <Link
+                  href={meetingHref(entry.meeting_id)}
+                  className="inline-flex items-center gap-0.5 truncate hover:text-primary hover:underline"
+                >
+                  {entry.meeting_title} <ExternalLink className="h-3 w-3" />
+                </Link>
+              </>
+            ) : (
+              <span>· Added by you</span>
+            )}
           </div>
         </div>
         <DropdownMenu>
@@ -71,12 +81,17 @@ export function EntryCard({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onEdit}>
+              <Pencil className="mr-2 h-4 w-4" /> Edit note
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onMove}>
               <FolderInput className="mr-2 h-4 w-4" /> Move to another journal
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onRefile}>
-              <RefreshCw className="mr-2 h-4 w-4" /> Re-file this meeting
-            </DropdownMenuItem>
+            {entry.meeting_id && (
+              <DropdownMenuItem onClick={onRefile}>
+                <RefreshCw className="mr-2 h-4 w-4" /> Re-file this meeting
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={onDelete}
@@ -88,9 +103,16 @@ export function EntryCard({
         </DropdownMenu>
       </div>
 
-      <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground/80">
-        {entry.summary}
-      </p>
+      {entry.meeting_id ? (
+        <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground/80">
+          {entry.summary}
+        </p>
+      ) : (
+        // Notes typed into the journal are written in markdown.
+        <div className="mt-2 text-foreground/80">
+          <JournalMarkdown markdown={entry.summary} />
+        </div>
+      )}
 
       {entry.key_points.length > 0 && (
         <ul className="mt-3 space-y-1 border-l-2 border-border pl-3 text-sm text-foreground/80">

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { compactOutput } from '../../tool-defs/output-compress.js';
 import { reportHelperRun, type HelperContext, type HelperRunStats } from '../helper.js';
@@ -27,13 +28,37 @@ export async function formatFiles(
   repoRoot: string,
   absolutePaths: string[],
   context?: HelperContext,
+  baseBranch?: string,
 ): Promise<FormatResult> {
-  const present = absolutePaths.filter((f) => existsSync(f));
+  const present = (await Promise.all(absolutePaths.map(async (f) => (existsSync(f) && !(await matchesBase(repoRoot, f, baseBranch)) ? f : null)))).filter(
+    (f): f is string => f !== null,
+  );
   if (!present.length) return { ok: true, formatted: 0 };
   const result = await runPrettier(repoRoot, present);
   const run = formatRunReport(present.length, result);
   await reportHelperRun(context, run.stats, run.summary);
   return result;
+}
+
+/**
+ * Whether the file is byte-identical to the base branch's copy. A coder that
+ * reverts out-of-scope churn with `git checkout <base> -- file` must get the
+ * base's bytes committed: base isn't always prettier-clean, so formatting the
+ * reverted file would re-introduce the very diff QA asked to remove (the same
+ * blocker came back over seven passes that way).
+ */
+async function matchesBase(repoRoot: string, file: string, baseBranch?: string): Promise<boolean> {
+  const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+  const current = readFileSync(file);
+  for (const ref of [baseBranch, 'main', 'master'].filter((r): r is string => Boolean(r))) {
+    try {
+      const { stdout } = await execFileAsync('git', ['show', `${ref}:${rel}`], { cwd: repoRoot, encoding: 'buffer', maxBuffer: 20_000_000 });
+      return Buffer.compare(stdout, current) === 0;
+    } catch {
+      // No such ref, or the file isn't on it: try the next.
+    }
+  }
+  return false;
 }
 
 /** What one formatter run reports: files given, files formatted (none when prettier failed). */

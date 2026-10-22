@@ -2092,6 +2092,24 @@ below) — never inside the target repo.
    the retrospective are unchanged (the retrospective already used the
    coordinator model).
 
+72. User said the coder and QA were stuck in a loop: the coder had to explain
+   exactly why a blocker wasn't fixed, and QA had to understand it and either
+   pass or explain better. Added `respond_to_qa` (`tool-defs/qa-response-tool.ts`,
+   coding agent): one answer per blocking finding of the latest failing pass,
+   `fixed` / `disputed` / `blocked`, each with an explanation and evidence
+   (file:line, failing test, exact command output), stored in
+   `session.qaResponses` by pass. The pre-QA fix check now flags a blocker with
+   no answer (also when nothing changed since the pass), checks a `fixed` claim
+   against the diff as before, and leaves a dispute or `blocked` answer to QA.
+   QA's re-review prompt carries the answers (`coderAnswersSection`): a
+   dispute that holds is "Withdrawn", one that doesn't is kept as a blocker
+   starting "Re: your dispute —" with a concrete case, and a blocker sent back
+   must say something the last one didn't. The send-back numbers the blockers
+   and shows the coder its own earlier answer beside a blocker that returned
+   (`earlierAnswer`). Tests: `fix-check.test.ts`, `qa-loop.test.ts`; the folder
+   passes through the node:test shim except the same 20 cases that fail without
+   these changes. Not run with real agents yet.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

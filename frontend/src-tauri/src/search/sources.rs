@@ -174,11 +174,11 @@ fn journal_doc(id: &str, title: &str, description: Option<&str>, overview: Optio
 }
 
 async fn note_doc(pool: &SqlitePool, entry_id: &str) -> Result<Option<Document>> {
-    let row: Option<(String, String, String, String, Option<String>, Option<f64>, String, String, String)> =
+    let row: Option<(String, String, String, String, Option<String>, Option<f64>, Option<String>, Option<String>, Option<String>)> =
         sqlx::query_as(
             "SELECT e.notebook_id, n.title, e.title, e.summary, e.key_points, e.start_time,
-                    e.meeting_id, m.title, CAST(m.created_at AS TEXT)
-             FROM notebook_entries e JOIN notebooks n ON n.id = e.notebook_id JOIN meetings m ON m.id = e.meeting_id
+                    e.meeting_id, m.title, COALESCE(CAST(m.created_at AS TEXT), e.created_at)
+             FROM notebook_entries e JOIN notebooks n ON n.id = e.notebook_id LEFT JOIN meetings m ON m.id = e.meeting_id
              WHERE e.id = ? AND e.status = 'filed'",
         )
         .bind(entry_id)
@@ -203,7 +203,7 @@ async fn note_doc(pool: &SqlitePool, entry_id: &str) -> Result<Option<Document>>
         "meetingId": meeting_id,
         "meetingTitle": meeting_title,
     });
-    Ok(Some(doc(KIND_JOURNAL_NOTE, title, &notebook_id, Some(date), meta, segments)))
+    Ok(Some(doc(KIND_JOURNAL_NOTE, title, &notebook_id, date, meta, segments)))
 }
 
 #[cfg(test)]

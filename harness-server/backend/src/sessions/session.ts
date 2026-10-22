@@ -222,6 +222,18 @@ export interface QaNote {
   at: string;
 }
 
+// The coder's answer to one blocking finding of a QA pass (respond_to_qa).
+export interface QaResponse {
+  // The QA pass whose blocker this answers, and the blocker's 1-based place in it.
+  pass: number;
+  blocker: number;
+  finding: string;
+  status: 'fixed' | 'disputed' | 'blocked';
+  explanation: string;
+  evidence: string;
+  at: string;
+}
+
 export interface FixScope {
   paths: string[];
   widened: { paths: string[]; reason: string; at: string }[];
@@ -384,6 +396,8 @@ export interface SessionRecord {
   // conversation opens with; the next coding round starts with none.
   qaNotes: QaNote[];
   qaHandoffNotes: QaNote[];
+  // The coder's per-blocker answers to the latest failing QA pass.
+  qaResponses: QaResponse[];
 
   qaReportPath: string | null;
   // Set when the QA lead split the review across reviewers (assign_qa_team);

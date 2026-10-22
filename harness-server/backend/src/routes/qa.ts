@@ -141,7 +141,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       return { text: null };
     }
     const loop = await loopFor(session);
-    return { text: compactQaFindings(raw, loop, session.qaDeclinedNotes ?? []) };
+    return { text: compactQaFindings(raw, loop, session.qaDeclinedNotes ?? [], session.qaResponses) };
   });
 
   // Why the latest QA pass failed compared with the earlier ones (sessions/qa-loop.ts),

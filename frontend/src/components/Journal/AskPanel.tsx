@@ -230,12 +230,14 @@ function SourceCard({ source, expanded, onToggle }: { source: AskSource; expande
           <p className="whitespace-pre-wrap rounded-md bg-background p-2 leading-relaxed text-foreground">
             {source.excerpt}
           </p>
-          <Link
-            href={meetingHref(source.meeting_id)}
-            className="mt-1.5 inline-flex items-center gap-1 text-primary hover:underline"
-          >
-            Open meeting <ExternalLink className="h-3 w-3" />
-          </Link>
+          {source.meeting_id && (
+            <Link
+              href={meetingHref(source.meeting_id)}
+              className="mt-1.5 inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              Open meeting <ExternalLink className="h-3 w-3" />
+            </Link>
+          )}
         </div>
       )}
     </div>

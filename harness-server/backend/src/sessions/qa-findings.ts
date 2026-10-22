@@ -1,5 +1,6 @@
 import matter from 'gray-matter';
-import { findingFiles, loopBrief, type QaCriterionRecord, type QaLoopAnalysis } from './qa-loop.js';
+import { findingFiles, findingSimilarity, loopBrief, SAME_FINDING, type QaCriterionRecord, type QaLoopAnalysis } from './qa-loop.js';
+import type { QaResponse } from './session.js';
 
 export interface ParsedQaReport {
   result: string | null;
@@ -93,7 +94,12 @@ export function parseQaReport(raw: string): ParsedQaReport {
  * blocking findings and the non-blocking notes the human sent back (all of them unless some were declined). Used for the send-back relay to the coding agent.
  * With `loop`, it opens with how this branch has been going back and forth.
  */
-export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = null, declinedNotes: string[] = []): string {
+export function compactQaFindings(
+  raw: string,
+  loop: QaLoopAnalysis | null = null,
+  declinedNotes: string[] = [],
+  responses: QaResponse[] = [],
+): string {
   const parsed = parseQaReport(raw);
   const { result, failedChecks, blocking } = parsed;
   // Blocking findings always go back; the human picks which non-blocking notes do.
@@ -102,7 +108,7 @@ export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = nul
   let text = `QA result: ${result ?? '?'}`;
   if (failedChecks.length > 0) text += ` — failing checks: ${failedChecks.join(', ')}`;
   if (loop?.looping) text += `\n\n${loopBrief(loop)}`;
-  text += blocking.length > 0 ? `\n\nFix:\n${blocking.map((f) => `- ${f}`).join('\n')}` : '\n\nNo blocking findings were listed.';
+  text += blocking.length > 0 ? `\n\nFix:\n${blocking.map((f, i) => `${i + 1}. ${f}${earlierAnswer(f, responses)}`).join('\n')}` : '\n\nNo blocking findings were listed.';
   if (notes.length > 0) {
     text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`;
   }
@@ -110,10 +116,17 @@ export function compactQaFindings(raw: string, loop: QaLoopAnalysis | null = nul
   return text;
 }
 
+/** What the coder said last time about a blocker that has come back, so it reads QA's reply with its own answer next to it. */
+function earlierAnswer(finding: string, responses: QaResponse[]): string {
+  const match = [...responses].reverse().find((r) => findingSimilarity(finding, r.finding) >= SAME_FINDING);
+  if (!match) return '';
+  return `\n   You answered this (${match.status}): ${match.explanation} QA's finding above replies to that: answer it, don't repeat yourself.`;
+}
+
 // Two things sent branches back more than once: fixes nothing tested (one
 // broke the line it fixed), and notes skipped without a word that the next
 // pass made blocking.
 export const FIX_RULES =
-  'For each blocking finding, fix it and add or change a test that fails without the fix. For each note, act on ' +
+  'For each blocking finding, fix it and add or change a test that fails without the fix, then call respond_to_qa for every blocker: fixed (the test or file:line that proves it), disputed (why QA is wrong, with the exact line or behaviour) or blocked (what you tried and the exact error). Do not leave one unanswered, and do not answer "already handled" without the line that handles it. For each note, act on ' +
   "it or call note_for_qa saying why you didn't: QA re-checks every note, and one skipped without a reason comes back. " +
   'Before you finish, check each blocker yourself: the lines QA names must be among the lines you changed, and your new test must fail without your change. The pre-QA check refuses a fix that changed none of them.';

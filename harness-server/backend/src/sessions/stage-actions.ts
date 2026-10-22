@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
@@ -131,7 +132,7 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
   }
   if (gate.status === 'skipped') throw new StageActionError(`Lint and the unit tests can't be run before QA: ${gate.summary}.`, 409);
   if (gate.status === 'fail') {
-    throw new StageActionError(`Can't start QA yet: ${gate.summary}. The coding lead has to fix this first.`, 409, {
+    throw new StageActionError(`Can't start QA yet: ${gate.summary}. The coding lead is being sent the failures to fix.\n\n${gate.details}`, 409, {
       code: 'checks_failed',
       fixMessage: gate.message,
       details: gate.details,
@@ -145,7 +146,17 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
     stage: 'qa-in-progress',
     codingApprovedAt: new Date().toISOString(),
     qaNotes: [],
-    qaHandoffNotes: session.qaNotes,
+    qaHandoffNotes: [
+      ...session.qaNotes,
+      ...(gate.status === 'pass' && gate.advisory?.length
+        ? [{
+            id: randomUUID(),
+            from: null,
+            text: `The pre-QA fix check could not confirm these blockers were fixed (the coder was told once and the branch went on): ${gate.advisory.join(' ')} Verify them in the code yourself.`,
+            at: new Date().toISOString(),
+          }]
+        : []),
+    ],
     qaRerunPending: session.transcripts.qa.length > 0,
     fixScope: null,
   });
