@@ -518,6 +518,8 @@ export interface SessionRecord {
   themeContextSeen: Partial<Record<'plan' | 'coding' | 'qa' | 'uiux', string>>;
   // Likewise for the app's architecture setting (architecture/architecture-context.ts).
   architectureContextSeen: Partial<Record<'requirements' | 'plan' | 'coding' | 'qa', string>>;
+  // Likewise for the docs map (context/shared-context.ts).
+  docsMapSeen: Partial<Record<'requirements' | 'plan' | 'coding' | 'qa', string>>;
 
   // Human-readable, for the UI's chat panes.
   transcripts: {

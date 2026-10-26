@@ -193,6 +193,12 @@ full; read the sections you need.
    them. Where the code or tests a step would grow sit in a file past about
    600 lines, say to put them in a new sibling file. A step that only writes
    docs names only docs files; those steps run on the cheaper model.
+   End each step's body with a `Known:` line for what you already read this
+   conversation and the builder would otherwise read again: each function,
+   type or constant it will call, as `path:line` with its signature, copied
+   from the source you read in this turn (never from memory). The builder
+   trusts these lines and opens a file only to edit it or when a signature
+   isn't enough. Leave the line out when you read nothing the step uses.
    - `steps`: the same steps as a minimal `{id, title}` list, **in the
      same dependency-respecting order** — the coding agent's checklist is
      seeded verbatim from this, so keep `id` short and stable and `title`

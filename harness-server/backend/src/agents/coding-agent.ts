@@ -40,6 +40,10 @@ import { qaFixSoloReason } from '../sessions/qa-loop.js';
 import { qaRoundsFor } from '../sessions/qa-rounds.js';
 import { planExcerpt, planStepSection, SESSION_PLAN_DOC } from './plan-excerpt.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { citedDocs, sharedContextForTurn } from '../context/shared-context.js';
+import { appContext } from '../context/app-context.js';
+import { renderDocsMap } from '../context/docs-map.js';
+import { requirementsDigest } from '../context/requirements-digest.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from './tool-defs/outline-tool.js';
@@ -317,6 +321,8 @@ export async function runCodingAgentTurn(
   const architectureContext = await architectureContextForTurn(session, 'coding', app, isFirstTurn);
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
+  const sharedContext = await sharedContextForTurn(session, 'coding', app, isFirstTurn, { systemElsewhere: true });
+  prompt = sharedContext.turnPrefix + prompt;
   const architectureDeps = { app, repoRoot: app.repoRoot, scope: true, baseBranch: diffBaseFor(session, app), allowRegenerate: true };
   // search_code without a glob starts in the domains the step being worked on names.
   const searchFocus = namedDomainsFocus(app, app.repoRoot, 'the domains your current step names', async () => {
@@ -842,10 +848,13 @@ export async function loadApprovedDocsForCoding(
     throw new Error('Coding needs an approved requirements document and plan.');
   }
   const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
-  let text = `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
+  let text = `\n\n# Approved requirements (${session.requirementsPath})\n\n${requirementsDigest(requirementsRaw, 'coding')}`;
 
+  const app = await getApp(session.appId);
+  const mapEntries = await appContext(app);
+  const mapped = new Set(mapEntries.map((e) => e.path));
   const cited: unknown = matter(requirementsRaw).data['related-docs'];
-  const relatedDocs: string[] = Array.isArray(cited) ? cited : [];
+  const relatedDocs: string[] = (Array.isArray(cited) ? cited : []).filter((d: string) => !mapped.has(d));
   // Listed, not inlined: the full docs rode along in every step of every
   // coding (and team-member) turn whether or not they were needed.
   const relatedLines: string[] = [];
@@ -863,6 +872,8 @@ export async function loadApprovedDocsForCoding(
       `\n\n# Related docs\n\nThe requirements cite these repo docs. Read the ones relevant to your current step ` +
       `with read_file (search_docs finds sections within them):\n\n${relatedLines.join('\n')}`;
   }
+
+  text += renderDocsMap(mapEntries, 'coding', citedDocs(requirementsRaw));
 
   // Only the steps this conversation works on in full (agents/plan-excerpt.ts);
   // read_doc serves the rest. Unset focusStepIds keeps the whole plan.

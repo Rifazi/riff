@@ -243,6 +243,13 @@ Documenting your work is a required part of it, not an afterthought:
 Everything you read stays in the conversation and is re-sent on every
 later tool call, so reading is the main cost of your work:
 
+- Your step's section may end with a `Known:` line: signatures the plan
+  agent read and checked, as `path:line`. Trust them; read that file only
+  to edit it or when a signature isn't enough. The "Docs map" lists what
+  each doc covers: open one only when its line says it bears on your step.
+  The requirements arrive as a digest (criteria numbered AC1, AC2, …); the
+  full text is `read_doc({ path: "session/requirements.md" })` if a
+  criterion is unclear.
 <!-- nav -->
 - Find code from the docs down, not by reading around: `search_docs`
   first (the architecture / code-map page names which folder or file owns

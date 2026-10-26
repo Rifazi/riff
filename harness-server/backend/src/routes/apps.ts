@@ -4,6 +4,7 @@ import { listApps, getApp, createApp, updateApp, deleteApp, AppInUseError } from
 import { docsDirFor, readRepoUrl, validateRepoRoot, describeSetup, baseBranchFor, InvalidRepoRootError, type CheckCommands } from '../apps/apps.js';
 import { buildDocsIndex, watchDocsForChanges, removeIndex } from '../repo/docs-index.js';
 import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
+import { appContext, ensureSummaries, forgetAppContext } from '../context/app-context.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
 import { changeDesignMemory, listDesignMemory } from '../themes/design-memory.js';
 import { deleteLesson, listLessons, listRetrospectives, listTrackedSuggestions, setLessonStatus, updateSuggestionStatus } from '../retrospective/store.js';
@@ -160,6 +161,21 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     return changeDesignMemory(request.params.id, null, { remove: [request.params.entryId] });
   });
 
+  // The shared context agent's docs map: one line per doc, and whether the local model or a rule wrote it.
+  app.get<{ Params: { id: string } }>('/api/apps/:id/context', async (request, reply) => {
+    const target = await getApp(request.params.id).catch(() => null);
+    if (!target) return reply.code(404).send({ error: 'app not found' });
+    return { docs: await appContext(target) };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/apps/:id/context/refresh', async (request, reply) => {
+    const target = await getApp(request.params.id).catch(() => null);
+    if (!target) return reply.code(404).send({ error: 'app not found' });
+    await appContext(target);
+    await ensureSummaries(target);
+    return { docs: await appContext(target) };
+  });
+
   // What finished sessions taught, and what goes into every agent's briefing for this app (retrospective/).
   app.get<{ Params: { id: string } }>('/api/apps/:id/lessons', async (request, reply) => {
     if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
@@ -200,6 +216,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     try {
       await deleteApp(request.params.id);
       removeIndex(request.params.id);
+      forgetAppContext(request.params.id);
       await removeAllReferenceDocs({ kind: 'app', appId: request.params.id });
       return reply.code(204).send();
     } catch (err) {

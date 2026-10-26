@@ -150,7 +150,7 @@ async function tryAdvance(
 ): Promise<Outcome> {
   const gate = async (approve: () => Promise<unknown>, approved: string): Promise<Outcome> => {
     if (hasPendingQuestionTool(transcript)) return { kind: 'stop', reason: 'Waiting for your answer to the question above.' };
-    const decision = await decideGate({ stageLabel: group, transcriptText: flattenTranscript(transcript) });
+    const decision = await decideGate({ stageLabel: group, transcriptText: flattenTranscript(transcript), entries: transcript });
     if (decision.action === 'stop') return { kind: 'stop', reason: decision.reason };
     try {
       await approve();

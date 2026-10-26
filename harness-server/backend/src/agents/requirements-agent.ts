@@ -46,6 +46,7 @@ import { stageHelperContext } from './helpers/helper.js';
 import { summarizeAppTheme } from '../themes/apply-theme.js';
 import { createFetchUrlToolClaude } from './tool-defs-claude/fetch-url-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { sharedContextForTurn } from '../context/shared-context.js';
 import { runUiuxAgentTurn } from './uiux-agent.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/requirements-agent.md');
@@ -89,11 +90,13 @@ export async function runRequirementsAgentTurn(
     provider === 'claude' ? !session.claudeSessionIds.requirements : session.histories.requirements.length === 0;
 
   let systemPrompt = promptForArchitecture(override ?? promptTemplate, app);
+  let hasManifest = false;
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     try {
       const manifest = await fs.readFile(path.join(docsDirFor(app), 'README.md'), 'utf8');
       systemPrompt += `\n\n# Docs manifest (docs/README.md)\n\n${manifest}`;
+      hasManifest = true;
     } catch {
       // docs/README.md missing — proceed without the manifest preamble
     }
@@ -142,6 +145,9 @@ export async function runRequirementsAgentTurn(
   const architectureContext = await architectureContextForTurn(session, 'requirements', app, isFirstTurn);
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
+  const sharedContext = await sharedContextForTurn(session, 'requirements', app, isFirstTurn, { systemElsewhere: hasManifest });
+  systemPrompt += sharedContext.system;
+  prompt = sharedContext.turnPrefix + prompt;
   const architectureDeps = { app, repoRoot: app.repoRoot, scope: false, allowRegenerate: false };
 
   // Per-turn, so it rides in the prompt rather than systemPrompt (same

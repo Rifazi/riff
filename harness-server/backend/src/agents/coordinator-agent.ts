@@ -198,12 +198,40 @@ function tryParseGate(raw: string): GateDecision | null {
   return null;
 }
 
+const BARE_REPORT_MAX_CHARS = 500;
+
+/**
+ * A gate answer from the transcript alone, so a model is paid only for the
+ * unclear ones. Stops (the safe direction) on a question, a worrying phrase
+ * or an erroring tool after the human's last message; approves only a short
+ * closing report with none of those. null = ask the model.
+ */
+export function gateByRule(entries: TranscriptEntry[]): GateDecision | null {
+  if (hasUnansweredQuestion(entries)) return { action: 'stop', reason: 'The agent is waiting on an answer.' };
+  let lastUserIndex = -1;
+  entries.forEach((e, i) => {
+    if (e.role === 'user') lastUserIndex = i;
+  });
+  const afterUser = entries.slice(lastUserIndex + 1);
+  for (let i = lastUserIndex + 1; i < entries.length; i++) {
+    if (entries[i].role !== 'assistant') continue;
+    const concern = concernInLastMessage(entries.slice(0, i + 1));
+    if (concern) return { action: 'stop', reason: `The agent raised "${concern}".` };
+  }
+  if (afterUser.some((e) => e.role === 'tool_result' && e.isError)) return null;
+  const closing = [...afterUser].reverse().find((e) => e.role === 'assistant')?.text?.trim() ?? '';
+  if (closing && closing.length <= BARE_REPORT_MAX_CHARS) return { action: 'approve', reason: 'A short report with nothing open.' };
+  return null;
+}
+
 /**
  * Whether a finished stage can be approved without the human. Same models
  * as decideNextAction: the built-in Qwen first, then the coordinator's
  * configured model. Anything unclear stops.
  */
-export async function decideGate(params: { stageLabel: string; transcriptText: string }): Promise<GateDecision> {
+export async function decideGate(params: { stageLabel: string; transcriptText: string; entries?: TranscriptEntry[] }): Promise<GateDecision> {
+  const byRule = params.entries ? gateByRule(params.entries) : null;
+  if (byRule) return byRule;
   const coordinatorConfig = await getRoleModelConfig('coordinator');
   const { provider, model } = coordinatorConfig;
   const prompt = `Stage: ${params.stageLabel}\n\nEnd of the conversation:\n${params.transcriptText || '(nothing)'}\n\nApprove or stop?`;

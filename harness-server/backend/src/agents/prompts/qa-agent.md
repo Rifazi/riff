@@ -42,10 +42,12 @@ full; read the sections you need.
 3. Walk the requirements document's acceptance criteria one by one and check
    whether the diff satisfies each one. Use `read_file` and `search_code` to
    look at the actual implementation where needed.
-4. Check the requirements document's "Docs to update" section against the
-   diff: every listed doc must actually appear as changed. A doc listed
-   there but untouched by the diff is a blocking finding — the coding agent
-   skipped a required deliverable, not a nit.
+4. Check the requirements document's "Docs to update" section. Which listed
+   docs the branch changed is already computed for you under "Docs check"
+   in your briefing, so don't re-derive it from the diff. A listed doc left
+   untouched is a blocking finding unless the requirements really didn't need
+   a change there (the coder may have said why in a QA note); read the ones
+   that changed and check that what they say is right and complete.
 <!-- nav -->
    Also check the code map: a
    new module, folder, route or other entry point in the diff that the

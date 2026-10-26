@@ -17,6 +17,9 @@ import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from '../sdk-client
 import type { HelperContext } from '../helpers/helper.js';
 import { compressMessages } from '../helpers/compress.js';
 import { repoInstructionsNote } from '../repo-instructions.js';
+import { docsMapSection } from '../../context/shared-context.js';
+import { requirementsDigest } from '../../context/requirements-digest.js';
+import { docsCheckNoteForBranch } from '../../context/docs-check.js';
 import { createReviewTools } from '../qa-agent.js';
 import { previousPassRef } from '../../sessions/qa-rounds.js';
 import { classifierToolEnabled } from '../helpers/classifier/tool.js';
@@ -73,7 +76,9 @@ export async function runQaReviewerAgent({ session, app, member, teammates, onEv
     themeBriefingFor(app.repoRoot, 'qa', app.id) +
     architectureBriefingFor(app, 'qa') +
     repoInstructionsNote(app.repoRoot) +
-    `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirements}` +
+    (await docsMapSection(app, 'qa', requirements)) +
+    `\n\n# Approved requirements (${session.requirementsPath})\n\n${requirementsDigest(requirements, 'qa')}` +
+    (await docsCheckNoteForBranch(session, app, requirements)) +
     brief +
     qaHandoffSection(session.qaHandoffNotes) +
     (referenceDocs ? `\n\n${referenceDocs}` : '');

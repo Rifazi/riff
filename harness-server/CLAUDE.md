@@ -2203,6 +2203,64 @@ below) — never inside the target repo.
    conversation's first request is fixed cost, and trim the biggest piece (tool
    schemas, the theme briefing sent to every coding conversation, or the handoff).
 
+76. User asked for redundancy across the agents to be cut (not the plan stage:
+   that stays) with a shared, possibly local, context agent that reads the md
+   files and maintains context. By weighted usage, Oct 5-25: coding 72%, QA 17%,
+   plan 8%, requirements 4%, so the work went at what coding and QA are handed.
+   `backend/src/context/`:
+   - **Context agent** (`app-context.ts`, pure half `docs-map.ts`): keeps one
+     summary line per doc in the app's docs index, cached by content hash in
+     `state/app-context/<appId>.json`. A new or edited doc gets a rule-made
+     summary at once (title + first sentence, `ruleSummary`); Riff's built-in
+     Qwen (`generateLocal`, ~2 s a doc, up to 40 a pass, one at a time) then
+     replaces it in the background (`ensureSummaries`), so a turn never waits on
+     the model and nothing leaves the machine. `GET /api/apps/:id/context` shows
+     the map and who wrote each line; `POST .../context/refresh` runs the pass.
+   - **Delivery** (`shared-context.ts`): `sharedContextForTurn` puts the map in the
+     system prompt of requirements, plan, QA and coding, and in the turn prompt
+     when a doc was added/removed/edited since that stage saw it
+     (`session.docsMapSeen`; the fingerprint is paths + hashes, so a model
+     summary replacing a rule one doesn't re-brief). Team members and QA
+     reviewers get it in their fresh system prompt (`docsMapSection`). Docs the
+     requirements cite or ask to update come first, and the budget is 4.5k chars
+     for requirements/plan and 2.2k for coding/QA, with a "… and N more" line. It
+     replaces coding's old "Related docs" list for cited docs in the map, and is
+     skipped for requirements when `docs/README.md` (a hand-written map) is
+     already in its prompt.
+   - **Requirements digest** (`requirements-digest.ts`): coding, team members, QA
+     and reviewers get the criteria numbered AC1.., the human's decisions,
+     non-goals, docs to update, affected areas and a problem statement cut to
+     700 chars, with `read_doc session/requirements.md` for the whole document;
+     a document under 3k chars, or with no criteria list, goes through as
+     written. Plan still reads the full document, and reconciliation turns carry
+     the full one.
+   - **Docs to update checked once** (`docs-check.ts`): the pre-QA gate checks that
+     the listed docs changed; QA no longer re-derives it. Its briefing gets "Docs
+     check", computed from the branch diff (changed / listed but not changed), and
+     the QA prompt says to judge content, not whether the file was touched.
+   - **Plan hands over what it read**: each plan step ends with a `Known:` line
+     (`path:line` + signature, copied from source read this turn); the coding
+     prompt says to trust it and open a file only to edit it. Prompt only: nothing
+     parses it.
+   - **Rules before models**: a first QA review is solo (no `assign_qa_team`)
+     when the branch changed ≤ 8 files and the requirements have ≤ 5 criteria
+     (`context/qa-solo.ts`; unknown sizes leave it to Tess). Bridget's gate
+     (`gateByRule` in coordinator-agent.ts) stops on a question, a worrying phrase in
+     any message since the human's last, and approves a closing message of ≤ 500
+     chars with none of those, with no model; an erroring tool, a longer message or
+     no message still goes to the model. **The approve-by-rule path removes a model
+     check from requirements/plan/coding approvals; if a stage gets approved that
+     shouldn't, tighten `BARE_REPORT_MAX_CHARS` or drop that branch.**
+   Not done: one shared briefing block across roles (theme, architecture, design
+   memory and lessons are still built per role: a system prompt starts with the
+   role's own text, so a prefix can't be shared between roles), and Jack's kickoff
+   decision was already rule-first (`split-hint`). Tests: `shared-context.test.ts`
+   (16); the folder passes through the node:test shim (462) except the same 6
+   cases that fail on main. Smoke-checked the context agent against this repo's
+   docs with the built-in Qwen. Not run with real agents yet: compare coding and
+   QA first-request context (`starts`) and `search_docs`/`read_doc` calls per
+   session in `state/usage-log.jsonl`, and how often the gate approves by rule.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

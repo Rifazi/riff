@@ -49,6 +49,7 @@ import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createWritePlanToolClaude } from './tool-defs-claude/write-plan-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { sharedContextForTurn } from '../context/shared-context.js';
 
 const PROMPT_PATH = path.join(config.harnessRoot, 'backend/src/agents/prompts/plan-agent.md');
 const TOOL_NAMES = [
@@ -103,6 +104,9 @@ export async function runPlanAgentTurn(
   const architectureContext = await architectureContextForTurn(session, 'plan', app, isFirstTurn);
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
+  const sharedContext = await sharedContextForTurn(session, 'plan', app, isFirstTurn);
+  systemPrompt += sharedContext.system;
+  prompt = sharedContext.turnPrefix + prompt;
   const architectureDeps = { app, repoRoot: app.repoRoot, scope: false, allowRegenerate: false };
   // search_code without a glob starts in the domains the approved requirements name.
   const requirementsPath = session.requirementsPath;

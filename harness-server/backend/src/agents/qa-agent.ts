@@ -52,6 +52,10 @@ import { createQaToolsClaude } from './tool-defs-claude/qa-tools.js';
 import { createWriteQaReportToolClaude } from './tool-defs-claude/write-qa-report-tool.js';
 import { askMultipleChoiceToolClaude, askQuestionToolClaude } from './tool-defs-claude/ask-question-tool.js';
 import { repoInstructionsNote } from './repo-instructions.js';
+import { sharedContextForTurn } from '../context/shared-context.js';
+import { requirementsDigest } from '../context/requirements-digest.js';
+import { docsCheckNoteForBranch } from '../context/docs-check.js';
+import { criteriaCount, soloFirstReview } from '../context/qa-solo.js';
 import { qaHandoffSection } from './tool-defs/qa-notes-tool.js';
 import { createAssignQaTeamTool } from './tool-defs/qa-team-tools.js';
 import { createAssignQaTeamToolClaude } from './tool-defs-claude/qa-team-tools.js';
@@ -234,7 +238,13 @@ export async function runQaAgentTurn(
   // A re-review small enough to do alone has no assign_qa_team: a team re-reads
   // the whole branch, and the fix changed a few files (sessions/qa-loop.ts).
   if (!review && session.qaPass > 1) review = await rereviewContext(session, app.repoRoot);
-  const solo = review ? soloRereview(review.rounds, review.fixFiles) : false;
+  let solo = review ? soloRereview(review.rounds, review.fixFiles) : false;
+  // A first pass over a small branch needs no team either: decided here, not by a paid turn.
+  if (!review && !session.qaTeam) {
+    const requirementsText = await fs.readFile(path.join(config.harnessRoot, requirementsPath), 'utf8').catch(() => '');
+    const changes = await branchChanges(app.repoRoot, diffBaseFor(session, app), ':(glob)**/*.md', branch);
+    solo = soloFirstReview(criteriaCount(requirementsText), changes ? changes.files.length : null);
+  }
   const sinceRef = previousPassRef(session);
   const { provider, model } = await getRoleModelConfig('qa');
   const helperContext = stageHelperContext(session.id, 'qa');
@@ -250,10 +260,14 @@ export async function runQaAgentTurn(
   const architectureContext = await architectureContextForTurn(session, 'qa', app, isFirstTurn);
   systemPrompt += architectureContext.system;
   prompt = architectureContext.turnPrefix + prompt;
+  const sharedContext = await sharedContextForTurn(session, 'qa', app, isFirstTurn);
+  systemPrompt += sharedContext.system;
+  prompt = sharedContext.turnPrefix + prompt;
   if (isFirstTurn) {
     systemPrompt += repoInstructionsNote(app.repoRoot);
     const requirementsRaw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
-    systemPrompt += `\n\n# Approved requirements document (${session.requirementsPath})\n\n${requirementsRaw}`;
+    systemPrompt += `\n\n# Approved requirements (${session.requirementsPath})\n\n${requirementsDigest(requirementsRaw, 'qa')}`;
+    systemPrompt += await docsCheckNoteForBranch(session, app, requirementsRaw);
     systemPrompt += `\n\n# Session\n\nBranch to review: ${session.branch}`;
     systemPrompt += qaHandoffSection(session.qaHandoffNotes);
     if (previousPasses) systemPrompt += previousPasses;
