@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { baseBranchFor, type AppConfig } from '../apps/apps.js';
 import { diffBaseFor } from '../sessions/shared-branch.js';
 import { DOMAIN_DOC } from '../architecture/architecture.js';
@@ -110,19 +112,23 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
     // Generated Files/Consumers sections are mechanical, so the gate rewrites
     // the stale ones in the domains this branch touched and commits them,
     // instead of sending the coder (or QA) a note about them.
-    const first = auditWayfinding(app.repoRoot, app.architecture);
-    const touched = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
-    const domains = touched ? new Set(branchScope(first, base, touched.files, touched.docDiff).byDomain.map((d) => d.domain)) : new Set<string>();
-    const touchedDirs = first.domains.filter((d) => domains.has(d.id)).map((d) => `${d.dir}/${DOMAIN_DOC}`);
-    if (touchedDirs.length) {
-      const fixed = auditWayfinding(app.repoRoot, app.architecture, { regenerate: (docPath) => touchedDirs.includes(docPath) });
-      regenerated = fixed.regenerated;
-      if (regenerated.length) await commitAll(app.repoRoot, 'docs: regenerate DOMAIN.md generated sections', regenerated).catch(() => null);
-    }
+    // Any domain's generated sections can go stale from this branch's edits
+    // (a Consumers list changes when another domain's imports do), so every
+    // domain is regenerated, not only the ones whose DOMAIN.md the branch
+    // touched. Only generated sections are rewritten.
+    const fixed = auditWayfinding(app.repoRoot, app.architecture, { regenerate: true });
+    regenerated = fixed.regenerated;
+    if (regenerated.length) await commitAll(app.repoRoot, 'docs: regenerate DOMAIN.md generated sections', regenerated).catch(() => null);
     const audit = auditWayfinding(app.repoRoot, app.architecture);
     const changes = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
     const baseline = await baselineProblems(app, base);
-    auditProblems = blockingAuditProblems(audit, changes ? branchScope(audit, base, changes.files, changes.docDiff) : null, baseline ?? undefined);
+    const scope = changes ? branchScope(audit, base, changes.files, changes.docDiff) : null;
+    // Second guard: a folder or file that isn't on disk can't be fixed by the lead, so it never holds the branch back.
+    if (scope) {
+      scope.offMap = scope.offMap.filter((o) => fs.existsSync(path.join(app.repoRoot, o.folder)));
+      scope.looseFiles = scope.looseFiles.filter((f) => fs.existsSync(path.join(app.repoRoot, f)));
+    }
+    auditProblems = blockingAuditProblems(audit, scope, baseline ?? undefined);
   }
 
   const summary = gateSummary(checks, auditProblems) + (regenerated.length ? ` (regenerated ${regenerated.length} DOMAIN.md)` : '');

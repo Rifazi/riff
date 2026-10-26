@@ -48,7 +48,7 @@ export function Notice({ tone = 'neutral', children }: { tone?: Tone; children: 
 
 export function ErrorText({ children }: { children: React.ReactNode }) {
   if (!children) return null;
-  return <div className="text-sm text-destructive mt-2">{children}</div>;
+  return <div className="text-sm text-destructive mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words">{children}</div>;
 }
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
