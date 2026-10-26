@@ -15,6 +15,8 @@ import { isShipped, keepOnBranch, recordSharedBranchShipped } from './shared-bra
 import type { SessionRecord } from './session.js';
 import { qaReportIsCurrent } from './qa-loop.js';
 import { runPreQaGate } from '../agents/pre-qa-gate.js';
+import { runVisualGate } from '../agents/visual-review.js';
+import { visualFixMessage } from '../agents/visual-review-core.js';
 import { scheduleRetrospective } from '../retrospective/service.js';
 
 // The approval gates, shared by the stage tabs' buttons (routes/*.ts) and
@@ -141,6 +143,23 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
   if ((approvalEpoch.get(session.id) ?? 0) !== epoch) {
     throw new StageActionError('The session was sent back to coding while the checks ran, so it was not sent to QA.', 409);
   }
+  // A branch that changes the UI is screenshotted, judged by the UI/UX agent and signed off by the human first.
+  const app = await getApp(session.appId);
+  const visual = await runVisualGate(session, app).catch((err) => {
+    throw new StageActionError(`The visual review couldn't run: ${err instanceof Error ? err.message : String(err)}`, 409);
+  });
+  if (visual.status === 'changes-needed') {
+    throw new StageActionError(`The UI/UX agent wants changes before QA: ${visual.review.summary} The coding lead is being sent the findings.`, 409, {
+      code: 'visual_changes_needed',
+      fixMessage: visual.message,
+    });
+  }
+  if (visual.status === 'awaiting-human') {
+    throw new StageActionError('The screenshots are ready for your approval. Review them on the Coding tab to start QA.', 409, { code: 'visual_review_pending' });
+  }
+  if ((approvalEpoch.get(session.id) ?? 0) !== epoch) {
+    throw new StageActionError('The session was sent back to coding while the visual review ran, so it was not sent to QA.', 409);
+  }
   // The coding agent's notes go over with the branch (qa-agent.ts).
   return updateSession(session.id, {
     stage: 'qa-in-progress',
@@ -160,6 +179,23 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
     qaRerunPending: session.transcripts.qa.length > 0,
     fixScope: null,
   });
+}
+
+/** The human signs off the screenshots the UI/UX agent passed, and QA starts. */
+export async function approveVisualReview(session: SessionRecord): Promise<SessionRecord> {
+  const review = session.visualReview;
+  if (review?.status !== 'awaiting-human') throw new StageActionError('there are no screenshots waiting for approval');
+  const approved = await updateSession(session.id, { visualReview: { ...review, status: 'approved', approvedAt: new Date().toISOString() } });
+  return approveCoding(approved);
+}
+
+/** The human wants changes: returns the message that sends the coding lead back to fix them. */
+export async function requestVisualChanges(session: SessionRecord, note: string): Promise<{ session: SessionRecord; fixMessage: string }> {
+  const review = session.visualReview;
+  if (review?.status !== 'awaiting-human') throw new StageActionError('there are no screenshots waiting for approval');
+  if (!note.trim()) throw new StageActionError('say what needs to change');
+  const next = { ...review, status: 'changes-requested' as const, humanNote: note.trim(), agentRounds: 0 };
+  return { session: await updateSession(session.id, { visualReview: next }), fixMessage: visualFixMessage(next, 'human') };
 }
 
 export type QaResult = 'pass' | 'fail' | 'pass-with-notes';

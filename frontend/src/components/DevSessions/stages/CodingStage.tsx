@@ -24,6 +24,7 @@ import { autoRunStopReason, progressOf } from '@/lib/dev-sessions/auto-run';
 import { sessionHref } from '@/lib/dev-sessions/stage';
 import { ChatPane } from '../ChatPane';
 import { ApprovalBar } from '../ApprovalBar';
+import { VisualReviewPanel } from '../VisualReviewPanel';
 import { useCoordinatorAutoRun } from '@/lib/dev-sessions/useCoordinatorAutoRun';
 import { CoordinatorControl } from '../CoordinatorControl';
 import { CodingPlanChecklist } from '../CodingPlanChecklist';
@@ -154,10 +155,12 @@ export function CodingStage({ session }: { session: SessionRecord }) {
       refresh();
       router.push(sessionHref(sessionId, 'qa'));
     },
-    // Lint or the tests fail: the coding lead gets the failing output and fixes it before QA.
+    // Lint or the tests fail, or the UI/UX agent wants changes: the coding lead gets the findings and fixes them before QA.
     onError: (err) => {
       const fixMessage = (err as Error & { fixMessage?: string }).fixMessage;
       if (fixMessage) void handleSend(fixMessage);
+      // The screenshots are waiting for the human: the visual review panel shows them.
+      if ((err as Error & { visualReviewPending?: boolean }).visualReviewPending) void refresh();
     },
   });
 
@@ -565,7 +568,12 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 sends this partial implementation to QA.
               </div>
             )}
-            <ErrorText>{approveMutation.error ? (approveMutation.error as Error).message : null}</ErrorText>
+            {!approved && <VisualReviewPanel session={session} onSendToCoder={(message) => void handleSend(message)} />}
+            <ErrorText>
+              {approveMutation.error && !(approveMutation.error as Error & { visualReviewPending?: boolean }).visualReviewPending
+                ? (approveMutation.error as Error).message
+                : null}
+            </ErrorText>
             <ApprovalBar
               approveLabel={approved ? 'Approved — QA started' : 'Approve diff and start QA'}
               onApprove={() => approveMutation.mutate()}

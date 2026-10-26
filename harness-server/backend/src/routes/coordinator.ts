@@ -33,6 +33,7 @@ import { gateRetryMessage, gateStopReason, gateStuck } from '../agents/pre-qa-ga
 import { getApp } from '../apps/apps-store.js';
 import {
   approveCoding,
+  StageActionError,
   approvePlan,
   approveQa,
   approveRequirements,
@@ -181,6 +182,14 @@ async function tryAdvance(
       try {
         await approveCoding(session);
       } catch (err) {
+        // The UI/UX agent wants changes: the coder fixes them like a failed check. Approving the screenshots is the human's alone.
+        if (err instanceof StageActionError && err.extra.code === 'visual_changes_needed') {
+          send({ type: 'coordinator_decision', action: 'continue', reason: 'The UI/UX agent wants changes to the screens. Sending it back to the coding lead.' });
+          return { kind: 'fix', message: String(err.extra.fixMessage) };
+        }
+        if (err instanceof StageActionError && err.extra.code === 'visual_review_pending') {
+          return { kind: 'stop', reason: 'This branch changes the UI. The UI/UX agent reviewed the screenshots; they wait for your approval on the Coding tab before QA starts.' };
+        }
         return { kind: 'stop', reason: err instanceof Error ? err.message : String(err) };
       }
       return { kind: 'advanced', reason: 'Every step is done and lint and the tests pass: sent the branch to QA.' };

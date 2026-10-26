@@ -98,7 +98,7 @@ export async function createApp(input: {
 export async function updateApp(
   id: string,
   // architecture: null turns it off; undefined leaves it as it is.
-  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean }
+  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean }
 ): Promise<AppWriteResult> {
   const apps = await readApps();
   const index = apps.findIndex((a) => a.id === id);
@@ -118,6 +118,8 @@ export async function updateApp(
   };
   if (patch.uiuxPass === false) delete updated.uiuxPass;
   else if (patch.uiuxPass) updated.uiuxPass = true;
+  if (patch.visualReview === false) updated.visualReview = false;
+  else if (patch.visualReview) delete updated.visualReview;
   if (patch.architecture === null) delete updated.architecture;
   else if (patch.architecture) updated.architecture = patch.architecture;
   const next = [...apps];

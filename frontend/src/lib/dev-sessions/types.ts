@@ -92,6 +92,8 @@ export interface AppConfig {
   architecture: ArchitectureConfig | null;
   // Whether the UI/UX pass is turned on for this app.
   uiuxPass: boolean;
+  // Whether a branch that changes the UI is screenshotted, judged by the UI/UX agent and approved by the human before QA.
+  visualReview: boolean;
 }
 
 // Mirrors harness-server's architecture/architecture.ts.
@@ -235,6 +237,21 @@ export type ThemeApplyResult = SetupSteps & { theme: AppThemeSummary };
 
 // Left for QA by the coding agent (from = null) or a team engineer (from =
 // its workstream's title) with note_for_qa.
+export interface VisualReview {
+  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped';
+  head: string;
+  verdict: 'good' | 'needs-changes' | null;
+  summary: string;
+  findings: { severity: 'blocker' | 'minor'; text: string; screenshot?: string }[];
+  // harness-server-relative PNG paths.
+  shots: { file: string; label: string }[];
+  agentRounds: number;
+  reason?: string;
+  humanNote?: string;
+  reviewedAt: string;
+  approvedAt?: string | null;
+}
+
 export interface QaNote {
   id: string;
   from: string | null;
@@ -483,6 +500,7 @@ export interface SessionRecord {
   // During a QA fix: the files QA named that the coder may write, and each widening (harness-server agents/fix-scope.ts).
   fixScope?: { paths: string[]; widened: { paths: string[]; reason: string; at: string }[]; pass: number } | null;
   qaRerunPending: boolean;
+  visualReview?: VisualReview | null;
   qaPass?: number;
   qaRounds?: unknown[];
 

@@ -1,12 +1,12 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
-import { createScreenshotExecute, screenshotDescription, screenshotSchema } from '../tool-defs/screenshot-tool.js';
+import { createScreenshotExecute, screenshotDescription, screenshotSchema, type ScreenshotDeps } from '../tool-defs/screenshot-tool.js';
 
 /**
  * Claude engine: the image goes back as an MCP image block, which the model
  * sees. The AI-SDK engine's twin is createScreenshotTool, which strips the
  * pixels from the stored history afterwards.
  */
-export function createScreenshotToolClaude(deps: { sessionId: string; repoRoot: string }) {
+export function createScreenshotToolClaude(deps: ScreenshotDeps) {
   const execute = createScreenshotExecute(deps);
   return tool(
     'screenshot_app',

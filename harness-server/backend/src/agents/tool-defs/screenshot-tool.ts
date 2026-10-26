@@ -130,7 +130,24 @@ export async function stopScreenshotServer(sessionId: string): Promise<void> {
   if (server) await server.then((s) => stopProcess(s.proc)).catch(() => undefined);
 }
 
-export function createScreenshotExecute(deps: { sessionId: string; repoRoot: string }) {
+export interface ScreenshotDeps {
+  sessionId: string;
+  repoRoot: string;
+  /** Called with every capture, so a caller can keep the files (the visual review shows them to the human). */
+  onCapture?: (shot: { file: string; text: string }) => void;
+}
+
+export function createScreenshotExecute(deps: ScreenshotDeps) {
+  const capture = createCapture(deps);
+  if (!deps.onCapture) return capture;
+  return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
+    const result = await capture(input);
+    deps.onCapture!({ file: result.file, text: result.text });
+    return result;
+  };
+}
+
+function createCapture(deps: { sessionId: string; repoRoot: string }) {
   let taken = 0;
   let rememberedLogin: PageLogin | undefined;
   return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
@@ -214,7 +231,7 @@ export function withoutImages(content: unknown): unknown {
 }
 
 /** The AI-SDK form: the model gets the image this turn; the stored result keeps only the text. */
-export function createScreenshotTool(deps: { sessionId: string; repoRoot: string }) {
+export function createScreenshotTool(deps: ScreenshotDeps) {
   return tool({
     description: screenshotDescription,
     inputSchema: screenshotSchema,

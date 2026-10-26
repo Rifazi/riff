@@ -96,7 +96,7 @@ export const api = {
 
   updateApp: (
     id: string,
-    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean }
+    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean }
   ) =>
     fetch(apiUrl(`/api/apps/${id}`), {
       method: 'PATCH',
@@ -291,10 +291,27 @@ export const api = {
     const res = await fetch(apiUrl(`/api/sessions/${id}/coding/approve`), { method: 'POST' });
     if (res.status === 409) {
       const body = await res.clone().json().catch(() => null);
-      if (body?.code === 'checks_failed') throw Object.assign(new Error(body.error), { fixMessage: String(body.fixMessage ?? '') });
+      if (body?.code === 'checks_failed' || body?.code === 'visual_changes_needed') {
+        throw Object.assign(new Error(body.error), { fixMessage: String(body.fixMessage ?? '') });
+      }
+      // The screenshots wait for the human: not an error, the Coding tab shows them.
+      if (body?.code === 'visual_review_pending') throw Object.assign(new Error(body.error), { visualReviewPending: true });
     }
     return json<SessionRecord>(res);
   },
+
+  approveVisualReview: (id: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/coding/visual-review/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
+
+  /** The reply's `fixMessage` is what to send the coding lead. */
+  requestVisualChanges: (id: string, note: string) =>
+    fetch(apiUrl(`/api/sessions/${id}/coding/visual-review/request-changes`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    }).then((r) => json<{ session: SessionRecord; fixMessage: string }>(r)),
+
+  visualShotUrl: (id: string, file: string) => apiUrl(`/api/sessions/${id}/visual-review/shots/${encodeURIComponent(file.split('/').pop() ?? file)}`),
 
   autoHandoffCoding: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/coding/auto-handoff`), { method: 'POST' }).then((r) =>

@@ -2434,3 +2434,40 @@ exist standalone).
   nothing (docs search, git operations, artifacts) ever spans two apps in
   the same operation. Multi-app support (step 7) is about *which single
   app* a session targets, not about combining apps.
+
+77. User asked that UI changes be screenshotted and approved by the human, with
+   the UI/UX agent judging them first.
+   - **Where**: `approveCoding` (`sessions/stage-actions.ts`), after the pre-QA
+     checks, so no route reaches QA around it. `runVisualGate`
+     (`agents/visual-review.ts`) looks at the changed files
+     (`uiFiles` in `visual-review-core.ts`: tsx/jsx/vue/svelte/css/scss/html and
+     `theme/theme.json`, not tests, stories or `.d.ts`); a branch with none goes
+     straight on. `AppConfig.visualReview === false` turns it off per app
+     (`PATCH /api/apps/:id`; no switch in the UI yet).
+   - **The review**: one fresh turn of the `uiux` role (no history kept; usage is
+     logged under stage `coding`, agent `uiux-review`) with `screenshot_app`,
+     the read tools, `analyze_colors` and `submit_visual_review`
+     (`tool-defs/submit-visual-review-tool.ts`: verdict, summary, findings
+     with `blocker`/`minor`). The first message carries the changed UI files, the
+     diff stat and the requirements; the prompt is `prompts/visual-review.md`
+     plus the UI/UX style guide. It must take a screenshot before it can submit.
+     `createScreenshotExecute` takes `onCapture` so the runner keeps the PNGs
+     (`state/screenshots/<sessionId>/`). A "needs-changes" with no blocker counts
+     as good (`effectiveVerdict`).
+   - **Outcomes**, in `session.visualReview` (keyed to the branch head it
+     looked at, so a new commit means a new review): `changes-needed` (a blocker)
+     is a 409 `visual_changes_needed` with `fixMessage`, which the Coding tab and
+     Bridget hand the coding lead like a failed check, at most `MAX_AGENT_ROUNDS`
+     (2) times in a row; after that, or when the agent is satisfied, it is
+     `awaiting-human` (409 `visual_review_pending`). Only the human approves
+     (`POST /coding/visual-review/approve`, then QA starts) or asks for changes
+     (`/request-changes` with a note → `fixMessage`). Bridget never approves the
+     screenshots: she stops and says so. `skipped` (non-blocking, with the reason
+     shown) when the UI/UX model is on Ollama, Chrome or the API key is missing,
+     or no screenshot could be taken (no dev script, the server won't start).
+   - **UI**: `components/DevSessions/VisualReviewPanel.tsx` on the Coding tab
+     above the approval bar (verdict, findings, a thumbnail grid, click to
+     enlarge). Images come from `GET /api/sessions/:id/visual-review/shots/:file`;
+     the Tauri CSP `img-src` allows the agent server.
+   Tests: `visual-review-core.test.ts` (4 cases). The gate itself needs Chrome and
+   a model, so it was only typechecked, not run end to end.

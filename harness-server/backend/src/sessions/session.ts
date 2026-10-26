@@ -213,6 +213,33 @@ export interface MergeFailure {
   reason: string;
 }
 
+export interface VisualReviewFinding {
+  severity: 'blocker' | 'minor';
+  text: string;
+  // One of the review's shot files this is about.
+  screenshot?: string;
+}
+
+export interface VisualReview {
+  // awaiting-human: the UI/UX agent is satisfied (or out of rounds) and the human decides.
+  // changes-requested: the coding lead was sent the findings; a new review runs when coding is approved again.
+  // skipped: nothing could be captured, so there was nothing to sign off.
+  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped';
+  // The branch commit the screenshots were taken at. A later commit needs a new review.
+  head: string;
+  verdict: 'good' | 'needs-changes' | null;
+  summary: string;
+  findings: VisualReviewFinding[];
+  // harnessRoot-relative PNG paths under state/screenshots/<sessionId>/.
+  shots: { file: string; label: string }[];
+  // Reviews in a row that sent the branch back; at the limit the human gets it with the agent's concerns.
+  agentRounds: number;
+  reason?: string;
+  humanNote?: string;
+  reviewedAt: string;
+  approvedAt?: string | null;
+}
+
 // Something the coding agent (from = null) or a team engineer (from = its
 // workstream's title) left for QA with note_for_qa.
 export interface QaNote {
@@ -454,6 +481,10 @@ export interface SessionRecord {
   // conversation — QaStage (or the coordinator) sends a re-review message
   // instead of waiting for an empty transcript, and the next QA turn clears it.
   qaRerunPending: boolean;
+
+  // The UI/UX agent's look at the screens a branch changes, and the human's
+  // sign-off on them, before QA starts (agents/visual-review.ts).
+  visualReview?: VisualReview | null;
 
   // Opt-in, per-session: when true, an SSE run against
   // /coordinator/run drives a stage's conversation forward automatically

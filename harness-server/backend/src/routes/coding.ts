@@ -13,7 +13,7 @@ import { diffBaseFor } from '../sessions/shared-branch.js';
 import type { AgentEvent } from '../agents/sdk-client.js';
 import { isTeamRunning, runCodingTeam, type TeamEvent } from '../agents/team/coding-team.js';
 import { restartLiveMember } from '../agents/team/team-state.js';
-import { approveCoding } from '../sessions/stage-actions.js';
+import { approveCoding, approveVisualReview, requestVisualChanges } from '../sessions/stage-actions.js';
 import { sendStageActionError } from './stage-action-reply.js';
 
 // Mirrors the frontmatter rewrite the approve/reject routes already do for
@@ -141,6 +141,40 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
       return await approveCoding(session);
     } catch (err) {
       return sendStageActionError(reply, err);
+    }
+  });
+
+  // Human-only: the screenshots the UI/UX agent passed. Approving starts QA.
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/coding/visual-review/approve', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    try {
+      return await approveVisualReview(session);
+    } catch (err) {
+      return sendStageActionError(reply, err);
+    }
+  });
+
+  // Human-only: wants changes. The reply carries the message the frontend sends the coding lead.
+  app.post<{ Params: { id: string }; Body: { note?: string } }>('/api/sessions/:id/coding/visual-review/request-changes', async (request, reply) => {
+    const session = await getSession(request.params.id);
+    if (!session) return reply.code(404).send({ error: 'session not found' });
+    try {
+      return await requestVisualChanges(session, request.body?.note ?? '');
+    } catch (err) {
+      return sendStageActionError(reply, err);
+    }
+  });
+
+  // One screenshot of the visual review, for the <img> tags on the Coding tab.
+  app.get<{ Params: { id: string; file: string } }>('/api/sessions/:id/visual-review/shots/:file', async (request, reply) => {
+    const { id, file } = request.params;
+    if (!/^[\w.-]+\.png$/.test(file) || !/^[\w-]+$/.test(id)) return reply.code(400).send({ error: 'bad screenshot name' });
+    try {
+      const png = await fs.readFile(path.join(config.stateDir, 'screenshots', id, file));
+      return reply.header('Content-Type', 'image/png').header('Cache-Control', 'private, max-age=3600').send(png);
+    } catch {
+      return reply.code(404).send({ error: 'screenshot not found' });
     }
   });
 

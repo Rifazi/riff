@@ -28,6 +28,8 @@ export interface AppConfig {
   architecture?: ArchitectureConfig;
   // Opt-in: the Apps page offers a UI/UX pass for this app (sessions/uiux-session.ts).
   uiuxPass?: boolean;
+  // false = no screenshot review before QA when a branch changes the UI (agents/visual-review.ts). Missing = on.
+  visualReview?: boolean;
 }
 
 export function baseBranchFor(app: AppConfig): string {
