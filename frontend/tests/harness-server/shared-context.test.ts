@@ -4,6 +4,12 @@ import { numberedCriteria, requirementsDigest } from '../../../harness-server/ba
 import { cleanModelSummary, docsMapFingerprint, renderDocsMap, ruleSummary, type DocEntry } from '../../../harness-server/backend/src/context/docs-map';
 import { docsCheckNote } from '../../../harness-server/backend/src/context/docs-check';
 import { criteriaCount, soloFirstReview } from '../../../harness-server/backend/src/context/qa-solo';
+import { MAX_NEEDED_DOCS, MAX_SEARCHED_DOCS, pickNeededDocs, queryFromRequirements } from '../../../harness-server/backend/src/context/needed-docs';
+import { appContext, cachedContext, forgetAppContext, MAX_CACHED_DOCS } from '../../../harness-server/backend/src/context/app-context';
+import { buildDocsIndex } from '../../../harness-server/backend/src/repo/docs-index';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { gateByRule } from '../../../harness-server/backend/src/agents/coordinator-agent';
 import type { TranscriptEntry } from '../../../harness-server/backend/src/sessions/session';
 
@@ -155,5 +161,64 @@ describe('gate by rule', () => {
     expect(gateByRule([e('user', { text: 'go' }), e('tool_result', { isError: true }), e('assistant', { text: 'Done.' })])).toBeNull();
     expect(gateByRule([e('user', { text: 'go' }), e('assistant', { text: 'word '.repeat(200) })])).toBeNull();
     expect(gateByRule([e('user', { text: 'go' })])).toBeNull();
+  });
+});
+
+process.env.RIFF_APP_CONTEXT_LOCAL = 'off';
+
+describe('only the docs a session needs are ingested', () => {
+  const indexed = ['docs/a.md', 'docs/b.md', 'docs/c.md', 'docs/ops.md'];
+
+  test('cited docs first, then search hits, deduplicated, unknown paths dropped', () => {
+    expect(pickNeededDocs(['ops.md'], ['docs/c.md', 'docs/ops.md', 'docs/zzz.md', 'docs/c.md'], indexed)).toEqual(['docs/ops.md', 'docs/c.md']);
+  });
+
+  test('search adds only its top few, and the total is capped', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `docs/d${i}.md`);
+    expect(pickNeededDocs([], many, many)).toHaveLength(MAX_SEARCHED_DOCS);
+    expect(pickNeededDocs(many.slice(20, 35), many, many)).toHaveLength(MAX_NEEDED_DOCS);
+  });
+
+  test('the search text is the title and the criteria', () => {
+    const q = queryFromRequirements(REQUIREMENTS);
+    expect(q).toContain('Partner on failures');
+    expect(q).toContain('The failure list shows the partner name');
+    expect(q).not.toContain('Filler paragraph');
+  });
+
+  test('appContext reads, hashes and caches only the docs it is asked for', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'ctx-'));
+    const id = `ctx-test-${Date.now()}`;
+    try {
+      mkdirSync(path.join(repo, 'docs'));
+      for (const f of ['a', 'b', 'c']) writeFileSync(path.join(repo, 'docs', `${f}.md`), `# ${f.toUpperCase()}\n\nThe ${f} doc explains ${f}.\n`);
+      const app: any = { id, name: id, repoRoot: repo };
+      await buildDocsIndex(app);
+      const entries = await appContext(app, ['docs/a.md', 'docs/missing.md']);
+      expect(entries.map((e) => e.path)).toEqual(['docs/a.md']);
+      expect((await cachedContext(id)).map((e) => e.path)).toEqual(['docs/a.md']);
+      expect((await appContext(app, [])).length).toBe(0);
+      expect((await cachedContext(id)).map((e) => e.path)).toEqual(['docs/a.md']);
+    } finally {
+      forgetAppContext(id);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  test('the cache never holds more than its cap', async () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'ctx-'));
+    const id = `ctx-cap-${Date.now()}`;
+    try {
+      mkdirSync(path.join(repo, 'docs'));
+      const files = Array.from({ length: MAX_CACHED_DOCS + 5 }, (_, i) => `docs/f${i}.md`);
+      for (const f of files) writeFileSync(path.join(repo, f), `# ${f}\n\nAbout ${f}.\n`);
+      const app: any = { id, name: id, repoRoot: repo };
+      await buildDocsIndex(app);
+      await appContext(app, files);
+      expect((await cachedContext(id)).length).toBeLessThanOrEqual(MAX_CACHED_DOCS);
+    } finally {
+      forgetAppContext(id);
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

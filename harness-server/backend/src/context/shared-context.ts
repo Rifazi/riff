@@ -7,6 +7,7 @@ import { updateSession } from '../sessions/session-store.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { docsToUpdate } from '../agents/pre-qa-gate-core.js';
 import { appContext } from './app-context.js';
+import { neededDocs, queryFromRequirements } from './needed-docs.js';
 import { docsMapFingerprint, renderDocsMap, type MapRole } from './docs-map.js';
 
 /** Docs the approved requirements cite (`related-docs`) or ask to change, for the map's first lines. */
@@ -15,15 +16,22 @@ export function citedDocs(requirementsRaw: string): string[] {
   return [...(Array.isArray(related) ? related.map(String) : []), ...docsToUpdate(requirementsRaw)];
 }
 
-async function citedFor(session: SessionRecord): Promise<string[]> {
-  if (!session.requirementsPath) return [];
-  const raw = await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8').catch(() => '');
-  return citedDocs(raw);
+/** What a stage's docs are chosen for: the requirements when approved, else the session's title and opening message. */
+async function queryFor(session: SessionRecord, requirementsRaw: string): Promise<string> {
+  if (requirementsRaw) return queryFromRequirements(requirementsRaw);
+  const opening = session.transcripts.requirements.find((e) => e.role === 'user')?.text ?? '';
+  return `${session.title}. ${opening}`.slice(0, 1200);
+}
+
+/** The docs a session needs, ingested (and only those): the requirements' cited docs plus the best search hits for the work. */
+export async function contextFor(app: AppConfig, query: string, requirementsRaw = '') {
+  return appContext(app, await neededDocs(app, query, citedDocs(requirementsRaw)));
 }
 
 /** The map as a system-prompt section, for conversations that always start fresh (team members, reviewers). */
 export async function docsMapSection(app: AppConfig, role: MapRole, requirementsRaw = ''): Promise<string> {
-  return renderDocsMap(await appContext(app), role, citedDocs(requirementsRaw));
+  const entries = await contextFor(app, queryFromRequirements(requirementsRaw), requirementsRaw);
+  return renderDocsMap(entries, role, citedDocs(requirementsRaw));
 }
 
 /**
@@ -40,13 +48,16 @@ export async function sharedContextForTurn(
   isFirstTurn: boolean,
   options: { systemElsewhere?: boolean } = {}
 ): Promise<{ system: string; turnPrefix: string }> {
-  const entries = await appContext(app);
+  const raw = session.requirementsPath
+    ? await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8').catch(() => '')
+    : '';
+  const entries = await contextFor(app, await queryFor(session, raw), raw);
   const current = docsMapFingerprint(entries);
   const seen = session.docsMapSeen[role];
   if (!isFirstTurn && seen === current) return { system: '', turnPrefix: '' };
 
   await updateSession(session.id, { docsMapSeen: { ...session.docsMapSeen, [role]: current } });
-  const section = renderDocsMap(entries, role, await citedFor(session));
+  const section = renderDocsMap(entries, role, citedDocs(raw));
   if (isFirstTurn) return { system: options.systemElsewhere ? '' : section, turnPrefix: '' };
   if (!section || (seen === undefined && current === 'none')) return { system: '', turnPrefix: '' };
   return {

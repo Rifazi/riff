@@ -4,10 +4,13 @@ import { config } from '../config.js';
 import type { AppConfig } from '../apps/apps.js';
 import { listIndexedFiles, readDocSection } from '../repo/docs-index.js';
 import { generateLocal, localModelStatus } from '../agents/local-llm.js';
+import { riffEnv } from '../riff-paths.js';
 import { cleanModelSummary, hashText, ruleSummary, type DocEntry } from './docs-map.js';
 
-// The shared context agent. It reads the repo's markdown docs once, keeps a
-// one-line summary of each (written by Riff's built-in Qwen when it's
+// The shared context agent. It ingests only the docs a session needs (the
+// caller names them: shared-context.ts picks the ones the requirements cite
+// plus the few the search ranks highest for the work), never the whole docs
+// folder. It keeps a one-line summary of each (written by Riff's built-in Qwen when it's
 // installed, else taken from the doc's own first sentence) and hands every
 // role the same map instead of each agent searching and opening docs to
 // find out what exists. Summaries are cached by content hash, so a doc is
@@ -20,6 +23,8 @@ const SUMMARY_SYSTEM =
   'sentences, at most 40 words: what the doc covers and when someone needs to read it. No preamble, no markdown.';
 const MODEL_INPUT_CHARS = 6000;
 const MAX_UPGRADES_PER_RUN = 40;
+// Summaries kept per app; the least recently needed go first.
+export const MAX_CACHED_DOCS = 40;
 
 interface Cache {
   docs: Record<string, DocEntry>;
@@ -53,41 +58,59 @@ async function saveCache(appId: string, cache: Cache): Promise<void> {
   }
 }
 
+/** Local summaries are on when the built-in model is installed, unless RIFF_APP_CONTEXT_LOCAL=off. */
+function localSummariesOn(): boolean {
+  return riffEnv('APP_CONTEXT_LOCAL') !== 'off' && localModelStatus().available;
+}
+
+/** What is already summarized for an app. Reads no docs. */
+export async function cachedContext(appId: string): Promise<DocEntry[]> {
+  return Object.values((await loadCache(appId)).docs).sort((x, y) => x.path.localeCompare(y.path));
+}
+
 /**
- * The map for an app, up to date with the docs index. New and edited docs
- * get their rule-made summary at once; the model upgrades them in the
+ * The map for `wanted` docs only, up to date with the docs index. A doc not
+ * named here is never read, hashed or summarized. New and edited docs get
+ * their rule-made summary at once; the model upgrades them in the
  * background (`ensureSummaries`).
  */
-export async function appContext(app: AppConfig): Promise<DocEntry[]> {
+export async function appContext(app: AppConfig, wanted: readonly string[]): Promise<DocEntry[]> {
   const cache = await loadCache(app.id);
-  const files = listIndexedFiles(app.id);
+  const indexed = new Set(listIndexedFiles(app.id));
   const entries: DocEntry[] = [];
-  const live = new Set<string>();
+  const now = Date.now();
   let changed = false;
-  for (const file of files) {
+  for (const file of new Set(wanted)) {
+    if (!indexed.has(file)) continue;
     const text = readDocSection(app.id, file);
     if (text === null) continue;
-    live.add(file);
     const hash = hashText(text);
     const held = cache.docs[file];
     if (held && held.hash === hash) {
+      held.usedAt = now;
       entries.push(held);
       continue;
     }
-    const entry: DocEntry = { path: file, hash, summary: ruleSummary(text) || file, by: 'rule' };
+    const entry: DocEntry = { path: file, hash, summary: ruleSummary(text) || file, by: 'rule', usedAt: now };
     cache.docs[file] = entry;
     entries.push(entry);
     changed = true;
   }
   for (const file of Object.keys(cache.docs)) {
-    if (!live.has(file)) {
+    if (!indexed.has(file)) {
       delete cache.docs[file];
       changed = true;
     }
   }
+  const kept = Object.values(cache.docs).sort((x, y) => (y.usedAt ?? 0) - (x.usedAt ?? 0));
+  for (const stale of kept.slice(MAX_CACHED_DOCS)) {
+    delete cache.docs[stale.path];
+    changed = true;
+  }
   if (changed) await saveCache(app.id, cache);
-  if (entries.some((e) => e.by === 'rule') && localModelStatus().available) void ensureSummaries(app);
-  return entries;
+  const live = entries.filter((e) => cache.docs[e.path]);
+  if (live.some((e) => e.by === 'rule') && localSummariesOn()) void ensureSummaries(app);
+  return live.sort((x, y) => x.path.localeCompare(y.path));
 }
 
 /** One background pass of model summaries for the docs that only have a rule-made one. */

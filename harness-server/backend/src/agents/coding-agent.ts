@@ -40,8 +40,8 @@ import { qaFixSoloReason } from '../sessions/qa-loop.js';
 import { qaRoundsFor } from '../sessions/qa-rounds.js';
 import { planExcerpt, planStepSection, SESSION_PLAN_DOC } from './plan-excerpt.js';
 import { repoInstructionsNote } from './repo-instructions.js';
-import { citedDocs, sharedContextForTurn } from '../context/shared-context.js';
-import { appContext } from '../context/app-context.js';
+import { citedDocs, contextFor, sharedContextForTurn } from '../context/shared-context.js';
+import { queryFromRequirements } from '../context/needed-docs.js';
 import { renderDocsMap } from '../context/docs-map.js';
 import { requirementsDigest } from '../context/requirements-digest.js';
 import { createDocsSearchTools } from './tool-defs/docs-search-tool.js';
@@ -851,7 +851,7 @@ export async function loadApprovedDocsForCoding(
   let text = `\n\n# Approved requirements (${session.requirementsPath})\n\n${requirementsDigest(requirementsRaw, 'coding')}`;
 
   const app = await getApp(session.appId);
-  const mapEntries = await appContext(app);
+  const mapEntries = await contextFor(app, queryFromRequirements(requirementsRaw), requirementsRaw);
   const mapped = new Set(mapEntries.map((e) => e.path));
   const cited: unknown = matter(requirementsRaw).data['related-docs'];
   const relatedDocs: string[] = (Array.isArray(cited) ? cited : []).filter((d: string) => !mapped.has(d));

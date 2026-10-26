@@ -7,6 +7,7 @@ export interface DocEntry {
   hash: string;
   summary: string;
   by: 'local' | 'rule';
+  usedAt?: number;
 }
 
 const MAX_SUMMARY_CHARS = 280;

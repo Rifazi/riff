@@ -2209,13 +2209,22 @@ below) — never inside the target repo.
    plan 8%, requirements 4%, so the work went at what coding and QA are handed.
    `backend/src/context/`:
    - **Context agent** (`app-context.ts`, pure half `docs-map.ts`): keeps one
-     summary line per doc in the app's docs index, cached by content hash in
+     summary line per doc *a session needs*, never the whole docs folder
+     (`needed-docs.ts`: the docs the requirements cite or ask to update, then the
+     top 3 `search` hits for the requirements' title and criteria, or for a session
+     title and opening message before there are requirements; 10 docs at most;
+     with no search engine, cited docs only). `appContext(app, wanted)` reads,
+     hashes and summarizes only those; the cache keeps at most 40 per app, least
+     recently needed first out, and drops docs that no longer exist. Cached by
+     content hash in
      `state/app-context/<appId>.json`. A new or edited doc gets a rule-made
      summary at once (title + first sentence, `ruleSummary`); Riff's built-in
      Qwen (`generateLocal`, ~2 s a doc, up to 40 a pass, one at a time) then
      replaces it in the background (`ensureSummaries`), so a turn never waits on
      the model and nothing leaves the machine. `GET /api/apps/:id/context` shows
-     the map and who wrote each line; `POST .../context/refresh` runs the pass.
+     what has been ingested so far and who wrote each line (it reads nothing).
+     `RIFF_APP_CONTEXT_LOCAL=off` skips the Qwen pass. The docs *index* behind
+     `read_doc`/`search_docs` still holds every doc in memory, as before.
    - **Delivery** (`shared-context.ts`): `sharedContextForTurn` puts the map in the
      system prompt of requirements, plan, QA and coding, and in the turn prompt
      when a doc was added/removed/edited since that stage saw it
@@ -2255,7 +2264,7 @@ below) — never inside the target repo.
    memory and lessons are still built per role: a system prompt starts with the
    role's own text, so a prefix can't be shared between roles), and Jack's kickoff
    decision was already rule-first (`split-hint`). Tests: `shared-context.test.ts`
-   (16); the folder passes through the node:test shim (462) except the same 6
+   (21, including that an unrequested doc is never ingested); the folder passes through the node:test shim (462) except the same 6
    cases that fail on main. Smoke-checked the context agent against this repo's
    docs with the built-in Qwen. Not run with real agents yet: compare coding and
    QA first-request context (`starts`) and `search_docs`/`read_doc` calls per
