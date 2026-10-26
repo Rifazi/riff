@@ -24,6 +24,10 @@ export interface UsageLogEntry {
   agent?: string;
   // Model requests the turn made. Absent on older entries.
   requests?: number;
+  // Context tokens of each conversation's first request in the turn (the
+  // fixed cost every request re-reads: prompt, tool schemas, handoff).
+  // More than one entry means the turn was cut and restarted. Absent on older entries.
+  starts?: number[];
   // Coding only: steps in the session's checklist then, for cost per step.
   planSteps?: number;
   // Set on a local helper run's entry (agents/helpers/helper.ts): `usage`

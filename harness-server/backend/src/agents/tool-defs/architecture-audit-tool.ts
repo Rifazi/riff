@@ -55,6 +55,12 @@ export function trimAudit(text: string, previous: string | null): string {
   let out = text;
   if (previous !== null) {
     out = out.replace(/\n\nDomains:\n(?:- .*\n?)+/, '\n\n(Domain list as in your first audit.)\n');
+    if (previous.includes('\n  Give each one a DOMAIN.md')) {
+      out = out.replace(/\n  Give each one a DOMAIN\.md[^\n]*/, '\n  (How to give each folder a DOMAIN.md: as in your earlier audit.)');
+    }
+    const scopeBlock = /\n\nBranch scope \(vs [^)]*\):\n(?:- .*\n?)+/;
+    const scopeNow = out.match(scopeBlock)?.[0].trimEnd();
+    if (scopeNow && scopeNow === previous.match(scopeBlock)?.[0].trimEnd()) out = out.replace(scopeBlock, '\n\n(Branch scope: unchanged since your last audit.)\n');
   }
   if (out.length <= AUDIT_CHAR_LIMIT) return out;
   const cut = out.lastIndexOf('\n', AUDIT_CHAR_LIMIT);
@@ -76,7 +82,7 @@ export function createAuditArchitectureExecute(deps: AuditArchitectureDeps) {
       const changes = await branchChanges(deps.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, deps.branch);
       if (changes) scope = branchScope(audit, base, changes.files, changes.docDiff);
     }
-    const full = formatWayfindingAudit(audit, scope);
+    const full = formatWayfindingAudit(audit, scope, { compact: true });
     const shown = trimAudit(full, previous);
     previous = full;
     return shown;

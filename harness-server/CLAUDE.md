@@ -2168,6 +2168,41 @@ below) — never inside the target repo.
    itself isn't run against a real repo yet. The pre-QA gate also sent this
    session back 5 times (`gateSendBacks`); that cost isn't investigated.
 
+75. User asked for scripts instead of tokens for repeated work, then for more
+   optimizations. Measured over 72 sessions (`state/usage-log.jsonl`, Oct 5-25):
+   a first count of "repeated calls" was wrong, since `ReadMemo` and `trimAudit`
+   already turn a repeat into a note. Counting only repeats that came back as full
+   text with no write between them, since Oct 19: `audit_architecture` 20 calls
+   (198k chars), `get_diff` 9 (46k), the rest under 20 each, about 60k tokens in
+   all, so no more caching was built. What the log does show: coding is 72% of
+   cost and QA 17%; cache reads 44% and cache writes 36% of coding. A turn
+   averages 15 requests at ~46k context, 1.34 tool calls per request, and the
+   fixed part of a conversation is ~30k tokens (first-turn system prompt ~11.7k:
+   base 5.4k, theme 1.6k, architecture 2.1k, plan/requirements excerpt 2.4k; the
+   rest is tool schemas, the SDK's own prompt and the handoff). A turn that starts
+   within 5 minutes of the previous one writes ~6k cache tokens, a cold one ~32k,
+   so the prompt cache works across conversation resets. A model of reset cost
+   against the 55k threshold (reads grow with context, re-orientation after a cut
+   is a fixed cost) is flat between 55k and ~80k, so the threshold stays.
+   - **Compact audit** (`formatWayfindingAudit(audit, scope, { compact: true })`,
+     used only by the agent tool; the Apps page report is unchanged): a large app
+     (> 12 domains) gets "Domains: not listed here, read MAP.md" instead of up to
+     40 one-line entries, and the branch scope lists the 20 domains with the most
+     files. 264 of 672 audits had hit the 10k cap.
+   - **Later audits** (`trimAudit`): the "Give each one a DOMAIN.md…" paragraph is
+     replaced by a pointer when an earlier audit gave it, and the branch scope list
+     by "unchanged" when it matches the last one.
+   - **Usage log**: each line has `starts`, the context tokens of the first request
+     of every conversation in the turn (more than one entry = the turn was cut and
+     restarted), so the fixed cost per conversation and the number of cuts per turn
+     can be read straight off the log. Not recorded before this.
+   Tests: three cases in `batch-tools.test.ts`; the folder passes through a
+   node:test shim (the shim has to be rebuilt each session: see the
+   harness-server-tests memory) except 6 cases that fail the same way without these
+   changes. Not run with real agents yet: next, read `starts` to see how much of a
+   conversation's first request is fixed cost, and trim the biggest piece (tool
+   schemas, the theme briefing sent to every coding conversation, or the handoff).
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

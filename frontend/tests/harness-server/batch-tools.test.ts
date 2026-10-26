@@ -70,6 +70,50 @@ describe('trimAudit', () => {
     expect(later).toContain('[y] two');
   });
 
+  test('later audits collapse the DOMAIN.md instructions and an unchanged branch scope', async () => {
+    const { trimAudit } = await import('../../../harness-server/backend/src/agents/tool-defs/architecture-audit-tool');
+    const first = [
+      'Wayfinding audit',
+      '',
+      '✗ This branch changed code in 1 folder(s) with no DOMAIN.md:',
+      '- a/: top-level domain (a/x.ts)',
+      '  Give each one a DOMAIN.md, created before you change its code, then run audit_architecture({ regenerate: true }).',
+      '',
+      'Branch scope (vs master):',
+      '- a: 1 file(s)',
+      '- b: 2 file(s)',
+    ].join('\n');
+    const same = trimAudit(`${first}\n\nNot on the map yet: z`, first);
+    expect(same).toContain('as in your earlier audit');
+    expect(same).not.toContain('created before you change its code');
+    expect(same).toContain('Branch scope: unchanged');
+    expect(same).toContain('Not on the map yet: z');
+    const moved = trimAudit(first.replace('- b: 2 file(s)', '- b: 3 file(s)'), first);
+    expect(moved).toContain('- b: 3 file(s)');
+  });
+
+  test('an instruction the earlier audit never gave is kept', async () => {
+    const { trimAudit } = await import('../../../harness-server/backend/src/agents/tool-defs/architecture-audit-tool');
+    const later = '✗ 1 folder(s):\n  Give each one a DOMAIN.md, created before you change its code.';
+    expect(trimAudit(later, 'Wayfinding audit\n- [x] one')).toContain('created before you change its code');
+  });
+
+  test('the compact audit lists no domains for a large app and caps the scope', async () => {
+    const { formatWayfindingAudit } = await import('../../../harness-server/backend/src/architecture/wayfinding-audit');
+    const domains = Array.from({ length: 30 }, (_, i) => ({ id: `d${i}`, dir: `src/d${i}`, owns: 'x', interface: 'f()', checkpoint: 'c', parent: null, junction: false }));
+    const audit = { srcDirs: ['src'], interfaceFile: 'service.ts', domains, problems: [], regenerated: [], undocumented: [], offMap: [], mapExists: true, missingSrcDirs: [] } as never;
+    const scope = { base: 'master', byDomain: domains.map((d, i) => ({ domain: d.id, files: Array.from({ length: i + 1 }, () => 'f') })), outside: [], structural: [], ownershipEdits: [], offMap: [], looseFiles: [] } as never;
+    const full = formatWayfindingAudit(audit, scope);
+    const compact = formatWayfindingAudit(audit, scope, { compact: true });
+    expect(full).toContain('- d3 (src/d3/)');
+    expect(compact).not.toContain('- d3 (src/d3/)');
+    expect(compact).toContain('Domains: not listed here');
+    expect(compact).toContain('- d29: 30 file(s)');
+    expect(compact).not.toContain('- d0: 1 file(s)');
+    expect(compact).toContain('10 more domain(s)');
+    expect(compact.length).toBeLessThan(full.length);
+  });
+
   test('cuts a very long result at a line', async () => {
     const { trimAudit } = await import('../../../harness-server/backend/src/agents/tool-defs/architecture-audit-tool');
     const out = trimAudit(Array.from({ length: 2000 }, (_, i) => `- problem ${i}`).join('\n'), null);

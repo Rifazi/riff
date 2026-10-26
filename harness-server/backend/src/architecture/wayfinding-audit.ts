@@ -931,8 +931,11 @@ function sectionDiff(chunk: string, title: string): string {
 // ------------------------------------------------------------------ report
 
 const MAX_LISTED = 40;
+// The agent's audit lists domains only for a small app: MAP.md and each DOMAIN.md say the same, and 160 of them were ~4k tokens every conversation.
+const COMPACT_DOMAIN_LIST_MAX = 12;
+const COMPACT_SCOPE_MAX = 20;
 
-export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScope | null): string {
+export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScope | null, options: { compact?: boolean } = {}): string {
   const audited = auditedSrcDirs(audit);
   const folders = (dirs: string[]) => dirs.map((d) => `${d}/`).join(', ');
   const lines: string[] = [`Wayfinding audit: domains under ${folders(audited.length ? audited : audit.srcDirs)}, public interface ${audit.interfaceFile} (or the file named after the domain's folder)`];
@@ -972,7 +975,9 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
       : `No domains yet (no ${DOMAIN_DOC} under ${srcDir}). ${MAP_PATH}: ${audit.mapExists ? 'present' : 'missing'}. ` +
           `A decision gets a domain when a second place needs it; start with the ones this work changes.`
   );
-  if (audit.domains.length) {
+  if (options.compact && audit.domains.length > COMPACT_DOMAIN_LIST_MAX) {
+    lines.push('', `Domains: not listed here, read ${MAP_PATH} and the domain's ${DOMAIN_DOC} (read_doc).`);
+  } else if (audit.domains.length) {
     lines.push('', 'Domains:');
     for (const d of audit.domains.slice(0, MAX_LISTED)) {
       lines.push(`- ${d.id} (${d.dir}/)${d.junction ? ' (junction)' : ''}: owns ${d.owns ?? '?'}; interface ${d.interface ?? '?'}; checkpoint \`${d.checkpoint ?? '?'}\``);
@@ -1030,7 +1035,11 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
   if (scope) {
     lines.push('', `Branch scope (vs ${scope.base}):`);
     if (!scope.byDomain.length && !scope.outside.length) lines.push('- no changes yet');
-    for (const d of scope.byDomain) lines.push(`- ${d.domain}: ${d.files.length} file(s)`);
+    const scopeDomains = options.compact ? [...scope.byDomain].sort((a, b) => b.files.length - a.files.length) : scope.byDomain;
+    for (const d of scopeDomains.slice(0, options.compact ? COMPACT_SCOPE_MAX : undefined)) lines.push(`- ${d.domain}: ${d.files.length} file(s)`);
+    if (options.compact && scope.byDomain.length > COMPACT_SCOPE_MAX) {
+      lines.push(`- … ${scope.byDomain.length - COMPACT_SCOPE_MAX} more domain(s) with fewer files`);
+    }
     if (scope.outside.length) {
       const shown = scope.outside.slice(0, 8).join(', ');
       lines.push(`- outside any domain: ${scope.outside.length} file(s) (${shown}${scope.outside.length > 8 ? ', …' : ''})`);

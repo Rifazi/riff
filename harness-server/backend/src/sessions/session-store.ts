@@ -270,10 +270,10 @@ export async function setClaudeSessionId(id: string, stage: StageKey, sdkSession
 export async function addStageUsage(
   id: string,
   stage: StageKey,
-  event: { usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number },
+  event: { usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number; starts?: number[] },
   agent: string = stage,
 ): Promise<void> {
-  const { usage, toolOutput, requests } = event;
+  const { usage, toolOutput, requests, starts } = event;
   let planSteps: number | undefined;
   await mutateSession(id, (session) => {
     session.usage[stage] = addUsage(session.usage[stage], usage);
@@ -287,6 +287,7 @@ export async function addStageUsage(
     ...(toolOutput ? { toolOutput } : {}),
     agent,
     ...(requests !== undefined ? { requests } : {}),
+    ...(starts?.length ? { starts } : {}),
     ...(planSteps !== undefined ? { planSteps } : {}),
   });
   const total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;

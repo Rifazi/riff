@@ -98,7 +98,7 @@ export type AgentEvent =
   | { type: 'coordinator_decision'; action: 'continue' | 'ready' | 'advanced'; reason: string }
   | { type: 'continuation'; hop: number; maxHops: number }
   | { type: 'compacted'; contextTokens: number }
-  | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number };
+  | { type: 'usage'; usage: TokenUsage; toolOutput?: ToolOutputStats; requests?: number; starts?: number[] };
 
 // Bounds automatic continuation (see runAgentTurn/runClaudeAgentTurn below):
 // when a turn is cut off purely because it hit its own per-call step/turn
@@ -357,6 +357,7 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
   let usage = result.usage;
   let used = result.requests;
   let conversationStart = result.startTokens;
+  const starts = [result.startTokens];
 
   while (result.finishReason === 'tool-calls' && used < budget.total && !params.abortSignal?.aborted) {
     const compacting = shouldCompact(params.compaction, result.contextTokens, conversationStart);
@@ -385,15 +386,18 @@ export async function runAgentTurn(rawParams: RunAgentTurnParams): Promise<RunAg
     });
     usage = addUsage(usage, result.usage);
     used += result.requests;
-    if (compacting) conversationStart = result.startTokens;
+    if (compacting) {
+      conversationStart = result.startTokens;
+      starts.push(result.startTokens);
+    }
   }
   if (result.finishReason === 'tool-calls' && used >= budget.total) {
     const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
-    onEvent({ type: 'usage', usage, toolOutput, requests: used });
+    onEvent({ type: 'usage', usage, toolOutput, requests: used, starts });
     return { updatedHistory: result.updatedHistory, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
-  onEvent({ type: 'usage', usage, toolOutput, requests: used });
+  onEvent({ type: 'usage', usage, toolOutput, requests: used, starts });
 
   return {
     updatedHistory: result.updatedHistory,
@@ -762,6 +766,7 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   let usage = result.usage;
   let used = result.requests;
   let conversationStart = result.startTokens;
+  const starts = [result.startTokens];
   const unfinished = () =>
     result.subtype === CONTEXT_BUDGET || (result.subtype === 'error_max_turns' && Boolean(result.sdkSessionId));
 
@@ -779,6 +784,7 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
         prompt: `${handoff.prompt}\n\n---\n\n${CONTINUATION_AFTER_COMPACTION_PROMPT}`,
       });
       conversationStart = result.startTokens;
+      starts.push(result.startTokens);
     } else {
       hop += 1;
       onEvent({ type: 'continuation', hop, maxHops: Math.ceil(budget.total / budget.perHop) - 1 });
@@ -798,14 +804,14 @@ export async function runClaudeAgentTurn(rawParams: RunClaudeAgentTurnParams): P
   if (unfinished() && used >= budget.total) {
     const resultText = outOfStepsText(budget.total);
     onEvent({ type: 'done', text: resultText, isError: true });
-    onEvent({ type: 'usage', usage, toolOutput, requests: used });
+    onEvent({ type: 'usage', usage, toolOutput, requests: used, starts });
     return { sdkSessionId: result.sdkSessionId, resultText, isError: true, usage, contextTokens: result.contextTokens };
   }
   // Stopped at the cap without continuing (no session id to resume, or aborted).
   if (result.subtype === 'error_max_turns' && !params.abortSignal?.aborted) {
     onEvent({ type: 'done', text: result.resultText, isError: true });
   }
-  onEvent({ type: 'usage', usage, toolOutput, requests: used });
+  onEvent({ type: 'usage', usage, toolOutput, requests: used, starts });
 
   return {
     sdkSessionId: result.sdkSessionId,
