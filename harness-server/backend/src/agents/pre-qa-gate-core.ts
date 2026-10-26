@@ -53,6 +53,39 @@ export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope
   return lines;
 }
 
+/**
+ * The doc paths a requirements document's "Docs to update" section lists: the
+ * first path-like token of each bullet (backticked or bare, with a file
+ * extension). A bullet that says "none" or names no path lists nothing.
+ */
+export function docsToUpdate(requirements: string): string[] {
+  const lines = requirements.split('\n');
+  const start = lines.findIndex((l) => /^#{1,6}\s+docs to update\s*$/i.test(l.trim()));
+  if (start < 0) return [];
+  const paths: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,6}\s/.test(line)) break;
+    const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.*)$/);
+    if (!bullet) continue;
+    const token = bullet[1].match(/`([^`\s]+\.[A-Za-z0-9]+)`/) ?? bullet[1].match(/^\*{0,2}([^\s`*:,;()]+\.[A-Za-z0-9]+)/);
+    if (token) paths.push(token[1].replace(/^\.\//, '').replace(/[.,;:]+$/, ''));
+  }
+  return [...new Set(paths)];
+}
+
+/** The listed docs the branch didn't change (a listed path matches a changed file by its full path or as a trailing part of it). */
+export function untouchedDocs(listed: readonly string[], changedFiles: readonly string[]): string[] {
+  return listed.filter((doc) => !changedFiles.some((f) => f === doc || f.endsWith(`/${doc}`)));
+}
+
+/** The check's output for the lead, one line per doc. */
+export function docsCheckOutput(untouched: readonly string[]): string {
+  return (
+    untouched.map((d) => `- ${d} is in the requirements' "Docs to update" but this branch doesn't change it`).join('\n') +
+    '\n\nUpdate each one for what this branch changed and commit. If a doc really needs no change, say why with note_for_qa.'
+  );
+}
+
 const MAX_AUDIT_LINES = 25;
 
 /** The failing output, one section per failed check and one for the audit problems; null when every check passed. */
@@ -77,7 +110,7 @@ export function gateMessage(checks: GateCheck[], auditProblems: string[]): strin
   const details = gateDetails(checks, auditProblems);
   if (!details) return null;
   return (
-    'Before QA, I ran lint and the unit tests on this branch, and something fails. Fix these on the branch and commit, then stop: ' +
+    "Before QA, I ran lint and the unit tests and checked the requirements' docs list and the branch's scope, and something fails. Fix these on the branch and commit, then stop: " +
     "QA starts once they pass, and QA doesn't run them itself. Don't assign a team for this, and don't leave a note asking QA to run or fix them.\n\n" +
     details
   );

@@ -168,6 +168,20 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+/** Files that blockers named in more than one pass, most often first (basenames are compared, so a bare name and a path match). */
+export function hotBlockerFiles(rounds: QaRoundRecord[]): string[] {
+  const passes = new Map<string, Set<number>>();
+  for (const r of rounds) {
+    for (const text of r.blocking) {
+      for (const f of findingFiles(text)) {
+        if (!passes.has(f)) passes.set(f, new Set());
+        passes.get(f)!.add(r.pass);
+      }
+    }
+  }
+  return [...passes].filter(([, p]) => p.size >= 2).sort((a, b) => b[1].size - a[1].size).map(([f]) => f);
+}
+
 const KIND_LABEL: Record<BlockerKind, string> = {
   repeated: 'flagged before, fix didn\'t hold',
   'was-note': 'was a note you skipped',

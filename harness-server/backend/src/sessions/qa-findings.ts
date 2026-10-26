@@ -1,6 +1,7 @@
 import matter from 'gray-matter';
 import { findingFiles, findingSimilarity, loopBrief, SAME_FINDING, type QaCriterionRecord, type QaLoopAnalysis } from './qa-loop.js';
-import type { QaResponse } from './session.js';
+import { fixSplitBrief } from './fix-split-core.js';
+import type { QaFixSplit, QaResponse } from './session.js';
 
 export interface ParsedQaReport {
   result: string | null;
@@ -99,6 +100,7 @@ export function compactQaFindings(
   loop: QaLoopAnalysis | null = null,
   declinedNotes: string[] = [],
   responses: QaResponse[] = [],
+  fixSplit: QaFixSplit | null = null,
 ): string {
   const parsed = parseQaReport(raw);
   const { result, failedChecks, blocking } = parsed;
@@ -112,6 +114,7 @@ export function compactQaFindings(
   if (notes.length > 0) {
     text += `\n\nAlso address (non-blocking, but QA wants these acted on):\n${notes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`;
   }
+  if (fixSplit) text += `\n\n${fixSplitBrief(fixSplit)}`;
   if (blocking.length > 0 || notes.length > 0) text += `\n\n${FIX_RULES}`;
   return text;
 }

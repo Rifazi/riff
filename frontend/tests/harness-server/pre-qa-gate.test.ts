@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   blockingAuditProblems,
   checkSucceeded,
+  docsToUpdate,
+  untouchedDocs,
   gateFingerprint,
   gateMessage,
   gateStopReason,
@@ -144,5 +146,35 @@ describe('fix passes that change nothing', () => {
     expect(reason).toContain('exactly the same way');
     expect(reason).toContain('- [docs] b');
     expect(gateStopReason('lint failed', [], 'limit', 2)).toContain('after 2 fix passes');
+  });
+});
+
+describe('docs to update', () => {
+  const doc = [
+    '## Acceptance criteria',
+    '- [ ] a.md is mentioned here',
+    '',
+    '## Docs to update',
+    '- docs/architecture.md — add the new route',
+    '- `README.md`: mention the flag',
+    '* **docs/api/orders.md** — new field',
+    '- none — nothing else',
+    '',
+    '## Links',
+    '- docs/other.md',
+  ].join('\n');
+
+  test('lists the paths in the section only', () => {
+    expect(docsToUpdate(doc)).toEqual(['docs/architecture.md', 'README.md', 'docs/api/orders.md']);
+  });
+
+  test('"none" and a missing section list nothing', () => {
+    expect(docsToUpdate('## Docs to update\n- none — no doc describes this\n')).toEqual([]);
+    expect(docsToUpdate('# Title\n')).toEqual([]);
+  });
+
+  test('untouched docs are the listed ones not in the changed files', () => {
+    expect(untouchedDocs(['docs/a.md', 'README.md'], ['src/x.ts', 'docs/a.md'])).toEqual(['README.md']);
+    expect(untouchedDocs(['docs/a.md'], ['app/docs/a.md'])).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { analyzeQaLoop, findingSimilarity, SAME_FINDING, type BlockerKind, type 
 export type BlockerCategory =
   | 'missing-test'
   | 'docs-not-updated'
+  | 'docs-inconsistent'
   | 'scope-drift'
   | 'incomplete-coverage'
   | 'red-checks'
@@ -18,7 +19,8 @@ export type BlockerCategory =
 const CATEGORY_RULES: { category: BlockerCategory; re: RegExp }[] = [
   { category: 'red-checks', re: /\b(unit suite|test suite|tests?) (is|are|still) (red|failing)|\bfails?\b[^.]{0,40}\b(lint|tsc|typecheck)|lint (error|fail)|\bsuite is red\b/i },
   { category: 'scope-drift', re: /\brevert\b|\bunrelated\b|out of scope|outside (?:the )?(?:plan|scope|requirements)|not (?:asked|requested) (?:for|by)|behaviou?r change to (?:the )?(?:build|script)/i },
-  { category: 'docs-not-updated', re: /\b(?:DOMAIN|MAP|README|CHANGELOG)\.md\b|docs? to update|\.md\b[^.]{0,60}(?:untouched|not updated|no entry|missing)|structural changes/i },
+  { category: 'docs-not-updated', re: /docs? to update|\.md\b[^.]{0,60}(?:untouched|not updated|no entry|not listed)/i },
+  { category: 'docs-inconsistent', re: /\b(?:DOMAIN|MAP|README|CHANGELOG)\.md\b|\.md\b|structural changes/i },
   { category: 'missing-test', re: /\b(?:no|missing|without|lacks?|still missing|absent)\b[^.]{0,60}\b(?:regression )?tests?\b|\btests?\b[^.]{0,40}\b(?:missing|absent|not added|never added)|regression test/i },
   { category: 'incomplete-coverage', re: /\b(?:no|missing|never|doesn'?t|does not|not) (?:\S+ ){0,4}(?:case|definition|handling|handles?|renders?|covers?|implemented|wired|registered|exported|listed)\b|falls? through|is missing from/i },
 ];
@@ -149,6 +151,8 @@ const RULE_LESSONS: Record<string, string> = {
     'Add a test in the same commit as every bug fix and every new behaviour. QA fails a branch whose fix or feature has no test that would catch it coming back.',
   'docs-not-updated':
     'Before you finish, open every doc the requirements list under "Docs to update" (DOMAIN.md, MAP.md, README) and update it in the same branch. QA has failed whole passes on a doc that was left alone.',
+  'docs-inconsistent':
+    'When you move, rename or add a domain or folder, in the same commit give it a complete DOMAIN.md (Parent, Interface, Consumers), point every DOMAIN.md and MAP.md that mentioned the old path at the new one, and run audit_architecture({ regenerate: true }). QA fails a branch whose docs describe paths that no longer exist.',
   'scope-drift':
     'Change only the files the current plan step names. Don\'t edit build scripts, config or unrelated files; if you already did, revert them before finishing. QA treats an unrelated change as a blocker.',
   'incomplete-coverage':
@@ -166,7 +170,7 @@ const MIN_REPEAT_FOR_LESSON = 1;
 export function ruleLessons(facts: RetroFacts): LessonDraft[] {
   const out: LessonDraft[] = [];
   const add = (key: string, category: LessonCategory) => out.push({ text: RULE_LESSONS[key], category, area: null, source: 'rule' });
-  for (const c of ['missing-test', 'docs-not-updated', 'scope-drift', 'incomplete-coverage', 'red-checks'] as const) {
+  for (const c of ['missing-test', 'docs-not-updated', 'docs-inconsistent', 'scope-drift', 'incomplete-coverage', 'red-checks'] as const) {
     if ((facts.byCategory[c] ?? 0) >= MIN_REPEAT_FOR_LESSON) add(c, c);
   }
   if ((facts.byKind.repeated ?? 0) > 0) add('repeated', 'process');

@@ -454,6 +454,22 @@ export async function hasUncommittedChanges(repoRoot: string): Promise<boolean> 
  * (or omitted), uncommitted and untracked work counts too, and an untracked
  * doc shows as a new file. Null when there's no common history to compare.
  */
+/** Files the branch adds (committed, and untracked on the live checkout), as repo-relative paths. */
+export async function branchAddedFiles(repoRoot: string, baseBranch: string, branch?: string): Promise<string[] | null> {
+  const git = client(repoRoot);
+  try {
+    const current = (await git.status()).current ?? '';
+    const live = !branch || branch === current;
+    const head = live ? 'HEAD' : branch;
+    const mergeBase = (await git.raw(['merge-base', baseBranch, head])).trim();
+    const added = await git.raw(['diff', '--name-only', '--diff-filter=A', `${mergeBase}..${head}`, '--', '.', ':(exclude)node_modules']);
+    const untracked = live ? await git.raw(['ls-files', '--others', '--exclude-standard']) : '';
+    return [...new Set([...added.split('\n'), ...untracked.split('\n')].map((f) => f.trim()).filter(Boolean))];
+  } catch {
+    return null;
+  }
+}
+
 export async function branchChanges(
   repoRoot: string,
   baseBranch: string,

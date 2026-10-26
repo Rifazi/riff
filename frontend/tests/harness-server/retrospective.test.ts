@@ -54,6 +54,13 @@ const round = (pass: number, result: string, blocking: string[], head: string | 
   head,
 });
 
+describe('docs findings', () => {
+  test('a doc the requirements list is not-updated; a doc that describes missing paths is inconsistent', () => {
+    expect(categorizeBlocker('client/src/scripts-ui/ScriptsPage/DOMAIN.md:82 still reference `movies-ui/MovieWorkspacePage`, a path that no longer exists')).toBe('docs-inconsistent');
+    expect(categorizeBlocker("MAP.md is listed in the requirements' \"Docs to update\" but is untouched by the branch")).toBe('docs-not-updated');
+  });
+});
+
 describe('categorizeBlocker', () => {
   test('sorts real findings by the mistake they describe', () => {
     expect(categorizeBlocker(DOCS)).toBe('docs-not-updated');

@@ -4,12 +4,14 @@ import { baseBranchFor, type AppConfig } from '../apps/apps.js';
 import { diffBaseFor } from '../sessions/shared-branch.js';
 import { DOMAIN_DOC } from '../architecture/architecture.js';
 import { auditWayfinding, branchScope } from '../architecture/wayfinding-audit.js';
-import { branchChanges, commitAll, currentBranch, diffWorktreeSince, resolveCommit, withDetachedWorktree } from '../repo/git.js';
+import { outOfPlan, scopeCheckOutput } from './scope-check.js';
+import { branchAddedFiles, branchChanges, commitAll, currentBranch, diffWorktreeSince, resolveCommit, withDetachedWorktree } from '../repo/git.js';
 import type { SessionRecord } from '../sessions/session.js';
 import { createQaExecutors, sessionCheckCache } from './tool-defs/qa-tools.js';
+import { config } from '../config.js';
 import { fixCheckProblems } from './fix-check.js';
 import { fixScopeFor } from './fix-scope.js';
-import { blockingAuditProblems, checkSucceeded, gateDetails, gateFingerprint, gateMessage, gateSummary, problemKey, type GateCheck } from './pre-qa-gate-core.js';
+import { blockingAuditProblems, checkSucceeded, docsCheckOutput, docsToUpdate, untouchedDocs, gateDetails, gateFingerprint, gateMessage, gateSummary, problemKey, type GateCheck } from './pre-qa-gate-core.js';
 
 export type PreQaGateResult =
   // `advisory`: fix-check problems the coder was already told about once; QA gets them as a note instead of the branch being held.
@@ -25,6 +27,35 @@ export type PreQaGateResult =
 // is left to QA, who looks at the real code, instead of holding the branch.
 const fixCheckHolds = new Map<string, number>();
 const MAX_FIX_CHECK_HOLDS = 1;
+
+// How many times the docs check has held a session's branch back: a doc the
+// requirements list may truly need no change, so it asks once and QA gets the rest.
+const docsCheckHolds = new Map<string, number>();
+
+/** The docs the requirements say to update that the branch doesn't touch. */
+async function untouchedRequiredDocs(session: SessionRecord, app: AppConfig): Promise<string[]> {
+  if (!session.requirementsPath || !session.branch) return [];
+  const raw = fs.readFileSync(path.join(config.harnessRoot, session.requirementsPath), 'utf8');
+  const listed = docsToUpdate(raw);
+  if (!listed.length) return [];
+  const changes = await branchChanges(app.repoRoot, diffBaseFor(session, app), ':(glob)**/*.md', session.branch);
+  return changes ? untouchedDocs(listed, changes.files) : [];
+}
+
+const scopeCheckHolds = new Map<string, number>();
+
+/** Work the branch did that the requirements and plan never mention; null when none or when it can't be told. */
+async function outOfPlanWork(session: SessionRecord, app: AppConfig): Promise<ReturnType<typeof outOfPlan>> {
+  if (!session.branch || !session.planPath || !session.requirementsPath) return null;
+  const read = (rel: string) => fs.readFileSync(path.join(config.harnessRoot, rel), 'utf8');
+  const planText = `${read(session.requirementsPath)}\n${read(session.planPath)}`;
+  const base = diffBaseFor(session, app);
+  const [changes, added] = await Promise.all([
+    branchChanges(app.repoRoot, base, ':(glob)**/*.md', session.branch),
+    branchAddedFiles(app.repoRoot, base, session.branch),
+  ]);
+  return changes && added ? outOfPlan(changes.files, added, planText) : null;
+}
 
 const baselineCache = new Map<string, Set<string>>();
 
@@ -102,6 +133,28 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
       checks.push({ label: 'fix check', passed: false, output: fixProblems.map((p) => `- ${p}`).join('\n') });
     } else {
       advisory = fixProblems;
+    }
+  }
+
+  const missingDocs = await untouchedRequiredDocs(session, app).catch(() => [] as string[]);
+  if (missingDocs.length) {
+    const holds = docsCheckHolds.get(session.id) ?? 0;
+    if (holds < 1) {
+      docsCheckHolds.set(session.id, holds + 1);
+      checks.push({ label: 'docs to update', passed: false, output: docsCheckOutput(missingDocs) });
+    } else {
+      advisory = [...advisory, ...missingDocs.map((d) => `${d} is in "Docs to update" but the branch doesn't change it`)];
+    }
+  }
+
+  const drift = await outOfPlanWork(session, app).catch(() => null);
+  if (drift) {
+    const holds = scopeCheckHolds.get(session.id) ?? 0;
+    if (holds < 1) {
+      scopeCheckHolds.set(session.id, holds + 1);
+      checks.push({ label: 'scope', passed: false, output: scopeCheckOutput(drift) });
+    } else {
+      advisory = [...advisory, ...drift.newDomains.map((d) => `${d}/ is a new domain the requirements and plan don't mention`)];
     }
   }
 

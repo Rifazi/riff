@@ -44,7 +44,8 @@ import {
 } from '../sessions/stage-actions.js';
 import { shouldKeepOnBranch } from '../sessions/shared-branch.js';
 import { loopStopReason, qaReportIsCurrent } from '../sessions/qa-loop.js';
-import { qaLoopFor } from '../sessions/qa-rounds.js';
+import { qaLoopFor, qaRoundsFor } from '../sessions/qa-rounds.js';
+import { splitHotFix } from '../agents/fix-split.js';
 
 // Bridget, the coordinator, drives a session from requirements to a merge
 // request. Within a stage she keeps its agent going; once the stage's
@@ -205,13 +206,23 @@ async function tryShip(session: SessionRecord): Promise<Outcome> {
       if (loop && loop.failedInARow >= MAX_QA_SEND_BACKS) {
         return { kind: 'stop', reason: `QA has failed ${loop.failedInARow} passes in a row, so I've stopped sending it back. ${loopStopReason(loop)}` };
       }
+      // A file QA has blocked twice means its step was too big or unclear: the plan model splits the fix before a third attempt.
+      let splitNote = '';
+      if (session.qaFixSplit?.pass !== session.qaPass && (loop?.failedInARow ?? 0) >= 2) {
+        const app = await getApp(session.appId);
+        const split = await splitHotFix(session, await qaRoundsFor(session, app.repoRoot).catch(() => [])).catch(() => null);
+        if (split) {
+          session = await updateSession(session.id, { qaFixSplit: split });
+          splitNote = ` ${split.files.join(', ')} blocked more than one pass, so the plan agent split the fix into ${split.steps.length} steps.`;
+        }
+      }
       try {
         await sendBackToCoding(session);
       } catch (err) {
         return { kind: 'stop', reason: `QA failed the branch, but sending it back failed: ${err instanceof Error ? err.message : String(err)}` };
       }
       const why = loop?.looping ? ` It keeps coming back (${loop.reasons.join(' ')}), so the coder gets each blocker with why.` : '';
-      return { kind: 'advanced', reason: `QA failed the branch (pass ${session.qaPass}). Sent it back to the coder with the findings.${why}` };
+      return { kind: 'advanced', reason: `QA failed the branch (pass ${session.qaPass}). Sent it back to the coder with the findings.${why}${splitNote}` };
     }
     if (result === 'pass-with-notes') {
       return { kind: 'stop', reason: 'QA passed with notes. Decide whether to send them back for fixes or ship as is.' };

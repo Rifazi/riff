@@ -2110,6 +2110,64 @@ below) — never inside the target repo.
    passes through the node:test shim except the same 20 cases that fail without
    these changes. Not run with real agents yet.
 
+73. User asked for Bridget's retrospective suggestions to be acted on, two
+   of them first. Both come from `retrospective/core.ts`'s rule suggestions
+   (`docs-check-before-qa`, `same-file-blocked-repeatedly`):
+   - **Docs to update, checked mechanically**: the pre-QA gate
+     (`agents/pre-qa-gate.ts`, pure half in `pre-qa-gate-core.ts`) reads the
+     requirements doc's `## Docs to update` section (`docsToUpdate`: the first
+     path of each bullet, "none" lists nothing) and compares it with the files
+     the branch changed, uncommitted ones included (`untouchedDocs`). A listed
+     doc the branch left alone is a failed `docs to update` check that goes back
+     to the coder like lint does. It holds a session once (`docsCheckHolds`):
+     a doc may truly need no change, so after that the rest reaches QA as
+     advisory notes. No model, one git diff.
+   - **Split the fix for a file QA keeps blocking**: `hotBlockerFiles`
+     (`sessions/qa-loop.ts`) lists files named by blockers in two or more
+     passes. When a pass fails with `failedInARow >= 2` and such a file exists,
+     `tryShip` (`routes/coordinator.ts`) first asks the plan role's model for a
+     split (`agents/fix-split.ts`: one single-shot call, no tools; 2-5 ordered
+     steps, each with files and the test that proves it; pure parse/prompt in
+     `sessions/fix-split-core.ts`), stores it as `session.qaFixSplit`
+     (once per pass) and then sends the branch back as before. `compactQaFindings`
+     adds `fixSplitBrief` to the send-back message while the split belongs to the
+     current pass. It does not edit the plan doc or reopen the plan stage; a bad
+     or failed answer just means no split. Only Bridget's send-back does this,
+     the human's button doesn't.
+   Tests: `pre-qa-gate.test.ts` (docs parsing), `fix-split.test.ts`. Not run
+   with real agents or through the node:test shim yet.
+
+74. User asked why moviemaker's "Rename project to movie" cost 6 QA passes
+   and whether the lessons caught it (session `7eae1287`). The "4 of 9 docs not
+   updated" were not skipped deliverables: every doc the requirements listed was
+   updated. The coder had promoted `MovieWorkspacePage` out of `movies-ui`,
+   which the rename-only ticket didn't ask for, and QA failed the stale
+   `DOMAIN.md` references and the missing `Parent:` line that followed.
+   `categorizeBlocker` had filed them as `docs-not-updated` because it matched
+   any `DOMAIN.md`/`MAP.md` mention, and that retired the "update the docs
+   listed" lesson on bad evidence. Changed:
+   - **Categories** (`retrospective/core.ts`): `docs-not-updated` is now only a
+     listed doc left untouched ("Docs to update", untouched/not updated/no
+     entry); a new `docs-inconsistent` takes the rest (stale paths, missing
+     sections, any other `.md` finding) with its own rule lesson (give a moved
+     or new domain a complete DOMAIN.md, repoint every doc that named the old
+     path, regenerate). Only `docs-not-updated` counts toward `docsOnlyPasses`
+     and the "check docs mechanically" suggestion. Earlier retrospectives keep
+     their old labels.
+   - The retired lesson `1b87ae7c` was turned back on for moviemaker
+     (`setLessonStatus`, which clears its record).
+   - **Scope check in the pre-QA gate** (`agents/scope-check.ts`, `branchAddedFiles`
+     in git.ts): a new `DOMAIN.md` in a folder neither the requirements nor the
+     plan mention is a failed `scope` check, and so are 3+ folders of changed
+     code they never name (a folder counts as named by its path, a non-generic
+     folder above it, or its own name; docs, tests, lockfiles and theme files
+     are ignored). Like the docs check it holds a session once (`scopeCheckHolds`),
+     then new domains reach QA as advisory notes. The coder can answer with
+     `note_for_qa`.
+   Tests: `retrospective.test.ts` (docs findings), `scope-check.test.ts`. The gate
+   itself isn't run against a real repo yet. The pre-QA gate also sent this
+   session back 5 times (`gateSendBacks`); that cost isn't investigated.
+
 **On terminology**: "Anthropic" in this codebase always means the
 API-key-billed path (console.anthropic.com); "Claude" always means the
 subscription/OAuth path (`claude login`). Keep that distinction consistent

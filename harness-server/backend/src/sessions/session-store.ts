@@ -76,6 +76,7 @@ function normalizeSession(session: SessionRecord): SessionRecord {
   session.qaNotes ??= [];
   session.qaHandoffNotes ??= [];
   session.qaResponses ??= [];
+  session.qaFixSplit ??= null;
   session.delivery ??= null;
   session.branchBase ??= null;
   session.splitProposal ??= null;
@@ -189,6 +190,7 @@ export async function createSession(input: {
     qaNotes: [],
     qaHandoffNotes: [],
     qaResponses: [],
+    qaFixSplit: null,
     qaReportPath: null,
     delivery: null,
     branchBase: null,
