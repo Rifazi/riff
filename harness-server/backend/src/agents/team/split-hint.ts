@@ -44,9 +44,9 @@ export function sameFile(a: string, b: string): boolean {
 // Names every step of a plan can mention without sharing any work: the doc each
 // domain keeps, root config, and a bare `service.ts`/`index.ts` that names a
 // different file in each folder. Session a258f09a's 19 steps across five
-// independent domains all named `DOMAIN.md`, so they looked like one chain
+// independent domains all named `README.md`, so they looked like one chain
 // and were built solo.
-const SHARED_NAMES = /^(DOMAIN\.md|MAP\.md|README\.md|CHANGELOG\.md|package(-lock)?\.json|tsconfig[\w.-]*\.json|pnpm-lock\.yaml|yarn\.lock)$/;
+const SHARED_NAMES = /^(MAP\.md|README\.md|CHANGELOG\.md|package(-lock)?\.json|tsconfig[\w.-]*\.json|pnpm-lock\.yaml|yarn\.lock)$/;
 const GENERIC_BARE = /^(service|index|types|constants|utils|infra)\.[A-Za-z]+$/;
 
 /** Whether a step's file token names something the step owns, so sharing it with another step means they depend on each other. */

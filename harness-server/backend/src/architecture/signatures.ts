@@ -3,8 +3,8 @@ import path from 'node:path';
 import ts from 'typescript';
 
 // What a domain's public file offers, one line per export, for the generated
-// Files section of its DOMAIN.md: a function's parameters and return type, a
-// type's shape. Agents read DOMAIN.md and then opened the file anyway to see
+// Files section of its README.md: a function's parameters and return type, a
+// type's shape. Agents read README.md and then opened the file anyway to see
 // how to call it (comic-drafter session a58b69ad), because Files only listed
 // export names.
 

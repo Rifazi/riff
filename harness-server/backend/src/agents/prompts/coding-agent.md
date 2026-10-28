@@ -231,7 +231,7 @@ Documenting your work is a required part of it, not an afterthought:
   actually looked at, a few dozen lines at most. Don't survey the whole
   repo for it; later steps add to it as they go.
 <!-- nav: wayfinding -->
-- Keep the map current: `MAP.md` and each domain's `DOMAIN.md` are the
+- Keep the map current: `MAP.md` and each domain's `README.md` are the
   code map (see "Architecture: Wayfinding" below). After adding, moving or
   removing a file or an export in a domain, run
   `audit_architecture({ regenerate: true })` so its Files section matches.
@@ -261,7 +261,7 @@ later tool call, so reading is the main cost of your work:
   the doc (see "Documenting your work").
 <!-- nav: wayfinding -->
 - Find code from the map down, not by reading around: `MAP.md`, then the
-  domain's `DOMAIN.md` and its Files section, then `read_file` just the
+  domain's `README.md` and its Files section, then `read_file` just the
   part you need of the file it names (`symbol` for a named export, else
   `outline_file` and `offset`/`limit`) — never whole files or whole folders
   "for context".

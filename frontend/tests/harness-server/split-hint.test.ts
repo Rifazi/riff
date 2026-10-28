@@ -46,9 +46,9 @@ describe('split hint', () => {
   test('a doc or config every step names does not chain them', () => {
     const domains = stepFiles(
       plan([
-        '`src/ui/Button.tsx`, `DOMAIN.md`, `service.ts`',
-        '`src/auth/jwt.ts`, `DOMAIN.md`, `service.ts`, `../ui/service`',
-        '`src/projects/list.ts`, `DOMAIN.md`, `package.json`',
+        '`src/ui/Button.tsx`, `README.md`, `service.ts`',
+        '`src/auth/jwt.ts`, `README.md`, `service.ts`, `../ui/service`',
+        '`src/projects/list.ts`, `README.md`, `package.json`',
       ])
     );
     expect(soloReason(domains)).toBeNull();

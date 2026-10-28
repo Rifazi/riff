@@ -25,7 +25,7 @@ export interface ScopeFinding {
 
 /**
  * Work the branch did that neither the approved requirements nor the plan
- * mention: a new DOMAIN.md in a folder they never name (a new domain), and
+ * mention: a new README.md in a folder they never name (a new domain), and
  * folders of code changed that they never name. Docs, tests, lockfiles and
  * theme files are ignored. Folders are only reported when there are 3 or
  * more, since a plan names folders loosely; a new domain is always reported.
@@ -34,7 +34,7 @@ export function outOfPlan(changed: readonly string[], added: readonly string[], 
   const newDomains = [
     ...new Set(
       added
-        .filter((f) => /(?:^|\/)DOMAIN\.md$/.test(f) && dirOf(f) !== '')
+        .filter((f) => /(?:^|\/)README\.md$/.test(f) && dirOf(f) !== '' && !/^(?:docs|\.github)(?:\/|$)/.test(f))
         .map(dirOf)
         .filter((dir) => !mentioned(`${dir}/x`, planText)),
     ),
@@ -53,7 +53,7 @@ export function outOfPlan(changed: readonly string[], added: readonly string[], 
 
 export function scopeCheckOutput(f: ScopeFinding): string {
   const lines = [
-    ...f.newDomains.map((d) => `- ${d}/ is a new domain (it has a new DOMAIN.md), but neither the requirements nor the plan mention it`),
+    ...f.newDomains.map((d) => `- ${d}/ is a new domain (it has a new README.md), but neither the requirements nor the plan mention it`),
     ...f.folders.slice(0, 10).map((d) => `- ${d}/ has changed code, but neither the requirements nor the plan mention that folder`),
   ];
   if (f.folders.length > 10) lines.push(`- … ${f.folders.length - 10} more folders`);

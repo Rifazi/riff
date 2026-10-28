@@ -114,10 +114,10 @@ export interface ArchitectureAudit {
     missingSrcDirs: string[];
     mapExists: boolean;
     domains: { id: string; dir: string }[];
-    // Folders of code inside a domain with no DOMAIN.md: child domains to be.
+    // Folders of code inside a domain with no README.md: child domains to be.
     undocumented: { folder: string; parent: string }[];
     problems: { kind: string; file: string; message: string }[];
-    // Folders outside the source folders that hold DOMAIN.md files. When no
+    // Folders outside the source folders that hold README.md files. When no
     // configured folder exists and there's exactly one, it was audited in
     // their place (inferredSrcDir).
     srcDirCandidates?: string[];

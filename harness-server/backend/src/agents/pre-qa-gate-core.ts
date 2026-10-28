@@ -26,7 +26,7 @@ export function checkSucceeded(output: string): boolean {
 
 /**
  * The audit problems this branch is answerable for: problems in MAP.md or in
- * domains it touched, and changed code in folders with no DOMAIN.md. Problems
+ * domains it touched, and changed code in folders with no README.md. Problems
  * in untouched domains are pre-existing and don't hold the branch back (QA
  * doesn't fail it for them either).
  */
@@ -45,7 +45,7 @@ export function blockingAuditProblems(audit: WayfindingAudit, scope: BranchScope
     .filter((p) => !touched || p.domain === null || touched.has(p.domain))
     .map((p) => `[${p.kind}] ${p.message.startsWith(p.file) ? p.message : `${p.file}: ${p.message}`}`);
   for (const o of scope?.offMap ?? []) {
-    lines.push(`[map] ${o.folder}/ has changed code but no DOMAIN.md (${o.parent ? `child domain of ${o.parent}` : 'top-level domain, add it to MAP.md'})`);
+    lines.push(`[map] ${o.folder}/ has changed code but no README.md (${o.parent ? `child domain of ${o.parent}` : 'top-level domain, add it to MAP.md'})`);
   }
   for (const f of scope?.looseFiles ?? []) {
     lines.push(`[map] ${f} is loose in a source folder: move it into the subfolder of the domain that owns it (only index/main/app/server/cli may sit there)`);
@@ -144,7 +144,7 @@ export function gateRetryMessage(message: string, pass: number, stuck: boolean):
   return (
     `Fix attempt ${pass + 1}: your last pass left exactly the same things failing, so what you changed didn't address them. ` +
     'Do not repeat it. For each failure below, run the check or audit_architecture yourself, read the exact output, and work out why it still fails ' +
-    '(a stale generated section needs audit_architecture({ regenerate: true }); a missing DOMAIN.md has to be created and committed; ' +
+    '(a stale generated section needs audit_architecture({ regenerate: true }); a missing README.md has to be created and committed; ' +
     'a problem in code you did not touch is not yours, so say so with note_for_qa). Commit the fix and confirm the check passes before you stop.\n\n' +
     message
   );

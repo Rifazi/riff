@@ -483,7 +483,7 @@ export async function branchChanges(
     const head = live ? 'HEAD' : branch;
     const mergeBase = (await git.raw(['merge-base', baseBranch, head])).trim();
     const range = live ? [mergeBase] : [`${mergeBase}..${head}`];
-    // Deleted files are left out: a folder the branch removed is not "changed code with no DOMAIN.md".
+    // Deleted files are left out: a folder the branch removed is not "changed code with no README.md".
     const tracked = await git.raw(['diff', '--name-only', '--diff-filter=d', ...range, '--', '.', ':(exclude)node_modules']);
     const untracked = live ? await git.raw(['ls-files', '--others', '--exclude-standard']) : '';
     const files = [...new Set([...tracked.split('\n'), ...untracked.split('\n')].map((f) => f.trim()).filter(Boolean))];

@@ -2471,3 +2471,46 @@ exist standalone).
      the Tauri CSP `img-src` allows the agent server.
    Tests: `visual-review-core.test.ts` (4 cases). The gate itself needs Chrome and
    a model, so it was only typechecked, not run end to end.
+78. User updated Wayfinding Architecture to v1.2 and asked for the agents to
+   follow it, the `DOMAIN.md` → `README.md` rename and the audit checks. The user
+   migrates existing apps by hand; step-by-step history above still says
+   `DOMAIN.md`, which is now `README.md` (`DOMAIN_DOC` in `architecture.ts`).
+   - **Rename**: every folder's doc is `README.md`. A README is a domain doc only
+     under the app's source folders; outside them it counts as a candidate source
+     folder only when it opens with a `Kind:` line, so ordinary READMEs aren't
+     taken for domains. `scope-check` ignores `docs/` and `.github/`; branch scope
+     reads ownership edits only from READMEs under a source folder. A leftover
+     `DOMAIN.md` is a docs problem ("is now README.md").
+   - **Briefings and guide** (`wayfinding-docs.ts`): a `Kind:` line (domain, child
+     domain, junction, adapter, shared), "Decisions and adapters", helpers go in a
+     `shared/` folder of the nearest common parent (a top-level `shared/` only as a
+     last resort, declared on MAP.md), code as small as its decisions and no comments,
+     unused code deleted in the segment that makes it unused, READMEs kept small
+     (one line per rule), MAP.md "External systems". Plan, coding and QA briefings
+     carry the same; QA flags the new violations. The generated **Contains**
+     section (children and adapters with their kind, marker
+     `generated: contains, do not edit`) replaces the `Child domains:` line, which
+     is now a problem. Files, Consumers and the guide's client/server rule stay.
+   - **Audit** (`architecture/code-checks.ts`, wired in `wayfinding-audit.ts`):
+     Kind line present and valid; no comments in code (TypeScript scanner;
+     lint/compiler directives, license headers and generated markers allowed;
+     one problem per distinct comment, so the baseline keeps a legacy comment from
+     blocking a branch); dead exports (named nowhere else in the repo, used once in
+     their own file, not named under Hidden behavior, not entry/framework names);
+     an adapter called only by its domain's public file; an inbound adapter
+     (`routes`, `handlers`, `controllers`, `api`, `consumers`, `listeners`,
+     `webhooks`) calls only that file or shared code beside it (the one exception to
+     "a child never depends on its parent"); shared code importing a sibling; an
+     adapter with no domain above it; a top-level shared folder not on MAP.md; an
+     External systems client package (the ones MAP.md lists, else packages the
+     adapter imports whose name holds the system's name) imported outside its
+     adapter. A README over 80 hand-written lines is an `advisories` entry ("For QA
+     to review"), never a problem.
+   - **Not ported**: v1.2 dropped "every code folder is a child domain", the Files
+     section and the find-code procedure from the paper; Riff keeps all three.
+   Tests: `wayfinding-audit.test.ts` (62: Kind, comments, dead code, adapters,
+   shared, external systems, Contains, size); the folder (488) passes through a
+   node:test shim except 10 cases: 9 need shim matchers (`toMatchObject`,
+   `toBeGreaterThan`, `arrayContaining`) and `scope-check`'s "stray folders" fails
+   without these changes. Not run with real agents or an existing app yet: dead-code
+   and comment findings on a legacy repo are the first thing to read.

@@ -286,7 +286,7 @@ describe('tasks that are not a helper\'s job', () => {
   const LIST = 'List all files under client/src/ (recursively, every file path).';
   const FULL = 'Show me the full contents of client/src/api/pages.ts and client/src/types.ts (the merged client-api work).';
   const MIXED =
-    'Show me the full contents of client/src/components/service.ts, client/src/components/DOMAIN.md, and list the component folders under client/src/components with the exported component name of each.';
+    'Show me the full contents of client/src/components/service.ts, client/src/components/README.md, and list the component folders under client/src/components with the exported component name of each.';
 
   test('classifies listing and full-contents tasks', () => {
     expect(isListFilesTask(LIST)).toBe(true);
@@ -322,12 +322,12 @@ describe('tasks that are not a helper\'s job', () => {
       2,
       async (paths) => {
         listed.push(paths);
-        return 'client/src/DOMAIN.md\n- `main.tsx`';
+        return 'client/src/README.md\n- `main.tsx`';
       },
     );
     expect(asked).toEqual(['Who calls createPage?']);
     expect(listed).toEqual([['client/src']]);
-    expect(text).toContain('[1] client/src/DOMAIN.md');
+    expect(text).toContain('[1] client/src/README.md');
     expect(text).toContain('[3] client/src/pages/x.tsx:12');
     expect(text).toContain('Not delegated: 2 (a file\'s full contents');
     expect(report.useful).toBe(2);

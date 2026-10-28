@@ -38,19 +38,19 @@ const scope = (domains: string[], offMap: BranchScope['offMap'] = []) =>
 
 describe('blockingAuditProblems', () => {
   const problems = [
-    { kind: 'docs' as const, file: 'server/src/pages/DOMAIN.md', domain: 'pages', message: 'Files section is stale' },
-    { kind: 'docs' as const, file: 'server/src/billing/DOMAIN.md', domain: 'billing', message: 'Files section is stale' },
+    { kind: 'docs' as const, file: 'server/src/pages/README.md', domain: 'pages', message: 'Files section is stale' },
+    { kind: 'docs' as const, file: 'server/src/billing/README.md', domain: 'billing', message: 'Files section is stale' },
     { kind: 'map' as const, file: 'MAP.md', domain: null, message: 'pages is missing from MAP.md' },
   ];
 
   test('keeps MAP.md and touched domains, drops untouched ones', () => {
     const lines = blockingAuditProblems(audit(problems), scope(['pages']));
-    expect(lines).toEqual(['[docs] server/src/pages/DOMAIN.md: Files section is stale', '[map] MAP.md: pages is missing from MAP.md']);
+    expect(lines).toEqual(['[docs] server/src/pages/README.md: Files section is stale', '[map] MAP.md: pages is missing from MAP.md']);
   });
 
-  test('changed code with no DOMAIN.md blocks', () => {
+  test('changed code with no README.md blocks', () => {
     const lines = blockingAuditProblems(audit([]), scope([], [{ folder: 'client/src/views/PagesSidebar', parent: 'views', files: ['a.tsx'] }]));
-    expect(lines).toEqual(['[map] client/src/views/PagesSidebar/ has changed code but no DOMAIN.md (child domain of views)']);
+    expect(lines).toEqual(['[map] client/src/views/PagesSidebar/ has changed code but no README.md (child domain of views)']);
   });
 
   test('without a branch scope every problem counts', () => {
@@ -69,7 +69,7 @@ describe('gateMessage', () => {
         { label: 'lint', passed: true, output: 'lint succeeded.' },
         { label: 'unit tests', passed: false, output: 'test failed.\n\nPagesSidebar › relabels after delete' },
       ],
-      ['[docs] a/DOMAIN.md: Files section is stale'],
+      ['[docs] a/README.md: Files section is stale'],
     )!;
     expect(message).toContain('## unit tests');
     expect(message).toContain('relabels after delete');
@@ -94,7 +94,7 @@ describe('gateSummary', () => {
   });
 });
 
-// The Rename & Delete session's real mismatch: DOMAIN.md said "… project id".
+// The Rename & Delete session's real mismatch: README.md said "… project id".
 describe('closestTestName', () => {
   const body = `
 describe('rename', () => {
@@ -115,12 +115,12 @@ describe('rename', () => {
 describe('baseline problems', () => {
   const problems = [
     { kind: 'structure' as const, file: 'src/infra/stack.ts', domain: 'infra', message: 'imports src/auth/backend.ts: reaches a private file of auth' },
-    { kind: 'docs' as const, file: 'src/infra/DOMAIN.md', domain: 'infra', message: 'Files section is stale' },
+    { kind: 'docs' as const, file: 'src/infra/README.md', domain: 'infra', message: 'Files section is stale' },
   ];
 
   test('a problem the base branch already has never blocks', () => {
     const baseline = new Set([problemKey(problems[0])]);
-    expect(blockingAuditProblems(audit(problems), null, baseline)).toEqual(['[docs] src/infra/DOMAIN.md: Files section is stale']);
+    expect(blockingAuditProblems(audit(problems), null, baseline)).toEqual(['[docs] src/infra/README.md: Files section is stale']);
   });
 
   test('wrapping differences do not make a problem new', () => {

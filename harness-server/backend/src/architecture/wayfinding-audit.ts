@@ -1,6 +1,24 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DOMAIN_DOC, MAP_PATH, interfaceStem, type WayfindingConfig } from './architecture.js';
+import {
+  CONTAINS_BLOCK,
+  DOC_KINDS,
+  README_REVIEW_LINES,
+  adapterProblems,
+  barePackage,
+  codeComments,
+  containsBlock,
+  docKind,
+  externalClientProblems,
+  externalSystems,
+  isInbound,
+  handWrittenLines,
+  unusedExports,
+  type DomainRef,
+  type ImportEdge,
+  type PackageImport,
+} from './code-checks.js';
 import { findDuplicateFunctions } from './duplicates.js';
 import { publicSignatures } from './signatures.js';
 
@@ -46,12 +64,14 @@ export interface WayfindingAudit {
   domains: WayfindingDomainSummary[];
   // Top-level folders under the source folders with no domain in them: legacy code not on the map yet.
   offMap: string[];
-  // Folders inside a domain that hold code but have no DOMAIN.md of their
+  // Folders inside a domain that hold code but have no README.md of their
   // own. Every such folder (a component, a page's part, a module) is meant to
-  // be a child domain, so a parent's DOMAIN.md never has to describe it.
+  // be a child domain, so a parent's README.md never has to describe it.
   undocumented: { folder: string; parent: string }[];
   problems: WayfindingProblem[];
-  // DOMAIN.md files whose generated sections were rewritten (regenerate: true).
+  // Things QA should look at that never fail a branch (a README.md past the size worth a review).
+  advisories?: string[];
+  // README.md files whose generated sections were rewritten (regenerate: true).
   regenerated: string[];
   usesTypeOrm: boolean;
   // Folders outside every audited source folder that hold domains: the app's
@@ -70,6 +90,7 @@ interface Domain {
   parent: Domain | null;
   children: Domain[];
   doc: string;
+  kind?: string;
 }
 
 const CODE_EXTS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
@@ -78,6 +99,7 @@ const MAX_DEPTH = 10;
 // Folders of tests and fixtures are part of the domain they sit in, never a child domain.
 const TEST_DIRS = new Set(['__tests__', '__mocks__', '__snapshots__', '__fixtures__', 'fixtures', 'test', 'tests']);
 const GENERATED_BLOCK = /<!-- generated: do not edit -->[\s\S]*?<!-- end generated -->/;
+const LEGACY_DOMAIN_DOC = 'DOMAIN.md';
 const FILES_BLOCK = /<!-- generated: files, do not edit -->[\s\S]*?<!-- end generated -->/;
 const MAX_FILES_LISTED = 60;
 const MAX_EXPORTS_LISTED = 8;
@@ -120,7 +142,7 @@ function walkFiles(dir: string, depth = 0): string[] {
   });
 }
 
-// ------------------------------------------------------------ DOMAIN.md parsing
+// ------------------------------------------------------------ README.md parsing
 
 export function headerField(doc: string, field: string): string | undefined {
   return doc.match(new RegExp(`^${field}:[ \\t]*(.+)$`, 'm'))?.[1].trim();
@@ -368,7 +390,7 @@ export function listDomains(repoRoot: string, config: WayfindingConfig): { id: s
 
 /**
  * Folders inside a domain that directly hold (non-test) code and have no
- * DOMAIN.md, at any depth: each should be a child domain of the nearest
+ * README.md, at any depth: each should be a child domain of the nearest
  * domain above it. Child domains are left to their own pass.
  */
 function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; parent: string }[] {
@@ -392,7 +414,7 @@ function undocumentedFolders(d: Domain, repoRoot: string): { folder: string; par
 // Markdown formatters (prettier, run by git_commit and finish_step) put blank lines around the list.
 const withoutBlankLines = (block: string) => block.replace(/\n\s*\n/g, '\n');
 
-/** Empty when nothing imports the domain: the section is left out of its DOMAIN.md. */
+/** Empty when nothing imports the domain: the section is left out of its README.md. */
 function consumersBlock(consumers: string[]): string {
   return consumers.length ? `<!-- generated: do not edit -->\n- ${consumers.join(', ')}\n<!-- end generated -->` : '';
 }
@@ -418,10 +440,10 @@ export function exportedNames(source: string): string[] {
 /**
  * The generated Files section: one line per file the domain itself holds
  * (child domains list their own), with what each code file exports, so an
- * agent goes from DOMAIN.md straight to the file it needs. `api` is the
+ * agent goes from README.md straight to the file it needs. `api` is the
  * public file's signatures (publicSignatures), listed under it so another
  * domain can call this one without opening its code. Empty when the domain
- * holds no files: the section is left out of its DOMAIN.md.
+ * holds no files: the section is left out of its README.md.
  */
 export function filesBlock(files: { path: string; source: string | null }[], publicStem: string, api: string[] = []): string {
   const isInterface = (file: string) => !file.includes('/') && isCode(file) && stemOf(file) === publicStem;
@@ -468,7 +490,7 @@ function ownFiles(d: Domain): string[] {
 
 /**
  * `regenerate` rewrites stale generated Consumers sections instead of
- * reporting them; a function limits it to the DOMAIN.md paths (repo-relative)
+ * reporting them; a function limits it to the README.md paths (repo-relative)
  * it accepts, e.g. a team member's owned paths.
  */
 export function auditWayfinding(
@@ -496,7 +518,7 @@ export function auditWayfinding(
   // Domains outside every source folder get no checks, so name the folders they're in.
   const inRoots = (file: string) => srcRoots.some((r) => file.startsWith(r + path.sep));
   const candidates = walkFiles(repoRoot)
-    .filter((f) => path.basename(f) === DOMAIN_DOC && !inRoots(f))
+    .filter((f) => path.basename(f) === DOMAIN_DOC && !inRoots(f) && docKind(readText(f)) !== undefined)
     .map((f) => toPosix(path.relative(repoRoot, path.dirname(path.dirname(f)))))
     // A child domain's grandparent is its parent domain, not a source folder.
     .filter((dir) => dir && dir !== '.' && !existsSync(path.join(repoRoot, dir, DOMAIN_DOC)));
@@ -513,7 +535,10 @@ export function auditWayfinding(
     domains.push(...found.domains);
     audit.offMap.push(...found.offMap);
   }
+  for (const d of domains) d.kind = docKind(d.doc);
   const problems = audit.problems;
+  const advisories: string[] = [];
+  audit.advisories = advisories;
   const fail = (kind: ProblemKind, file: string, domain: Domain | null, message: string) =>
     problems.push({ kind, file, domain: domain?.id ?? null, message });
   const rel = (p: string) => toPosix(path.relative(repoRoot, p));
@@ -541,6 +566,9 @@ export function auditWayfinding(
   const resolver = loadAliases(repoRoot);
   const edges = new Map<Domain, Set<Domain>>();
   const codeFiles = srcRoots.flatMap((root) => walkFiles(root)).filter(isCode);
+  const importEdges: ImportEdge[] = [];
+  const packageImports: PackageImport[] = [];
+  const isPublicFile = (target: string, d: DomainRef) => path.dirname(target) === d.dir && isCode(target) && stemOf(target) === publicStems.get(d as Domain);
   const entitiesByDomain = new Map<Domain, string[]>();
 
   for (const file of codeFiles) {
@@ -556,11 +584,18 @@ export function auditWayfinding(
     if (!from) continue;
     for (const spec of importSpecifiers(text)) {
       const target = resolveImport(spec, file, resolver);
-      if (!target) continue;
+      if (!target) {
+        const pkg = isTest(file) ? null : barePackage(spec);
+        if (pkg) packageImports.push({ file: rel(file), from, pkg });
+        continue;
+      }
       const to = ownerOf(target);
       if (!to || to === from) continue;
+      if (!isTest(file)) importEdges.push({ file: rel(file), abs: file, from, to, target });
       const where = `${rel(file)} imports ${rel(target)}`;
-      if (isAncestor(to, from)) {
+      // An inbound adapter (routes) is the one child that calls its parent: through the parent's public file.
+      const callsItsDomain = isInbound(from) && to === from.parent && isPublicFile(target, to);
+      if (isAncestor(to, from) && !callsItsDomain) {
         fail('structure', rel(file), from, `${where}: a child domain may not depend on its parent (${to.id})`);
         continue;
       }
@@ -605,6 +640,52 @@ export function auditWayfinding(
     }
   }
 
+  // ---- adapters, shared code and external systems
+  for (const p of adapterProblems(importEdges, isPublicFile)) fail('structure', p.file, p.domain as Domain | null, p.message);
+  if (audit.mapExists) {
+    const systems = externalSystems(readText(mapFile));
+    for (const p of externalClientProblems(systems, domains, (d) => (d as Domain).rel, packageImports)) {
+      fail('structure', p.file, p.domain as Domain | null, p.message);
+    }
+  }
+  for (const d of domains) {
+    if (d.kind === 'adapter' && !d.parent) fail('structure', docPath(d), d, `${d.id} is an adapter with no domain above it: an adapter lives inside the one domain it serves`);
+    if (d.kind === 'shared' && !d.parent && audit.mapExists && !parseMapRows(readText(mapFile)).some((r) => r.name === d.name || r.name === d.id)) {
+      fail('map', MAP_PATH, null, `top-level shared folder ${d.id} is not declared: list it with the reason no single domain can own its code, or move it into a domain's own shared/ folder`);
+    }
+  }
+
+  // ---- no comments, and no code nothing uses
+  {
+    const domainCode = codeFiles.filter((f) => ownerOf(f));
+    for (const file of domainCode) {
+      const comments = codeComments(readText(file), file);
+      for (const text of comments) {
+        fail('docs', rel(file), ownerOf(file)!, `${rel(file)}: comment "${text}". Delete it: why a rule exists goes in its Why line, traps in Hidden behavior, units in the name`);
+      }
+    }
+    const everything = [...new Set([...codeFiles, ...walkFiles(repoRoot).filter(isCode)])].map((f) => ({ file: f, source: readText(f) }));
+    const candidates = domainCode
+      .filter((f) => !isTest(f))
+      .map((f) => ({
+        file: f,
+        names: exportedNames(readText(f)),
+        declared: sectionBody(ownerOf(f)!.doc, 'Hidden behavior'),
+      }));
+    for (const dead of unusedExports(candidates, everything)) {
+      fail(
+        'structure',
+        rel(dead.file),
+        ownerOf(dead.file)!,
+        `${rel(dead.file)}: \`${dead.name}\` is exported but nothing uses it. Delete it with its tests and its README.md lines, or name the consumer the code can't show under Hidden behavior`
+      );
+    }
+  }
+  for (const d of domains) {
+    const stale = path.join(d.dir, LEGACY_DOMAIN_DOC);
+    if (existsSync(stale)) fail('docs', rel(stale), d, `${rel(stale)}: ${LEGACY_DOMAIN_DOC} is now ${DOMAIN_DOC}; rename it and add the Kind line`);
+  }
+
   // ---- dependency cycles between domains
   {
     const state = new Map<Domain, 'visiting' | 'done'>();
@@ -627,7 +708,7 @@ export function auditWayfinding(
     for (const d of domains) visit(d, []);
   }
 
-  // ---- DOMAIN.md
+  // ---- README.md
   const ruleOwners = new Map<string, string>();
   const tableOwners = new Map<string, string>();
   const srcFileNames = new Set(codeFiles.map((f) => path.basename(f)));
@@ -641,10 +722,14 @@ export function auditWayfinding(
     if (parent ? !(parent.startsWith(expectedParent) || (d.parent && parent.startsWith(d.parent.id))) : d.parent) {
       fail('docs', here, d, `Parent is "${parent ?? '(missing)'}", but the folder says ${expectedParent}`);
     }
-    const declaredChildren = listOf(headerField(doc, 'Child domains')).sort().join(', ');
-    const actualChildren = d.children.map((c) => c.name).sort().join(', ');
-    if (declaredChildren !== actualChildren) {
-      fail('docs', here, d, `Child domains lists [${declaredChildren}], folders are [${actualChildren}]`);
+    if (headerField(doc, 'Child domains') !== undefined) {
+      fail('docs', here, d, '"Child domains:" is replaced by the generated Contains section: remove the line');
+    }
+    if (!d.kind) fail('docs', here, d, `missing "Kind:" (${DOC_KINDS.join(', ')})`);
+    else if (!(DOC_KINDS as readonly string[]).includes(d.kind)) fail('docs', here, d, `"Kind: ${d.kind}" is not one of ${DOC_KINDS.join(', ')}`);
+    const written = handWrittenLines(doc);
+    if (written > README_REVIEW_LINES) {
+      advisories.push(`${here}: ${written} lines written by hand (over ${README_REVIEW_LINES}). Trim it; if the folder owns decisions that change for different reasons, split off a child domain or adapter`);
     }
     for (const field of ['Owns', 'Does not own', 'Interface', 'Checkpoint']) {
       const value = headerField(doc, field);
@@ -713,8 +798,10 @@ export function auditWayfinding(
     const files = ownFiles(d).map((f) => ({ path: f, source: isCode(f) ? readText(path.join(d.dir, f)) : null }));
     const publicFile = files.find((f) => !f.path.includes('/') && isCode(f.path) && stemOf(f.path) === publicStems.get(d));
     const api = publicFile ? publicSignatures(path.join(d.dir, publicFile.path), (spec, from) => resolveImport(spec, from, resolver)) : [];
+    const contained = d.children.map((c) => ({ name: c.name, kind: c.kind ?? 'child domain' }));
     const sections = [
       { title: 'Files', pattern: FILES_BLOCK, expected: filesBlock(files, publicStems.get(d)!, api), stale: 'Files section is stale (a file was added, removed or changed its exports)' },
+      { title: 'Contains', pattern: CONTAINS_BLOCK, expected: containsBlock(contained), stale: `Contains section is stale (should list: ${contained.map((c) => c.name).sort().join(', ') || 'nothing'})` },
       { title: 'Consumers', pattern: GENERATED_BLOCK, expected: consumersBlock(consumers), stale: `Consumers section is stale (should be: ${consumers.join(', ') || 'none'})` },
     ];
     let rewritten = false;
@@ -799,8 +886,8 @@ function insertSection(doc: string, title: string, block: string): string {
     lines.splice(heading + 1, 0, block);
     return `${lines.join('\n')}\n`;
   }
-  if (title === 'Files') {
-    const before = ['Mirrors', 'Consumers'].map((t) => lines.findIndex((l) => new RegExp(`^##\\s+${t}\\s*$`, 'i').test(l))).find((i) => i !== -1);
+  if (title === 'Files' || title === 'Contains') {
+    const before = (title === 'Files' ? ['Mirrors', 'Contains', 'Consumers'] : ['Consumers']).map((t) => lines.findIndex((l) => new RegExp(`^##\\s+${t}\\s*$`, 'i').test(l))).find((i) => i !== -1);
     if (before !== undefined) {
       lines.splice(before, 0, `## Files`, block, '');
       return `${lines.join('\n')}\n`;
@@ -812,7 +899,7 @@ function insertSection(doc: string, title: string, block: string): string {
 export function parseMapRows(map: string): { name: string; owns: string }[] {
   // Only the first table: the domain index. Later sections hold other lists.
   const body = map.replace(/<!--[\s\S]*?-->/g, '');
-  // The name may be plain, `code`, or a link to its DOMAIN.md: [name](path).
+  // The name may be plain, `code`, or a link to its README.md: [name](path).
   return [...body.matchAll(/^\|\s*(?:\[\s*`?([\w./-]+)`?\s*\]\([^)]*\)|`?([\w./-]+)`?)\s*\|\s*([^|]*)\|/gm)]
     .map((m) => ({ name: m[1] ?? m[2], owns: m[3].trim() }))
     .filter((r) => r.name.toLowerCase() !== 'domain' && /[a-z]/i.test(r.name) && !/^-+$/.test(r.name));
@@ -824,7 +911,7 @@ export interface BranchScope {
   base: string;
   byDomain: { domain: string; files: string[] }[];
   outside: string[];
-  // Changed files in a folder that should have a DOMAIN.md and doesn't: a
+  // Changed files in a folder that should have a README.md and doesn't: a
   // top-level folder under a source folder with no domain (no parent), or a
   // folder of code inside a domain (parent = that domain's id, the child
   // domain it should become).
@@ -833,9 +920,9 @@ export interface BranchScope {
   // domain folders, that aren't an entry point: each belongs in a domain's
   // own subfolder.
   looseFiles: string[];
-  // DOMAIN.md files whose ownership lines (Owns, Does not own, Owns data, Kind, Inputs, Parent, Child domains) changed.
+  // README.md files whose ownership lines (Owns, Does not own, Owns data, Kind, Inputs, Parent, Child domains) changed.
   ownershipEdits: { file: string; fields: string[] }[];
-  // DOMAIN.md files added or deleted: structural changes, logged in MAP.md.
+  // README.md files added or deleted: structural changes, logged in MAP.md.
   structural: { file: string; change: 'added' | 'removed' }[];
 }
 
@@ -843,7 +930,7 @@ const ENTRY_STEMS = ['index', 'main', 'app', 'server', 'cli'];
 
 const OWNERSHIP_FIELDS = ['Owns', 'Owns data', 'Does not own', 'Kind', 'Inputs', 'Parent', 'Child domains'];
 
-/** Which domains a branch's changed files fall in, and what its DOMAIN.md diff says about ownership. */
+/** Which domains a branch's changed files fall in, and what its README.md diff says about ownership. */
 export function branchScope(audit: WayfindingAudit, base: string, changedFiles: string[], domainDocDiff: string): BranchScope {
   const domains = [...audit.domains].sort((a, b) => b.dir.length - a.dir.length);
   const byDomain = new Map<string, string[]>();
@@ -871,7 +958,7 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
     }
     flag(`${root}/${rest.split('/')[0]}`, null, file);
   }
-  // Inside a domain, the outermost folder without a DOMAIN.md comes first: its
+  // Inside a domain, the outermost folder without a README.md comes first: its
   // own subfolders become its children once it is a domain.
   const undocumented = [...(audit.undocumented ?? [])].sort((a, b) => a.folder.length - b.folder.length);
   for (const file of changedFiles) {
@@ -884,7 +971,7 @@ export function branchScope(audit: WayfindingAudit, base: string, changedFiles: 
   const structural: BranchScope['structural'] = [];
   for (const chunk of domainDocDiff.split(/^diff --git /m).slice(1)) {
     const file = chunk.match(/^a\/(\S+) b\/(\S+)/)?.[2];
-    if (!file) continue;
+    if (!file || !roots.some((r) => file.startsWith(`${r}/`))) continue;
     if (/^new file mode/m.test(chunk)) structural.push({ file, change: 'added' });
     else if (/^deleted file mode/m.test(chunk)) structural.push({ file, change: 'removed' });
     else {
@@ -931,7 +1018,7 @@ function sectionDiff(chunk: string, title: string): string {
 // ------------------------------------------------------------------ report
 
 const MAX_LISTED = 40;
-// The agent's audit lists domains only for a small app: MAP.md and each DOMAIN.md say the same, and 160 of them were ~4k tokens every conversation.
+// The agent's audit lists domains only for a small app: MAP.md and each README.md say the same, and 160 of them were ~4k tokens every conversation.
 const COMPACT_DOMAIN_LIST_MAX = 12;
 const COMPACT_SCOPE_MAX = 20;
 
@@ -1023,8 +1110,8 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
       lines.push(
         `  Give each one a ${DOMAIN_DOC}, created before you change its code (a folder you're adding gets one with it): fill ` +
           `it in from the code (Owns, Interface, Checkpoint, and only what has content: the Rules its code implements anchored to tests that exist, ` +
-          `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A child domain's Parent is the domain above it; add it to that parent's "Child ` +
-          `domains" and move the parent's rules about it into the new ${DOMAIN_DOC}. Its public file is the code file named ` +
+          `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A child domain's Parent is the domain above it; give it a Kind line (child domain, adapter or shared) and move ` +
+          `the parent's rules about it into the new ${DOMAIN_DOC}; the parent's Contains section is generated. Its public file is the code file named ` +
           `after its folder unless it has a service.ts. Log it under Structural changes in ${MAP_PATH}, then run ` +
           'audit_architecture({ regenerate: true }).'
       );
@@ -1055,6 +1142,10 @@ export function formatWayfindingAudit(audit: WayfindingAudit, scope?: BranchScop
       `Folders of code inside a domain with no ${DOMAIN_DOC} of their own (each becomes a child domain when a change touches it): ` +
         `${shown}${audit.undocumented.length > 12 ? ', …' : ''}`
     );
+  }
+  if (audit.advisories?.length) {
+    lines.push('', 'For QA to review (these never fail a branch):', ...audit.advisories.slice(0, 8).map((a) => `- ${a}`));
+    if (audit.advisories.length > 8) lines.push(`- … ${audit.advisories.length - 8} more`);
   }
   if (audit.offMap.length) {
     const shown = audit.offMap.slice(0, 12).join(', ');

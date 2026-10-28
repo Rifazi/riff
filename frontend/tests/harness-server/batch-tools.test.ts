@@ -70,14 +70,14 @@ describe('trimAudit', () => {
     expect(later).toContain('[y] two');
   });
 
-  test('later audits collapse the DOMAIN.md instructions and an unchanged branch scope', async () => {
+  test('later audits collapse the README.md instructions and an unchanged branch scope', async () => {
     const { trimAudit } = await import('../../../harness-server/backend/src/agents/tool-defs/architecture-audit-tool');
     const first = [
       'Wayfinding audit',
       '',
-      '✗ This branch changed code in 1 folder(s) with no DOMAIN.md:',
+      '✗ This branch changed code in 1 folder(s) with no README.md:',
       '- a/: top-level domain (a/x.ts)',
-      '  Give each one a DOMAIN.md, created before you change its code, then run audit_architecture({ regenerate: true }).',
+      '  Give each one a README.md, created before you change its code, then run audit_architecture({ regenerate: true }).',
       '',
       'Branch scope (vs master):',
       '- a: 1 file(s)',
@@ -94,7 +94,7 @@ describe('trimAudit', () => {
 
   test('an instruction the earlier audit never gave is kept', async () => {
     const { trimAudit } = await import('../../../harness-server/backend/src/agents/tool-defs/architecture-audit-tool');
-    const later = '✗ 1 folder(s):\n  Give each one a DOMAIN.md, created before you change its code.';
+    const later = '✗ 1 folder(s):\n  Give each one a README.md, created before you change its code.';
     expect(trimAudit(later, 'Wayfinding audit\n- [x] one')).toContain('created before you change its code');
   });
 

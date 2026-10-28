@@ -115,7 +115,7 @@ export function createReviewTools(deps: ReviewToolDeps) {
   // search_code without a glob starts in the domains the branch touched (read once: QA doesn't change the branch).
   let changed: Promise<string[]> | null = null;
   const searchFocus = changedDomainsFocus(deps.app, deps.repoRoot, 'the domains this branch touched', () => {
-    changed ??= branchChanges(deps.repoRoot, deps.baseBranch, ':(glob)**/DOMAIN.md', deps.branch).then((c) => c?.files ?? []);
+    changed ??= branchChanges(deps.repoRoot, deps.baseBranch, ':(glob)**/README.md', deps.branch).then((c) => c?.files ?? []);
     return changed;
   });
   return {

@@ -17,6 +17,25 @@ export interface PageLogin {
   password: string;
 }
 
+/** One thing to do on the page before the capture: click, fill a field, press a key, open another path or wait. */
+export interface PageStep {
+  do: 'click' | 'fill' | 'press' | 'goto' | 'wait';
+  /** click: the visible text or aria-label of the button/link/tab. wait: text to wait for. */
+  text?: string;
+  /** click / fill: a CSS selector, instead of text / label. */
+  selector?: string;
+  /** fill: the field's label, placeholder, aria-label or name. */
+  label?: string;
+  /** fill: the value to type, or the option to choose in a select. */
+  value?: string;
+  /** press: a key such as Enter, Tab or Escape. */
+  key?: string;
+  /** goto: a path in the app. */
+  path?: string;
+  /** wait: milliseconds (max 10000). */
+  ms?: number;
+}
+
 export interface CaptureOptions {
   chrome: string;
   url: string;
@@ -24,8 +43,15 @@ export interface CaptureOptions {
   height: number;
   dark: boolean;
   login?: PageLogin;
+  /** Done in order after the page opens, before the capture. */
+  steps?: PageStep[];
   /** Where the png goes. */
   file: string;
+}
+
+export interface CaptureResult {
+  /** Where the browser ended up, after any steps. */
+  finalUrl: string;
 }
 
 const LOGIN_TIMEOUT_MS = 20_000;
@@ -201,6 +227,124 @@ function loginScript(username: string, password: string): string {
   })()`;
 }
 
+/** Runs in the page: performs a click or fill, polling up to 6s for the target to appear. On failure lists what could be clicked. */
+function stepScript(step: PageStep): string {
+  return `(async () => {
+    const step = ${JSON.stringify(step)};
+    const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const norm = (t) => (t || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const CLICKABLE = 'button, a, [role="button"], [role="tab"], [role="menuitem"], [role="link"], [role="option"], input[type="submit"], input[type="button"], summary, label';
+    const clickLabel = (el) => norm(el.getAttribute('aria-label') || el.value || el.textContent);
+    const fieldLabels = (el) => {
+      const out = [el.getAttribute('aria-label'), el.getAttribute('placeholder'), el.getAttribute('name'), el.id];
+      if (el.labels) for (const l of el.labels) out.push(l.textContent);
+      const by = el.getAttribute('aria-labelledby');
+      if (by) for (const id of by.split(' ')) out.push(document.getElementById(id)?.textContent);
+      return out.map(norm).filter(Boolean);
+    };
+    const pick = (list, want, labelsOf) => {
+      const w = norm(want);
+      return list.find((el) => labelsOf(el).some((l) => l === w)) || list.find((el) => labelsOf(el).some((l) => l.includes(w)));
+    };
+    const find = () => {
+      if (step.selector) return [...document.querySelectorAll(step.selector)].find(visible);
+      if (step.do === 'click') {
+        const list = [...document.querySelectorAll(CLICKABLE)].filter(visible);
+        return pick(list, step.text, (el) => [clickLabel(el)]);
+      }
+      const list = [...document.querySelectorAll('input, textarea, select, [contenteditable="true"]')].filter((el) => visible(el) && el.type !== 'hidden');
+      return pick(list, step.label, fieldLabels);
+    };
+    const end = Date.now() + 6000;
+    let el;
+    while (Date.now() < end && !(el = find())) await sleep(250);
+    if (!el) {
+      const names = [...document.querySelectorAll(step.do === 'click' ? CLICKABLE : 'input, textarea, select')]
+        .filter(visible).map((e) => (step.do === 'click' ? clickLabel(e) : fieldLabels(e)[0])).filter(Boolean);
+      const seen = [...new Set(names)].slice(0, 25).join(' | ');
+      return { ok: false, reason: 'Nothing visible matched. On the page: ' + (seen || '(nothing clickable)') };
+    }
+    el.scrollIntoView({ block: 'center' });
+    if (step.do === 'click') { el.click(); return { ok: true }; }
+    el.focus();
+    if (el.tagName === 'SELECT') {
+      const opt = [...el.options].find((o) => norm(o.textContent) === norm(step.value) || o.value === step.value) ||
+        [...el.options].find((o) => norm(o.textContent).includes(norm(step.value)));
+      if (!opt) return { ok: false, reason: 'No option "' + step.value + '". Options: ' + [...el.options].map((o) => o.textContent.trim()).join(' | ') };
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(el, opt.value);
+    } else if (el.type === 'checkbox' || el.type === 'radio') {
+      const want = !/^(false|off|no|0)$/i.test(step.value || 'true');
+      if (el.checked !== want) el.click();
+      return { ok: true };
+    } else if (el.isContentEditable) {
+      el.textContent = step.value || '';
+    } else {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, step.value || '');
+    }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true };
+  })()`;
+}
+
+const KEYS: Record<string, { code: string; keyCode: number; text?: string }> = {
+  enter: { code: 'Enter', keyCode: 13, text: '\r' },
+  tab: { code: 'Tab', keyCode: 9 },
+  escape: { code: 'Escape', keyCode: 27 },
+  esc: { code: 'Escape', keyCode: 27 },
+  arrowdown: { code: 'ArrowDown', keyCode: 40 },
+  arrowup: { code: 'ArrowUp', keyCode: 38 },
+  space: { code: 'Space', keyCode: 32, text: ' ' },
+};
+
+async function runStep(cdp: Cdp, step: PageStep, origin: string): Promise<void> {
+  switch (step.do) {
+    case 'goto': {
+      const p = step.path ?? '/';
+      await navigate(cdp, `${origin}${p.startsWith('/') ? p : `/${p}`}`);
+      return;
+    }
+    case 'wait': {
+      if (step.text) {
+        const want = JSON.stringify(step.text.toLowerCase());
+        const end = Date.now() + 10_000;
+        while (Date.now() < end) {
+          try {
+            if (await cdp.evaluate<boolean>(`document.body.innerText.toLowerCase().includes(${want})`)) return;
+          } catch {
+            // navigating
+          }
+          await sleep(300);
+        }
+        throw new Error(`"${step.text}" did not appear within 10s.`);
+      }
+      await sleep(Math.min(Math.max(step.ms ?? 1000, 0), 10_000));
+      return;
+    }
+    case 'press': {
+      const name = step.key ?? 'Enter';
+      const known = KEYS[name.toLowerCase()];
+      const base = { key: name, code: known?.code ?? name, windowsVirtualKeyCode: known?.keyCode ?? 0 };
+      await cdp.send('Input.dispatchKeyEvent', { type: known?.text ? 'keyDown' : 'rawKeyDown', ...base, ...(known?.text ? { text: known.text } : {}) });
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+      await sleep(600);
+      return;
+    }
+    default: {
+      if (step.do === 'click' ? !step.text && !step.selector : !step.label && !step.selector) {
+        throw new Error(step.do === 'click' ? 'click needs `text` or `selector`.' : 'fill needs `label` or `selector`.');
+      }
+      const result = await cdp.evaluate<{ ok: boolean; reason?: string }>(stepScript(step));
+      if (!result.ok) throw new Error(result.reason);
+      // a click may start a navigation or a client-side route change: give it a moment
+      await sleep(step.do === 'click' ? 900 : 150);
+    }
+  }
+}
+
 const PROBE = `(() => {
   const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const alert = document.querySelector('[role="alert"], .error, [class*="error"]');
@@ -225,7 +369,7 @@ async function waitForLogin(cdp: Cdp, startPath: string): Promise<string | null>
 }
 
 /** Opens the page (signing in first when asked) and writes a png of it. */
-export async function captureWithChrome(opts: CaptureOptions): Promise<void> {
+export async function captureWithChrome(opts: CaptureOptions): Promise<CaptureResult> {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'riff-chrome-'));
   let proc: ChildProcess | undefined;
   let cdp: Cdp | undefined;
@@ -250,8 +394,20 @@ export async function captureWithChrome(opts: CaptureOptions): Promise<void> {
 
     await navigate(cdp, opts.url);
     await sleep(SETTLE_MS);
+    const origin = new URL(opts.url).origin;
+    for (const [i, step] of (opts.steps ?? []).entries()) {
+      try {
+        await runStep(cdp, step, origin);
+      } catch (err) {
+        const what = step.do === 'goto' ? step.path : step.text ?? step.label ?? step.selector ?? step.key ?? '';
+        throw new Error(`Step ${i + 1} (${step.do}${what ? ` "${what}"` : ''}) failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (opts.steps?.length) await sleep(SETTLE_MS);
+    const finalUrl = await cdp.evaluate<string>('location.href').catch(() => opts.url);
     const shot = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
     await fs.writeFile(opts.file, Buffer.from(shot.data, 'base64'));
+    return { finalUrl };
   } finally {
     cdp?.close();
     proc?.kill('SIGKILL');

@@ -6,7 +6,7 @@ const plan = 'rename movies-ui and client/src/app-shell/App.tsx; server/src/movi
 
 describe('outOfPlan', () => {
   test('a new domain the plan never names is reported', () => {
-    const found = outOfPlan(['client/src/app-shell/App.tsx', 'client/src/movie-workspace-ui/service.ts'], ['client/src/movie-workspace-ui/DOMAIN.md'], plan);
+    const found = outOfPlan(['client/src/app-shell/App.tsx', 'client/src/movie-workspace-ui/service.ts'], ['client/src/movie-workspace-ui/README.md'], plan);
     expect(found?.newDomains).toEqual(['client/src/movie-workspace-ui']);
   });
 

@@ -33,9 +33,9 @@ beforeAll(async () => {
 // Blockers as QA wrote them on real sessions: Cleanup (docs only, no commits between passes),
 // EDI 856 (a missed case, then a script the branch had no business touching) and Script breakdown.
 const DOCS =
-  'client/src/storyboards-ui/StoryboardPanel/DOMAIN.md is listed in the requirements\' "Docs to update" but is untouched by the branch — add a Rules entry';
+  'client/src/storyboards-ui/StoryboardPanel/README.md is listed in the requirements\' "Docs to update" but is untouched by the branch — add a Rules entry';
 const DOCS_AGAIN =
-  'client/src/storyboards-ui/StoryboardPanel/DOMAIN.md is listed in the requirements\' "Docs to update" but is still untouched by the branch (no commits since pass 1) — add a Rules entry';
+  'client/src/storyboards-ui/StoryboardPanel/README.md is listed in the requirements\' "Docs to update" but is still untouched by the branch (no commits since pass 1) — add a Rules entry';
 const MISSING_CASE =
   "client/src/features/edi-viewer/DataSections.tsx sectionPreview (~line 33-65): no 'shipments' case, so the Shipments panel's collapsed preview falls through to the default";
 const SCRIPT =
@@ -56,7 +56,7 @@ const round = (pass: number, result: string, blocking: string[], head: string | 
 
 describe('docs findings', () => {
   test('a doc the requirements list is not-updated; a doc that describes missing paths is inconsistent', () => {
-    expect(categorizeBlocker('client/src/scripts-ui/ScriptsPage/DOMAIN.md:82 still reference `movies-ui/MovieWorkspacePage`, a path that no longer exists')).toBe('docs-inconsistent');
+    expect(categorizeBlocker('client/src/scripts-ui/ScriptsPage/README.md:82 still reference `movies-ui/MovieWorkspacePage`, a path that no longer exists')).toBe('docs-inconsistent');
     expect(categorizeBlocker("MAP.md is listed in the requirements' \"Docs to update\" but is untouched by the branch")).toBe('docs-not-updated');
   });
 });

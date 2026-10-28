@@ -57,7 +57,7 @@ export function ArchitectureFields({
             <ExternalAnchor href={WAYFINDING_REPO_URL} className="text-primary hover:underline">
               Wayfinding
             </ExternalAnchor>{' '}
-            keeps a <code>MAP.md</code> of domains and a <code>DOMAIN.md</code> in each. The agents read them first, plan changes as
+            keeps a <code>MAP.md</code> of domains and a <code>README.md</code> in each. The agents read them first, plan changes as
             segments one domain at a time, keep the docs current, and run the architecture checks. QA reviews the code and docs together.
             Saving creates <code>MAP.md</code> and <code>docs/wayfinding.md</code> on the base branch if they&apos;re missing. Domains are
             added as changes need them.
@@ -190,7 +190,7 @@ export function ArchitectureTools({
           <Notice tone={problems ? 'amber' : 'green'}>
             {audit.audit.domains.length} domain(s) · {problems ? `${problems} problem(s)` : 'no problems'}
             {audit.audit.undocumented?.length
-              ? ` · ${audit.audit.undocumented.length} folder(s) of code without a DOMAIN.md (agents add one when they change them)`
+              ? ` · ${audit.audit.undocumented.length} folder(s) of code without a README.md (agents add one when they change them)`
               : ''}
           </Notice>
           <pre className="max-h-80 overflow-auto custom-scrollbar text-xs bg-muted border border-border rounded-md p-3 whitespace-pre-wrap">

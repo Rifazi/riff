@@ -28,7 +28,7 @@ describe('branchChanges', () => {
       git(dir, 'add', '-A');
       git(dir, 'commit', '-m', 'rename');
 
-      const changes = await branchChanges(dir, 'main', ':(glob)**/DOMAIN.md', 'feature');
+      const changes = await branchChanges(dir, 'main', ':(glob)**/README.md', 'feature');
       expect(changes?.files).toEqual(['server/src/new-name/a.ts']);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

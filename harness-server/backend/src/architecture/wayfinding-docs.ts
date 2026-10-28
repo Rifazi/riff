@@ -1,3 +1,4 @@
+import { README_REVIEW_LINES } from './code-checks.js';
 import { DOMAIN_DOC, MAP_PATH, WAYFINDING_GUIDE_PATH, WAYFINDING_REPO_URL, describeSrcDirs, type WayfindingConfig } from './architecture.js';
 
 // Marks docs/wayfinding.md as Riff's, so it's refreshed on setup without
@@ -21,17 +22,17 @@ export function renderMapTemplate(today: string): string {
 export function renderDomainTemplate(config: WayfindingConfig): string {
   return `# <domain>
 
+Kind: <domain | child domain | junction | adapter | shared>
 Parent: <parent domain; leave the line out for a top-level domain>
 Owns: <the decisions this domain makes>
 Owns data: <tables this domain writes; leave the line out if none>
-Child domains: <names; leave the line out if none>
 Does not own: <nearby decisions that live elsewhere (see <domain>); leave the line out if none>
 Interface: <public functions in ${config.interfaceFile}, or in the file named after this folder when there is no ${config.interfaceFile}>
 Checkpoint: <command that runs this domain's tests>
 
 ## Rules
-- <rule, in plain English>
-  Why: <reason, source, or date>
+- <one line per rule; for an adapter, technical rules only>
+  Why: <one line: reason, source, or date>
   Enforced by: <test file> › "<test name>"
 
 ## Hidden behavior
@@ -71,7 +72,9 @@ Every change answers three questions:
 | Public interface | The domain's \`${config.interfaceFile}\`, or, when it has none, the file named after its folder (a page's \`ProjectListPage/ProjectListPage.tsx\`): the only file other domains import. No re-export file is needed when that file already is the public surface. |
 | Child domain | A domain folder inside a domain. **Every folder of code inside a domain is one** (a component, a page's part, a module, a handler, a table), as small as a single file, with its own \`${DOMAIN_DOC}\`; folders of tests and fixtures aren't. Visible only to its parent (and its siblings). Never depends on its parent: a helper two children both need is its own sibling child domain, not a file the parent owns, and a helper children of different top-level domains both need is a top-level domain of its own (a child is visible only inside its parent, so never copy it into each). Its public file is the code file named after its folder, unless it has a \`${config.interfaceFile}\`. |
 | Junction | A domain whose rules combine other domains' decisions (\`Kind: junction\` and \`Inputs:\` in its ${DOMAIN_DOC}). |
-| Map | \`${MAP_PATH}\` at the repo root: one line per top-level domain and junction. |
+| Adapter | Code that connects a domain to something outside it (HTTP routes, a queue, an external system's client, legacy code). Its own folder and ${DOMAIN_DOC} with \`Kind: adapter\`. See "Decisions and adapters". |
+| Shared | A \`shared/\` folder inside a domain, for helpers several of its parts use (\`Kind: shared\`). See "One copy of every helper". |
+| Map | \`${MAP_PATH}\` at the repo root: one line per top-level domain and junction, plus External systems. |
 | Segment | A bounded step of a change: one decision through one domain's boundary, validated and revertible on its own. |
 
 ## Client and server code are never mixed
@@ -91,6 +94,21 @@ file, and a domain's public file never serves both sides. The browser bundle mus
 - An existing domain that mixes both sides is split before you change it, in its own segment: move the server code and the
   rules it implements into a server domain, leave the client code and its rules in a client domain, and change no behavior.
   Do one domain at a time and finish with its checkpoint and the audit before the next.
+
+## Decisions and adapters
+
+Code in a domain is one of two kinds. **Decisions** are the rules the domain owns. **Adapters** connect the domain to something
+outside it: HTTP, a database, a queue, an external system, legacy code. An adapter makes no business decisions; it may hold
+technical ones about its outside system (how a failed call is retried). Set the adapters aside, and what is left is decisions,
+grouped by what changes for the same reason.
+
+- An adapter gets its own folder and ${DOMAIN_DOC} (\`Kind: adapter\`, \`Parent:\` its domain), like a child domain; its Rules are
+  technical only. The database adapter (\`model.ts\`) stays a file: it only maps the tables the domain lists under Owns data.
+- An adapter belongs to exactly one domain. Only that domain's public file calls an outbound adapter, and an inbound adapter
+  (\`routes/\`) calls only that domain's public file.
+- Each external system is reached through one domain's adapter, so every rule about it has one owner. List it on ${MAP_PATH}
+  under "External systems" with that domain. Never import an external system's client library from a second domain.
+- A business rule found in an adapter is misplaced: move it to the domain's decisions.
 
 ## Before writing code
 
@@ -120,12 +138,19 @@ file, and a domain's public file never serves both sides. The browser bundle mus
 - Never re-implement another domain's decision; call it.
 - **One copy of every helper.** Before writing a function, look for it: the domains' Files sections list every export with its
   signature (parsing a request body, shaping a response, reading the caller's id, formatting, validation, a small component). Call the
-  one that exists. When a second place needs code that lives in one domain's private files or only in another's, move it into a
-  domain both import, in its own segment before either caller changes: a sibling child when the users share a parent, else a
-  top-level domain (a plain domain such as \`http-response\`, on ${MAP_PATH}). Never copy a helper to avoid creating a domain, and
-  never copy it because a child "may not depend on its parent". Copy only when the copies can't share code (separately
-  deployed units with no common package), and say why under Mirrors in both ${DOMAIN_DOC} files. The audit reports the same
-  function written in two domains.
+  one that exists. Extract a helper when a second caller needs it, not before. Shared code lives inside a domain wherever
+  possible: a helper several parts of one domain use goes in a \`shared/\` folder of their nearest common parent (\`pricing/shared/\`),
+  with its own ${DOMAIN_DOC} (\`Kind: shared\`), in its own segment before either caller changes. A helper another top-level domain
+  needs is first offered through the owning domain's public file. A top-level \`shared/\` folder is a last resort, for when no single
+  domain can own the helper, and is declared on ${MAP_PATH} with the reason. Shared code makes no decisions and imports nothing
+  from its siblings; a helper that starts making a decision moves to the part of the domain that owns it. Never copy a helper to
+  avoid creating a folder, and never copy it because a child "may not depend on its parent". Copy only when the copies can't share
+  code (separately deployed units with no common package), and say why under Mirrors in both ${DOMAIN_DOC} files. The audit
+  reports the same function written in two domains.
+- **Code is as small as its decisions and carries no comments.** No dead code, speculative abstraction, wrapper that only
+  forwards a call or second copy of a rule. Behavior is documented once, in the ${DOMAIN_DOC}: why a rule exists goes in its Why
+  line, traps in Hidden behavior, units in the name (\`amountCents\`, not a comment). The only comments are ones a tool reads (lint
+  and compiler directives, generated-section markers, license headers).
 - Write a table only from the domain that owns it.
 - If no domain owns the decision and only one place uses it, record it under that domain's "Owns". Create a new domain only
   when a second place needs it; do it in its own segment and log it in \`${MAP_PATH}\` under Structural changes.
@@ -139,6 +164,13 @@ file, and a domain's public file never serves both sides. The browser bundle mus
 - Update Rules, Hidden behavior and Recipes in every \`${DOMAIN_DOC}\` you touched, in the same segment as the code. Anchor
   every rule to a test (\`Enforced by: <test file> › "<test name>"\`).
 - Never edit generated sections by hand; regenerate them.
+- Delete the code, tests and folders this segment left unused, and their lines in the ${DOMAIN_DOC}, in the same segment.
+  Version control keeps the history. Two cases wait: a public interface with separately deployed consumers (expand, then
+  contract), and anything with declared consumers the map can't see (another repository). Removing a whole domain, junction,
+  adapter or shared folder is a structural change: its own segment, logged on ${MAP_PATH}.
+- Keep each ${DOMAIN_DOC} small: one line per rule (its test carries the detail), Why is one line, delete what is no longer
+  true, recipes only for tasks that recur, nothing the code says plainly. A ${DOMAIN_DOC} that keeps growing means its folder
+  owns decisions that change for different reasons: split off a child domain or adapter, or trim.
 - Put any change to "Owns", "Does not own" or Mirrors in its own segment, so QA sees it separately.
 - Run the checkpoint and the mechanical checks.
 - Hand the route, the diff and the docs to an independent QA review.
@@ -164,8 +196,8 @@ belongs to no domain (this guide, setup, cross-cutting notes).
 Write down what the code cannot tell you. Do not restate what it can, unless the restatement is anchored to a test.
 
 Keep each \`${DOMAIN_DOC}\` about its own folder. A rule, a hidden behavior or a recipe goes in the narrowest domain whose code
-implements it; a parent keeps only the decisions it makes itself (how its children fit together) and lists its children under
-"Child domains". That is what keeps a top-level \`${DOMAIN_DOC}\` short as the code under it grows.
+implements it; a parent keeps only the decisions it makes itself (how its children fit together); its generated Contains
+section lists its children and adapters. That is what keeps a top-level \`${DOMAIN_DOC}\` short as the code under it grows.
 
 **Leave out what you have nothing to put in.** A line or section with no content (no tables, no child domains, no mirrors, no
 hidden behavior, no recipes, no rules yet, nothing it does not own) is deleted, never written as "none" or left as a template
@@ -192,8 +224,13 @@ no behavior. Do one domain at a time and finish with its checkpoint and the audi
 
 In Riff Dev Sessions the agents run \`audit_architecture\`, which checks: other domains reached only through
 their public file; child domains visible only inside their parent; no child depending on its parent; no dependency
-cycles; every rule anchored to a test that exists; no rule in two domains; no function written in two domains unless both declare it under Mirrors; files named in Recipes exist; the generated Files and
-Consumers sections match the code; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
+cycles; every rule anchored to a test that exists; no rule in two domains; no function written in two domains unless both declare it under Mirrors; files named in Recipes exist; the generated Files, Contains and
+Consumers sections match the code; every ${DOMAIN_DOC} opens with a valid Kind line; no comments in code other than lint and compiler
+directives, generated markers and license headers; no export nothing uses (name a consumer the code can't show under Hidden behavior);
+an adapter called only by its own domain's public file, an inbound adapter (routes, handlers) calling only that file, shared code
+importing nothing from its siblings, a top-level shared/ folder declared on \`${MAP_PATH}\`, and an external system's client package
+(listed under External systems on \`${MAP_PATH}\`) imported only by its adapter; a ${DOMAIN_DOC} past ${README_REVIEW_LINES} hand-written lines is
+flagged for QA, not failed; every top-level domain on \`${MAP_PATH}\` (junctions marked as such); and, where the code defines TypeORM
 entities, one writer per table with the domain's prefix, listed under "Owns data". It does not yet check that a domain is
 wholly client or wholly server; QA does. The reference repo's
 \`example/tools/check.ts\` is a standalone version of the same checks to wire into CI.
@@ -224,10 +261,16 @@ const SHARED = (c: WayfindingConfig) =>
   `visible only inside its parent, and every folder of code inside a domain is a child domain with its own ${DOMAIN_DOC}, so ` +
   `each ${DOMAIN_DOC} describes only its own folder. read_doc reads ${MAP_PATH} and any ${DOMAIN_DOC} (by path, optionally one heading), and ` +
   `search_docs searches them along with docs/. The full procedure, with the ${DOMAIN_DOC} template, is ${WAYFINDING_GUIDE_PATH}. ` +
-  `audit_architecture runs the mechanical checks and lists the domains with their folders. Client and server code are never mixed: ` +
+  `audit_architecture runs the mechanical checks and lists the domains with their folders. Every ${DOMAIN_DOC} opens with a Kind ` +
+  `line (domain, child domain, junction, adapter or shared). Code is either a decision or an adapter: an adapter (HTTP routes, ` +
+  `a database, a queue, an external system's client) makes no business decisions, has its own folder and ${DOMAIN_DOC}, belongs ` +
+  `to one domain that alone calls it, and each external system is reached through one domain's adapter, listed on ${MAP_PATH} ` +
+  `under External systems. A business rule in an adapter is misplaced. Code is as small as its decisions, carries no comments ` +
+  `(behavior goes in the ${DOMAIN_DOC}), and what a change leaves unused is deleted in the same segment. Client and server code are never mixed: ` +
   `a domain is wholly browser code or wholly server code (handlers, tables, CDK), each side has its own source folder, and a ` +
   `domain's public file never serves both, so the browser bundle never loads server code. Every helper has one copy: look for it ` +
-  `in the Files sections before writing it, and when a second domain needs code, move it into a domain both import instead of copying it.`;
+  `in the Files sections before writing it, and when a second place needs code, put it in a shared/ folder of the nearest common ` +
+  `parent (Kind: shared; a top-level shared/ only as a last resort, declared on ${MAP_PATH}) instead of copying it.`;
 
 // How to find code here. It replaces the base prompt's general guidance on
 // finding code and keeping a code map (an app's prompt override can't be
@@ -239,7 +282,7 @@ const FINDING_CODE = (c: WayfindingConfig) =>
   `prompt on how to find code (searching docs/ for a code-map page first, searching the code broadly) or on keeping a ` +
   `code map page.\n\n` +
   `1. read_doc ${MAP_PATH}: find the domain that owns the decision. ${MAP_PATH} lists only top-level domains; a domain's ` +
-  `child domains are under "Child domains" in its ${DOMAIN_DOC}.\n` +
+  `child domains and adapters are listed under "Contains" in its ${DOMAIN_DOC}.\n` +
   `2. read_doc that domain's ${DOMAIN_DOC}, one heading at a time when you need only part of it ("Files", "Rules", ` +
   `"Hidden behavior", "Recipes"). Its Files section lists every file the domain holds and what each exports, the public ` +
   `file first, marked "(interface)", with the signature of everything it exports (parameters, return types, props, type ` +
@@ -281,8 +324,10 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `range), not whole files. Also check every domain's Files signatures, not just the ones involved, for each helper a step would ` +
       `write (request parsing, response shaping, auth lookups, formatting, validation, shared components): a step calls the helper ` +
       `that exists. When code a step needs sits in one domain's private files, or two domains would each need it, an earlier step of ` +
-      `its own moves it into a domain both import (a sibling child under one parent, else a top-level domain on ${MAP_PATH}) and ` +
-      `points the existing copies at it, before any step uses it; a step never plans a second copy. Name the files each step changes as the Files sections list them, so the coding agent goes ` +
+      `its own moves it into the shared/ folder of the nearest common parent of its callers (a top-level shared/ only when no domain can own it, declared on ${MAP_PATH}) and ` +
+      `points the existing copies at it, before any step uses it; a step never plans a second copy. A step that leaves code, tests or folders unused deletes them in that step, ` +
+      `and each step keeps code minimal and comment-free (behavior goes in the ${DOMAIN_DOC}). A step that adds an HTTP route, queue handler or external-system client plans it as an adapter ` +
+      `folder of the one domain it serves (Kind: adapter), never reached by another domain, and an external system's client library is imported from one domain only (listed on ${MAP_PATH} under External systems). Name the files each step changes as the Files sections list them, so the coding agent goes ` +
       `straight to them. When a step adds, moves or removes files in a domain, the step also updates that ${DOMAIN_DOC} ` +
       `(audit_architecture regenerates Files); a code-map page such as docs/architecture.md covers only code on no domain.\n\n` +
       `Before writing the plan, read ${MAP_PATH} and the ${DOMAIN_DOC} of every domain involved (a parent before its child), ` +
@@ -301,7 +346,7 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `(not a group), turns code that two children share into a sibling child domain rather than leaving it with the parent, keeps the ` +
       `parent's public file, entry point and any composition of the children (such as a CDK construct) at the parent, moves each existing ` +
       `rule and its test to the child that implements it, changes no behavior, and covers one domain, ending with its checkpoint and the ` +
-      `audit. Every DOMAIN.md the plan writes leaves out lines and sections it has nothing to put in. When an interface with separately deployed, external or ` +
+      `audit. Every README.md the plan writes leaves out lines and sections it has nothing to put in. When an interface with separately deployed, external or ` +
       `persisted consumers changes, plan expand then contract: add the new shape, move consumers one step at a time, remove the ` +
       `old shape last; schema changes are forward-only. Behavior-neutral work (refactors, upgrades) takes the short route: ` +
       `domain, interface unchanged, consumers, segments. A decision gets a new domain only when a second place needs it. Every domain the plan creates is its own subfolder ` +
@@ -316,9 +361,16 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `domain's decision, call it; write a table only from its owning domain. Before writing any function, find out whether it ` +
       `exists: the Files signatures of every domain list what each exports (search_docs for the job in words, or search_code for ` +
       `its likely name). Call it. If it only exists as a private file of another domain, or is already written in two places, ` +
-      `move it into a domain both import in its own step and commit (a sibling child under one parent, else a top-level domain on ` +
-      `${MAP_PATH}), point every copy at it and delete the copies, then continue; never paste a second copy, and never copy a ` +
-      `helper into a child domain because a child may not import its parent. Copy only when the copies can't share code, and say ` +
+      `move it into the shared/ folder of the nearest common parent of its callers (its own ${DOMAIN_DOC}, Kind: shared, no decisions, ` +
+      `no imports from its siblings) in its own step and commit, point every copy at it and delete the copies, then continue; a ` +
+      `top-level shared/ only when no domain can own it, declared on ${MAP_PATH} with the reason; never paste a second copy, and never copy a ` +
+      `helper into a child domain because a child may not import its parent. Write only the code the decision needs and no comments: ` +
+      `why a rule exists goes in its Why line, traps in Hidden behavior, units in the name. Delete the code, tests and folders your ` +
+      `step leaves unused, and their lines in the ${DOMAIN_DOC}, in the same step (a public interface with separately deployed consumers ` +
+      `waits for contract). Code that talks to the outside (routes, queue handlers, an external system's client) is an adapter: its own ` +
+      `folder and ${DOMAIN_DOC} (Kind: adapter), called only by its one domain's public file (an inbound one calls only that file), ` +
+      `holding technical rules only; a business rule found in one moves to the domain, and a client library is imported from one domain only. ` +
+      `Keep each ${DOMAIN_DOC} small: one line per rule, delete what is no longer true, no recipe for a one-off. Copy only when the copies can't share code, and say ` +
       `why under Mirrors in both ${DOMAIN_DOC} files. audit_architecture reports a function written in two domains; the step isn't ` +
       `finished while it reports one in a domain you touched. In the same step as the code, update that ` +
       `${DOMAIN_DOC}'s Rules (each anchored: Enforced by: <test file> › "<test name>", with that test written), Hidden behavior ` +
@@ -335,8 +387,8 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `Before changing files in a folder without one (audit_architecture lists them, and with your branch's changes reports ` +
       `them as a problem), create it first, as its own commit: copy the template from ${WAYFINDING_GUIDE_PATH} and fill it in ` +
       `from the code you read (Owns, Interface, Checkpoint, and only what has content: the Rules its code implements anchored to tests that exist, ` +
-      `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A top-level one goes on ${MAP_PATH}. A child's Parent is the domain above it: add it to ` +
-      `that parent's "Child domains" and move the parent's rules, hidden behavior and recipes about it into the child, so the ` +
+      `Hidden behavior, Recipes); leave out any line or section with nothing in it, never write "none". A top-level one goes on ${MAP_PATH}. A child's Parent is the domain above it: give it a Kind ` +
+      `line (child domain, adapter or shared); the parent's Contains section is generated; move the parent's rules, hidden behavior and recipes about it into the child, so the ` +
       `parent keeps only its own decisions. A folder you add gets its ${DOMAIN_DOC} in the same step. A child's public file is ` +
       `the code file named after its folder (no re-export file), unless it has a ${config.interfaceFile}. Log each new domain ` +
       `under Structural changes in ${MAP_PATH} and run audit_architecture({ regenerate: true }) for Files and Consumers. ` +
@@ -356,7 +408,11 @@ export function wayfindingBriefing(role: ArchitectureBriefingRole, config: Wayfi
       `outside the owning domain that re-implements its decision), a helper the branch wrote that already exists in another domain ` +
       `or that it copied into a second domain instead of moving it into one both import (the audit reports identical functions: a ` +
       `finding in every domain the branch touched; near-copies the audit can't see are yours to find with search_code), undeclared mirrors, and misplaced decisions (a rule ` +
-      `implemented in a consumer); hidden behavior the work relied on or discovered but didn't record; and a diff touching ` +
+      `implemented in a consumer, or a business rule inside an adapter); also flag: code comments the branch added (other than lint/compiler directives, ` +
+      `generated markers, license headers); code, tests or folders the change left unused and didn't delete (unless a declared consumer or ` +
+      `separately deployed consumer needs them); shared code that makes a decision or imports its siblings, a top-level shared/ not declared on ${MAP_PATH}, ` +
+      `an adapter called from outside its domain, an external system's client imported by more than one domain, a ${DOMAIN_DOC} with no Kind line, ` +
+      `and a ${DOMAIN_DOC} line the branch added that restates code or copies a rule from another folder (a ${DOMAIN_DOC} that keeps growing may need a boundary split); hidden behavior the work relied on or discovered but didn't record; and a diff touching ` +
       `domains the plan's Route didn't name. When the docs and the code disagree and no test the branch didn't modify settles ` +
       `which is right, say it needs the human's decision rather than guessing. A stale Files section is an audit problem like any ` +
       `other; a code-map page missing an entry for code inside a domain is not a finding. Problems only in domains the branch didn't touch ` +

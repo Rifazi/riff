@@ -6,7 +6,7 @@ import path from 'node:path';
 import { publicSignatures } from '../../../harness-server/backend/src/architecture/signatures';
 import { statusPaths } from '../../../harness-server/backend/src/agents/handoff';
 
-// The signatures a DOMAIN.md's Files section shows for the domain's public
+// The signatures a README.md's Files section shows for the domain's public
 // file, so an agent can call it without opening the code.
 
 describe('publicSignatures', () => {

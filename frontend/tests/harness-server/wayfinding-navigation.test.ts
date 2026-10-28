@@ -9,7 +9,7 @@ import { domainsNamedIn, domainsOfFiles, listByDomain } from '../../../harness-s
 import { createSearchCodeExecute, isListAllQuery } from '../../../harness-server/backend/src/agents/tool-defs/code-search-tool';
 import { planStepSection } from '../../../harness-server/backend/src/agents/plan-excerpt';
 
-// How agents in a Wayfinding app find code: from MAP.md and DOMAIN.md down,
+// How agents in a Wayfinding app find code: from MAP.md and README.md down,
 // with searches that start in the domains the work is about.
 
 const DOMAINS = [
@@ -118,11 +118,11 @@ describe('listing files with search_code', () => {
   beforeEach(() => {
     repo = mkdtempSync(path.join(tmpdir(), 'search-listing-'));
     write(
-      'client/src/pages/DOMAIN.md',
+      'client/src/pages/README.md',
       '# pages\n\n## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface): ListPage\n<!-- end generated -->\n'
     );
     write('client/src/pages/service.ts', "export { ListPage } from './ListPage/ListPage'\n");
-    write('client/src/pages/ListPage/DOMAIN.md', '# ListPage\n');
+    write('client/src/pages/ListPage/README.md', '# ListPage\n');
     write('client/src/pages/ListPage/ListPage.tsx', 'export const ListPage = () => null\n');
     write('client/src/main.tsx', 'render()\n');
     write('client/package-lock.json', '{}\n');
@@ -138,9 +138,9 @@ describe('listing files with search_code', () => {
 
   test("answers from the domains' Files sections, plus files on no domain", async () => {
     const result = (await listByDomain(repo, domains, 'client/**'))!;
-    expect(result).toContain('client/src/pages/DOMAIN.md\n- `service.ts` (interface): ListPage');
+    expect(result).toContain('client/src/pages/README.md\n- `service.ts` (interface): ListPage');
     // No Files section yet: its tracked files instead.
-    expect(result).toContain('client/src/pages/ListPage/DOMAIN.md (no Files section yet');
+    expect(result).toContain('client/src/pages/ListPage/README.md (no Files section yet');
     expect(result).toContain('- `ListPage.tsx`');
     expect(result).toContain('On no domain yet:\nclient/src/main.tsx');
     expect(result).not.toContain('package-lock.json');
@@ -156,10 +156,10 @@ describe('listing files with search_code', () => {
     expect(result).toContain('- `Row.tsx`');
   });
 
-  test('a glob over DOMAIN.md files lists the domains', async () => {
-    const result = (await listByDomain(repo, domains, 'client/**/DOMAIN.md'))!;
-    expect(result).toContain('client/src/pages/DOMAIN.md');
-    expect(result).toContain('client/src/pages/ListPage/DOMAIN.md');
+  test('a glob over README.md files lists the domains', async () => {
+    const result = (await listByDomain(repo, domains, 'client/**/README.md'))!;
+    expect(result).toContain('client/src/pages/README.md');
+    expect(result).toContain('client/src/pages/ListPage/README.md');
     expect(result).not.toContain('On no domain yet');
   });
 

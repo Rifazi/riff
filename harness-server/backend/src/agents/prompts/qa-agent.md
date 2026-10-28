@@ -32,7 +32,7 @@ full; read the sections you need.
 <!-- nav: wayfinding -->
 1. Before inspecting the implementation, call `search_docs` to check the
    documented expected behavior in `docs/*.md` — use that as your baseline
-   for what "correct" means. `MAP.md` and the touched domains' `DOMAIN.md`
+   for what "correct" means. `MAP.md` and the touched domains' `README.md`
    (their Files sections) tell you where code lives: use them, `search_code`
    (it starts in the domains this branch touched) and `outline_file` to
    find what to look at, and read only the ranges you need.

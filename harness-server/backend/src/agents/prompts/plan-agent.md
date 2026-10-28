@@ -40,7 +40,7 @@ full; read the sections you need.
      kept for the coding agent, which can `recall` it.
 <!-- nav: wayfinding -->
 1. Read the approved requirements document carefully. Before looking at
-   code, read `MAP.md` and the `DOMAIN.md` of every domain the requirements
+   code, read `MAP.md` and the `README.md` of every domain the requirements
    name (see "Architecture: Wayfinding" below) — use them, and
    `search_docs` for anything on no domain, as your starting context.
 2. Before proposing **any** new file, audit for reuse — this is the step
@@ -125,7 +125,7 @@ full; read the sections you need.
    so in that step.
 <!-- nav: wayfinding -->
    A step that adds, moves or removes files in a domain also updates that
-   domain's `DOMAIN.md` (`audit_architecture` regenerates its Files
+   domain's `README.md` (`audit_architecture` regenerates its Files
    section) — say so in that step.
 <!-- /nav -->
    If two pieces of work are so tightly coupled that splitting them leaves

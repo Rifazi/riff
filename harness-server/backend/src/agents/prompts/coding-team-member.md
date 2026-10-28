@@ -71,15 +71,15 @@ independent calls in one message, and all of a file's changes in one
 you own the code-map docs page, update it for everything merged into your
 branch as well as your own work; if you don't, leave it alone.
 <!-- nav: wayfinding -->
-Find code from the map down, as above: `MAP.md`, the domain's `DOMAIN.md`
+Find code from the map down, as above: `MAP.md`, the domain's `README.md`
 and its Files section, and only then `read_file` of just the part you need
 (`symbol` when you know its name, else `outline_file` and a range).
 `search_code` without a glob starts in your owned paths. Put independent
 calls in one message, and all of a file's changes in one `edit_file` call
 (`edits`). Regenerate the Files section of the domains you own
 (`audit_architecture({ regenerate: true })`) after adding or removing files
-or exports; leave other domains' `DOMAIN.md` alone. Before changing code in
-a folder of yours with no `DOMAIN.md` (top-level, or a folder of code inside
+or exports; leave other domains' `README.md` alone. Before changing code in
+a folder of yours with no `README.md` (top-level, or a folder of code inside
 a domain, which becomes its child domain), create one for it first, in its
 own commit; a folder you add gets one in the same step (see "Architecture:
 Wayfinding"). If you don't own `MAP.md`, say in

@@ -9,12 +9,12 @@ export const auditArchitectureSchema = z.object({
   regenerate: z
     .boolean()
     .optional()
-    .describe('Rewrite the generated Files and Consumers sections of every DOMAIN.md from the code before reporting (never edit them by hand)'),
+    .describe('Rewrite the generated Files and Consumers sections of every README.md from the code before reporting (never edit them by hand)'),
 });
 export const auditArchitectureReadOnlySchema = z.object({});
 
 const BASE_DESCRIPTION =
-  "Run this app's Wayfinding Architecture checks and list its domains (from MAP.md and each DOMAIN.md). Reports: imports " +
+  "Run this app's Wayfinding Architecture checks and list its domains (from MAP.md and each README.md). Reports: imports " +
   "of another domain's private files, child domains reached from outside their parent, children depending on their parent, " +
   'dependency cycles, rules without an existing "Enforced by" test, rules in two domains, Recipes naming missing files, ' +
   'stale generated Files and Consumers sections, top-level domains missing from MAP.md, and (with TypeORM) tables without one owner. ';
@@ -31,14 +31,14 @@ export interface AuditArchitectureDeps {
   // started, else the app's base branch.
   baseBranch?: string;
   allowRegenerate: boolean;
-  // A team member regenerates only the DOMAIN.md files inside its owned paths.
+  // A team member regenerates only the README.md files inside its owned paths.
   writablePaths?: string[];
 }
 
 export function auditArchitectureDescription(deps: Pick<AuditArchitectureDeps, 'scope' | 'allowRegenerate'>): string {
   return (
     BASE_DESCRIPTION +
-    (deps.scope ? 'Also lists the domains this branch touched and any ownership or structural edits to DOMAIN.md files. ' : '') +
+    (deps.scope ? 'Also lists the domains this branch touched and any ownership or structural edits to README.md files. ' : '') +
     (deps.allowRegenerate ? 'regenerate: true rewrites the generated Files and Consumers sections. ' : 'Read-only. ') +
     'Run it before planning or changing code in a domain, and again before finishing.'
   );
@@ -55,8 +55,8 @@ export function trimAudit(text: string, previous: string | null): string {
   let out = text;
   if (previous !== null) {
     out = out.replace(/\n\nDomains:\n(?:- .*\n?)+/, '\n\n(Domain list as in your first audit.)\n');
-    if (previous.includes('\n  Give each one a DOMAIN.md')) {
-      out = out.replace(/\n  Give each one a DOMAIN\.md[^\n]*/, '\n  (How to give each folder a DOMAIN.md: as in your earlier audit.)');
+    if (previous.includes('\n  Give each one a README.md')) {
+      out = out.replace(/\n  Give each one a README\.md[^\n]*/, '\n  (How to give each folder a README.md: as in your earlier audit.)');
     }
     const scopeBlock = /\n\nBranch scope \(vs [^)]*\):\n(?:- .*\n?)+/;
     const scopeNow = out.match(scopeBlock)?.[0].trimEnd();

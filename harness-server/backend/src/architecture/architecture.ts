@@ -3,14 +3,14 @@ import path from 'node:path';
 // An app can opt into an architecture its agents follow. The only one so
 // far is Wayfinding (https://github.com/Rifazi/wayfinding-architecture):
 // every important decision is owned by exactly one domain, MAP.md indexes
-// the domains, each domain's DOMAIN.md holds its rules, and changes go
+// the domains, each domain's README.md holds its rules, and changes go
 // requirement → decision → domain → interface → consumers → segment.
 export const WAYFINDING_REPO_URL = 'https://github.com/Rifazi/wayfinding-architecture';
 
 export interface WayfindingConfig {
   kind: 'wayfinding';
   // Repo-relative folders the domains live under (each one a folder with a
-  // DOMAIN.md), e.g. ["server/src", "client/src"] for a repo with two packages.
+  // README.md), e.g. ["server/src", "client/src"] for a repo with two packages.
   srcDirs: string[];
   // A domain's one public file, the only one other domains may import. Matched
   // by stem, so "service.ts" also accepts service.js / service.tsx.
@@ -22,7 +22,7 @@ export type ArchitectureConfig = WayfindingConfig;
 export const DEFAULT_WAYFINDING: WayfindingConfig = { kind: 'wayfinding', srcDirs: ['src'], interfaceFile: 'service.ts' };
 
 export const MAP_PATH = 'MAP.md';
-export const DOMAIN_DOC = 'DOMAIN.md';
+export const DOMAIN_DOC = 'README.md';
 // Riff-generated guide to the procedure; under docs/ so search_docs indexes it.
 export const WAYFINDING_GUIDE_PATH = 'docs/wayfinding.md';
 

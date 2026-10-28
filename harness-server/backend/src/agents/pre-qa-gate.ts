@@ -167,11 +167,11 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
     // instead of sending the coder (or QA) a note about them.
     // Any domain's generated sections can go stale from this branch's edits
     // (a Consumers list changes when another domain's imports do), so every
-    // domain is regenerated, not only the ones whose DOMAIN.md the branch
+    // domain is regenerated, not only the ones whose README.md the branch
     // touched. Only generated sections are rewritten.
     const fixed = auditWayfinding(app.repoRoot, app.architecture, { regenerate: true });
     regenerated = fixed.regenerated;
-    if (regenerated.length) await commitAll(app.repoRoot, 'docs: regenerate DOMAIN.md generated sections', regenerated).catch(() => null);
+    if (regenerated.length) await commitAll(app.repoRoot, 'docs: regenerate README.md generated sections', regenerated).catch(() => null);
     const audit = auditWayfinding(app.repoRoot, app.architecture);
     const changes = await branchChanges(app.repoRoot, base, `:(glob)**/${DOMAIN_DOC}`, session.branch);
     const baseline = await baselineProblems(app, base);
@@ -184,7 +184,7 @@ export async function runPreQaGate(session: SessionRecord, app: AppConfig): Prom
     auditProblems = blockingAuditProblems(audit, scope, baseline ?? undefined);
   }
 
-  const summary = gateSummary(checks, auditProblems) + (regenerated.length ? ` (regenerated ${regenerated.length} DOMAIN.md)` : '');
+  const summary = gateSummary(checks, auditProblems) + (regenerated.length ? ` (regenerated ${regenerated.length} README.md)` : '');
   const message = gateMessage(checks, auditProblems);
   const details = gateDetails(checks, auditProblems);
   return message && details ? { status: 'fail', summary, message, details, fingerprint: gateFingerprint(checks, auditProblems), auditProblems } : { status: 'pass', summary, ...(advisory.length ? { advisory } : {}) };

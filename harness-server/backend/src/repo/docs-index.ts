@@ -152,7 +152,7 @@ export function docsSearchScope(appId: string): string {
 /**
  * Brings the search engine's copy of this app's docs up to date (cheap when
  * nothing changed). For an app that follows Wayfinding that includes MAP.md
- * and every DOMAIN.md, read fresh from the checkout each time: they live
+ * and every README.md, read fresh from the checkout each time: they live
  * beside the code, outside docs/ and its watcher, and agents edit them as
  * they work.
  */

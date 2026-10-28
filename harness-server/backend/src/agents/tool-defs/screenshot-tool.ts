@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { tool, type ModelMessage } from 'ai';
@@ -34,6 +35,26 @@ export const screenshotSchema = z.object({
       'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you. ' +
         'Remembered for the rest of this turn, so later screenshots sign in again without it.'
     ),
+  steps: z
+    .array(
+      z.object({
+        do: z.enum(['click', 'fill', 'press', 'goto', 'wait']),
+        text: z.string().optional().describe('click: the visible text or aria-label of the button, link or tab. wait: text to wait for.'),
+        selector: z.string().optional().describe('click / fill: a CSS selector, when text or label is ambiguous.'),
+        label: z.string().optional().describe('fill: the field\'s label, placeholder, aria-label or name.'),
+        value: z.string().optional().describe('fill: what to type, the option to choose in a select, or true/false for a checkbox.'),
+        key: z.string().optional().describe('press: Enter, Tab, Escape, ArrowDown, ArrowUp or Space.'),
+        path: z.string().optional().describe('goto: another path in the app.'),
+        ms: z.number().int().min(0).max(10000).optional().describe('wait: milliseconds, when there is no text to wait for.'),
+      })
+    )
+    .max(30)
+    .optional()
+    .describe(
+      'Do these in order after the page (and login) is open, before the capture: click buttons and links, fill and submit forms, open other paths. ' +
+        'Use it to reach screens that exist only after an action: the form behind an "Add" button, a detail page of a record you create with the form, a dialog, a tab. ' +
+        'The result names the URL the browser ended on, so you can open the created record\'s page later with `path`. A step that finds nothing fails the call and lists what is on the page.'
+    ),
 });
 export type ScreenshotInput = z.infer<typeof screenshotSchema>;
 
@@ -44,7 +65,9 @@ export const screenshotDescription =
   'markup. Take the desktop and phone views of each screen you assess, and dark mode if the app supports it. Costs a few seconds and a few ' +
   'thousand tokens per image, so take only the screens that matter (at most 8 a turn). Screens behind a login: pass `login` ' +
   'with the credentials you were given and the tool fills in and submits the form for you. Without credentials such screens show the login ' +
-  'page or an empty state: note that, and say you could not see the real screen.';
+  'page or an empty state: note that, and say you could not see the real screen. To reach a screen that needs clicks (a form behind a button, a record ' +
+  'that must be created first, a dialog, another tab), pass `steps`: the tool clicks, fills forms and navigates for you, then captures where it ends up ' +
+  'and reports that URL. Never ask the user to click through the app or create test data for you.';
 
 export interface ScreenshotResult {
   text: string;
@@ -90,7 +113,9 @@ async function startDevServer(repoRoot: string): Promise<DevServer> {
   const script = devScriptFor(repoRoot);
   if (!script) throw new Error('The app has no dev, start or serve script in its package.json, so there is nothing to open. Pass `url` for a server that is already running.');
   await ensureDependencies(repoRoot);
-  const proc = spawn('npm', ['run', script], { cwd: repoRoot, detached: true, env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', CI: '' } });
+  // A free port of our own, so a server already on the app's usual port (often another app) is never the one captured.
+  const port = await freePort();
+  const proc = spawn('npm', ['run', script], { cwd: repoRoot, detached: true, env: { ...process.env, PORT: String(port), BROWSER: 'none', FORCE_COLOR: '0', CI: '' } });
   return new Promise<DevServer>((resolve, reject) => {
     let output = '';
     const fail = (message: string) => {
@@ -115,6 +140,17 @@ async function startDevServer(repoRoot: string): Promise<DevServer> {
   });
 }
 
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as net.AddressInfo;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 function stopProcess(proc: ChildProcess): void {
   try {
     if (proc.pid) process.kill(-proc.pid, 'SIGTERM');
@@ -135,6 +171,8 @@ export interface ScreenshotDeps {
   repoRoot: string;
   /** Called with every capture, so a caller can keep the files (the visual review shows them to the human). */
   onCapture?: (shot: { file: string; text: string }) => void;
+  /** Lets the agent point `url` at a server that is already running. Off by default: whatever sits on a localhost port may be a different app. */
+  allowUrl?: boolean;
 }
 
 export function createScreenshotExecute(deps: ScreenshotDeps) {
@@ -147,7 +185,7 @@ export function createScreenshotExecute(deps: ScreenshotDeps) {
   };
 }
 
-function createCapture(deps: { sessionId: string; repoRoot: string }) {
+function createCapture(deps: ScreenshotDeps) {
   let taken = 0;
   let rememberedLogin: PageLogin | undefined;
   return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
@@ -156,6 +194,7 @@ function createCapture(deps: { sessionId: string; repoRoot: string }) {
     if (!chrome) throw new Error('Google Chrome (or Chromium/Edge) was not found. Install it, or set RIFF_CHROME to its executable.');
 
     let base = input.url?.trim();
+    if (base && !deps.allowUrl) throw new Error("`url` is not available here: the screenshot tool starts this app's own dev server. Call it again without `url`.");
     if (!base) {
       if (!servers.has(deps.sessionId)) servers.set(deps.sessionId, startDevServer(deps.repoRoot));
       try {
@@ -175,17 +214,20 @@ function createCapture(deps: { sessionId: string; repoRoot: string }) {
     const file = path.join(dir, `${Date.now()}-${input.viewport ?? 'desktop'}${input.dark ? '-dark' : ''}.png`);
     const login = input.login ?? rememberedLogin;
     if (input.login) rememberedLogin = input.login;
+    const steps = input.steps ?? [];
     const signedIn = login ? ', signed in' : '';
-    if (login) {
+    if (login || steps.length) {
+      let finalUrl = target;
       try {
-        await captureWithChrome({ chrome, url: target, width: view.width, height: input.height ?? view.height, dark: Boolean(input.dark), login, file });
+        ({ finalUrl } = await captureWithChrome({ chrome, url: target, width: view.width, height: input.height ?? view.height, dark: Boolean(input.dark), login, steps, file }));
       } catch (err) {
         throw new Error(err instanceof Error ? err.message : String(err));
       }
       const shot = (await fs.readFile(file)).toString('base64');
       const rel = path.relative(config.harnessRoot, file);
+      const after = steps.length ? ` after ${steps.length} step${steps.length === 1 ? '' : 's'}; the browser ended on ${finalUrl}` : '';
       return {
-        text: `${target} at ${view.width}x${input.height ?? view.height}${input.dark ? ', dark' : ''}${signedIn}. Saved to ${rel}.`,
+        text: `${target} at ${view.width}x${input.height ?? view.height}${input.dark ? ', dark' : ''}${signedIn}${after}. Saved to ${rel}.`,
         image: { data: shot, mediaType: 'image/png' },
         file: rel,
       };

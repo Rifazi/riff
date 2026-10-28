@@ -19,13 +19,13 @@ import { branchChanges } from '../../../harness-server/backend/src/repo/git';
 
 const CONFIG = { kind: 'wayfinding' as const, srcDirs: ['src'], interfaceFile: 'service.ts' };
 
-function domainDoc(name: string, opts: { parent?: string; children?: string; rules?: string; consumers?: string; extra?: string } = {}) {
+function domainDoc(name: string, opts: { parent?: string; kind?: string; rules?: string; consumers?: string; extra?: string } = {}) {
   return `# ${name}
 
+Kind: ${opts.kind ?? (opts.parent ? 'child domain' : 'domain')}
 Parent: ${opts.parent ?? 'none (top-level domain)'}
 Owns: ${name} decisions
 Owns data: none
-Child domains: ${opts.children ?? 'none'}
 Does not own: everything else
 Interface: ${name}Fn()
 Checkpoint: npm run checkpoint -- ${name}
@@ -51,9 +51,8 @@ const write = (rel: string, text: string) => {
 function seedCleanRepo() {
   write('MAP.md', '# Map\n\n| Domain | Owns | Interface |\n| --- | --- | --- |\n| pricing | prices | priceFor() |\n| invoice | layout | render() |\n');
   write(
-    'src/pricing/DOMAIN.md',
+    'src/pricing/README.md',
     domainDoc('pricing', {
-      children: 'promotions',
       consumers: 'invoice',
       rules: '- Discounts are capped at $50.\n  Enforced by: service.test.ts › "caps discount at $50"\n',
     })
@@ -61,12 +60,13 @@ function seedCleanRepo() {
   write('src/pricing/service.ts', "import { promoFor } from './promotions/service.ts'\nexport const priceFor = () => promoFor()\n");
   write('src/pricing/service.test.ts', "test('caps discount at $50', () => {})\n");
   write('src/pricing/model.ts', 'export const table = 1\n');
-  write('src/pricing/promotions/DOMAIN.md', domainDoc('promotions', { parent: 'pricing', consumers: 'pricing' }));
+  write('src/pricing/promotions/README.md', domainDoc('promotions', { parent: 'pricing', consumers: 'pricing' }));
   write('src/pricing/promotions/service.ts', 'export const promoFor = () => 0\n');
-  write('src/invoice/DOMAIN.md', domainDoc('invoice'));
+  write('src/invoice/README.md', domainDoc('invoice'));
   write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nexport const render = () => priceFor()\n");
   write('src/lib/util.ts', 'export const x = 1\n');
-  // Writes each DOMAIN.md's generated Files section.
+  write('src/index.ts', "import { render } from './invoice/service';\nimport { table } from './pricing/model';\nexport const main = () => [render(), table];\n");
+  // Writes each README.md's generated Files section.
   auditWayfinding(repo, CONFIG, { regenerate: true });
 }
 
@@ -102,7 +102,7 @@ describe('auditWayfinding', () => {
       write('src/pricing/promotions/parse.ts', parse(''));
       write('src/invoice/parse.ts', parse(''));
       expect(messages().filter((m) => m.includes('is also written in')).length).toBe(2);
-      write('src/invoice/DOMAIN.md', domainDoc('invoice', { extra: '\n## Mirrors\n- pricing/promotions: separate deploy\n' }));
+      write('src/invoice/README.md', domainDoc('invoice', { extra: '\n## Mirrors\n- pricing/promotions: separate deploy\n' }));
       expect(messages().filter((m) => m.includes('is also written in'))).toEqual([]);
     });
 
@@ -134,19 +134,19 @@ describe('auditWayfinding', () => {
 
   test('flags a rule whose test is gone, and a rule without an anchor', () => {
     write('src/pricing/service.test.ts', "test('something else', () => {})\n");
-    write('src/invoice/DOMAIN.md', domainDoc('invoice', { rules: '- Invoices show every discount line.\n' }));
+    write('src/invoice/README.md', domainDoc('invoice', { rules: '- Invoices show every discount line.\n' }));
     const found = messages();
     expect(found.some((m) => m.includes('rule anchored to a missing test: service.test.ts › "caps discount at $50"'))).toBe(true);
     expect(found.some((m) => m.includes('rule has no "Enforced by" test: Invoices show every discount line.'))).toBe(true);
   });
 
   test('flags a stale Consumers section, and regenerate rewrites it', () => {
-    write('src/pricing/DOMAIN.md', readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8').replace('- invoice', '- none'));
+    write('src/pricing/README.md', readFileSync(path.join(repo, 'src/pricing/README.md'), 'utf8').replace('- invoice', '- none'));
     expect(messages().some((m) => m.startsWith('Consumers section is stale (should be: invoice)'))).toBe(true);
 
     const fixed = auditWayfinding(repo, CONFIG, { regenerate: (doc) => doc.startsWith('src/pricing/') });
-    expect(fixed.regenerated).toEqual(['src/pricing/DOMAIN.md']);
-    expect(readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8')).toContain('<!-- generated: do not edit -->\n- invoice\n');
+    expect(fixed.regenerated).toEqual(['src/pricing/README.md']);
+    expect(readFileSync(path.join(repo, 'src/pricing/README.md'), 'utf8')).toContain('<!-- generated: do not edit -->\n- invoice\n');
     expect(messages()).toEqual([]);
   });
 
@@ -157,11 +157,12 @@ describe('auditWayfinding', () => {
     expect(found.some((m) => m.startsWith('billing is on the map but has no top-level domain folder'))).toBe(true);
   });
 
-  test('flags the wrong Parent and undeclared child domains', () => {
-    write('src/pricing/DOMAIN.md', domainDoc('pricing', { consumers: 'invoice' }));
-    write('src/pricing/promotions/DOMAIN.md', domainDoc('promotions', { consumers: 'pricing' }));
+  test('flags the wrong Parent, a leftover Child domains line and a missing Contains section', () => {
+    write('src/pricing/README.md', domainDoc('pricing', { consumers: 'invoice', extra: 'Child domains: promotions\n' }));
+    write('src/pricing/promotions/README.md', domainDoc('promotions', { consumers: 'pricing' }));
     const found = messages();
-    expect(found.some((m) => m.startsWith('Child domains lists [], folders are [promotions]'))).toBe(true);
+    expect(found.some((m) => m.startsWith('"Child domains:" is replaced by the generated Contains section'))).toBe(true);
+    expect(found.some((m) => m.includes('missing the generated Contains block'))).toBe(true);
     expect(found.some((m) => m.includes('but the folder says pricing'))).toBe(true);
   });
 
@@ -172,7 +173,7 @@ describe('auditWayfinding', () => {
     expect(formatWayfindingAudit(audit)).toContain("app/ doesn't exist yet");
   });
 
-  test('a wrong source folder is audited from the one folder that holds every DOMAIN.md', () => {
+  test('a wrong source folder is audited from the one folder that holds every README.md', () => {
     const audit = auditWayfinding(repo, { ...CONFIG, srcDirs: ['app'] });
     expect(audit.inferredSrcDir).toBe('src');
     expect(audit.domains.map((d) => d.id).sort()).toEqual(['invoice', 'pricing', 'pricing/promotions']);
@@ -181,7 +182,7 @@ describe('auditWayfinding', () => {
   });
 
   test('a wrong source folder with domains in several folders is reported, not guessed', () => {
-    write('server/src/projects/DOMAIN.md', domainDoc('projects'));
+    write('server/src/projects/README.md', domainDoc('projects'));
     const audit = auditWayfinding(repo, { ...CONFIG, srcDirs: ['app'] });
     expect(audit.inferredSrcDir).toBeUndefined();
     expect(audit.srcDirCandidates).toEqual(['server/src', 'src']);
@@ -189,15 +190,15 @@ describe('auditWayfinding', () => {
   });
 
   test('Owns data matches tables written as code', () => {
-    write('src/invoice/DOMAIN.md', domainDoc('invoice').replace('Owns data: none', 'Owns data: `invoice_headers`, `invoice_lines`'));
+    write('src/invoice/README.md', domainDoc('invoice').replace('Owns data: none', 'Owns data: `invoice_headers`, `invoice_lines`'));
     write('src/invoice/entities.ts', "@Entity('invoice_headers')\nclass A {}\n@Entity({ name: 'invoice_lines' })\nclass B {}\n");
     auditWayfinding(repo, CONFIG, { regenerate: true });
     expect(messages()).toEqual([]);
   });
 
   test('a Consumers block reformatted with blank lines is not stale', () => {
-    const doc = readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8');
-    write('src/pricing/DOMAIN.md', doc.replace('<!-- generated: do not edit -->\n- invoice\n', '<!-- generated: do not edit -->\n\n- invoice\n\n'));
+    const doc = readFileSync(path.join(repo, 'src/pricing/README.md'), 'utf8');
+    write('src/pricing/README.md', doc.replace('<!-- generated: do not edit -->\n- invoice\n', '<!-- generated: do not edit -->\n\n- invoice\n\n'));
     expect(messages()).toEqual([]);
   });
 });
@@ -206,22 +207,22 @@ describe('empty sections', () => {
   const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
 
   test('regenerate leaves out a Consumers section nothing imports, heading included', () => {
-    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
-    expect(doc('src/pricing/DOMAIN.md')).toContain('## Consumers');
+    expect(doc('src/invoice/README.md')).not.toContain('Consumers');
+    expect(doc('src/pricing/README.md')).toContain('## Consumers');
     expect(messages()).toEqual([]);
   });
 
   test('a "none" Consumers block is stale, and regenerate removes it', () => {
-    write('src/invoice/DOMAIN.md', `${doc('src/invoice/DOMAIN.md')}\n## Consumers\n<!-- generated: do not edit -->\n- none\n<!-- end generated -->\n`);
+    write('src/invoice/README.md', `${doc('src/invoice/README.md')}\n## Consumers\n<!-- generated: do not edit -->\n- none\n<!-- end generated -->\n`);
     expect(messages()).toContain('Consumers section is empty: remove it');
     auditWayfinding(repo, CONFIG, { regenerate: true });
-    expect(doc('src/invoice/DOMAIN.md')).not.toContain('Consumers');
+    expect(doc('src/invoice/README.md')).not.toContain('Consumers');
     expect(messages()).toEqual([]);
   });
 
-  test('a DOMAIN.md without Parent, Owns data, Child domains or Does not own passes', () => {
+  test('a README.md without Parent, Owns data, Child domains or Does not own passes', () => {
     write(
-      'src/invoice/DOMAIN.md',
+      'src/invoice/README.md',
       domainDoc('invoice').replace(/^(Parent|Owns data|Child domains|Does not own):.*\n/gm, '')
     );
     auditWayfinding(repo, CONFIG, { regenerate: true });
@@ -229,7 +230,7 @@ describe('empty sections', () => {
   });
 
   test('a child domain still has to name its parent', () => {
-    write('src/pricing/promotions/DOMAIN.md', domainDoc('promotions', { consumers: 'pricing' }).replace(/^Parent:.*\n/m, ''));
+    write('src/pricing/promotions/README.md', domainDoc('promotions', { consumers: 'pricing' }).replace(/^Parent:.*\n/m, ''));
     expect(messages().some((m) => m.includes('Parent is "(missing)"'))).toBe(true);
   });
 });
@@ -238,28 +239,28 @@ describe('generated Files section', () => {
   const doc = (rel: string) => readFileSync(path.join(repo, rel), 'utf8');
 
   test("lists the domain's own files with their exports, interface first, tests last, child domains left out", () => {
-    expect(doc('src/pricing/DOMAIN.md')).toContain(
+    expect(doc('src/pricing/README.md')).toContain(
       '## Files\n<!-- generated: files, do not edit -->\n' +
         '- `service.ts` (interface):\n  - `priceFor()`\n- `model.ts`: table\n- tests: `service.test.ts`\n<!-- end generated -->'
     );
-    expect(doc('src/pricing/DOMAIN.md')).not.toContain('promotions/service.ts');
+    expect(doc('src/pricing/README.md')).not.toContain('promotions/service.ts');
     // Placed before Consumers.
-    expect(doc('src/pricing/DOMAIN.md').indexOf('## Files')).toBeLessThan(doc('src/pricing/DOMAIN.md').indexOf('## Consumers'));
+    expect(doc('src/pricing/README.md').indexOf('## Files')).toBeLessThan(doc('src/pricing/README.md').indexOf('## Consumers'));
   });
 
   test('a new file or export makes it stale, and regenerate rewrites it', () => {
     write('src/invoice/layout.ts', 'export function pageSize() {}\nexport { pageSize as size }\n');
     expect(messages()).toContain('Files section is stale (a file was added, removed or changed its exports)');
     auditWayfinding(repo, CONFIG, { regenerate: true });
-    expect(doc('src/invoice/DOMAIN.md')).toContain('- `layout.ts`: pageSize, size\n');
+    expect(doc('src/invoice/README.md')).toContain('- `layout.ts`: pageSize, size\n');
     expect(messages()).toEqual([]);
   });
 
-  test('a DOMAIN.md without one is reported, and regenerate adds it', () => {
-    write('src/invoice/DOMAIN.md', domainDoc('invoice'));
+  test('a README.md without one is reported, and regenerate adds it', () => {
+    write('src/invoice/README.md', domainDoc('invoice'));
     expect(messages()).toContain('missing the generated Files block');
     auditWayfinding(repo, CONFIG, { regenerate: true });
-    expect(doc('src/invoice/DOMAIN.md')).toContain('## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface):\n  - `render()`\n');
+    expect(doc('src/invoice/README.md')).toContain('## Files\n<!-- generated: files, do not edit -->\n- `service.ts` (interface):\n  - `render()`\n');
   });
 
   test('exportedNames covers declarations, lists, aliases and anonymous defaults', () => {
@@ -274,8 +275,8 @@ describe('generated Files section', () => {
 describe('a domain without service.ts', () => {
   // A React page as a child domain: its component file is its interface.
   function seedPage() {
-    write('src/invoice/DOMAIN.md', domainDoc('invoice', { children: 'InvoicePage' }));
-    write('src/invoice/InvoicePage/DOMAIN.md', domainDoc('InvoicePage', { parent: 'invoice' }));
+    write('src/invoice/README.md', domainDoc('invoice', { children: 'InvoicePage' }));
+    write('src/invoice/InvoicePage/README.md', domainDoc('InvoicePage', { parent: 'invoice' }));
     write('src/invoice/InvoicePage/InvoicePage.tsx', "import { Row } from './Row'\nexport function InvoicePage() { return Row }\n");
     write('src/invoice/InvoicePage/Row.tsx', 'export const Row = 1\n');
     // Styles share the page's name but are never its interface.
@@ -287,7 +288,7 @@ describe('a domain without service.ts', () => {
     write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nimport { InvoicePage } from './InvoicePage/InvoicePage'\nexport const render = () => [priceFor(), InvoicePage]\n");
     auditWayfinding(repo, CONFIG, { regenerate: true });
     expect(messages()).toEqual([]);
-    expect(readFileSync(path.join(repo, 'src/invoice/InvoicePage/DOMAIN.md'), 'utf8')).toContain(
+    expect(readFileSync(path.join(repo, 'src/invoice/InvoicePage/README.md'), 'utf8')).toContain(
       '- `InvoicePage.tsx` (interface):\n  - `InvoicePage()`\n- `InvoicePage.css`\n- `Row.tsx`: Row\n'
     );
   });
@@ -308,9 +309,11 @@ describe('a domain without service.ts', () => {
 });
 
 describe('folders of code inside a domain', () => {
-  test('each one without a DOMAIN.md is listed as a child domain to be; tests and styles-only folders are not', () => {
-    write('src/invoice/Header/Header.tsx', 'export const Header = 1\n');
+  test('each one without a README.md is listed as a child domain to be; tests and styles-only folders are not', () => {
+    write('src/invoice/Header/Header.tsx', "import { Logo } from './parts/Logo';\nexport const Header = () => Logo;\n");
+    write('src/invoice/Header/Header.test.ts', "import { Header } from './Header';\ntest('renders', () => Header());\n");
     write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 1\n');
+    write('src/invoice/Header/parts/Logo.test.ts', "import { Logo } from './Logo';\ntest('logo', () => Logo);\n");
     write('src/invoice/__tests__/a.test.ts', "test('x', () => {})\n");
     write('src/invoice/assets/style.css', '.a {}\n');
     auditWayfinding(repo, CONFIG, { regenerate: true });
@@ -320,9 +323,9 @@ describe('folders of code inside a domain', () => {
       { folder: 'src/invoice/Header/parts', parent: 'invoice' },
     ]);
     expect(audit.problems).toEqual([]);
-    expect(formatWayfindingAudit(audit)).toContain('Folders of code inside a domain with no DOMAIN.md of their own');
+    expect(formatWayfindingAudit(audit)).toContain('Folders of code inside a domain with no README.md of their own');
 
-    write('src/invoice/Header/DOMAIN.md', domainDoc('Header', { parent: 'invoice' }));
+    write('src/invoice/Header/README.md', domainDoc('Header', { parent: 'invoice' }));
     expect(auditWayfinding(repo, CONFIG).undocumented).toEqual([{ folder: 'src/invoice/Header/parts', parent: 'invoice/Header' }]);
   });
 });
@@ -331,8 +334,9 @@ describe('several source folders', () => {
   const TWO = { ...CONFIG, srcDirs: ['src', 'client/src'] };
 
   test('audits the domains under every folder', () => {
-    write('client/src/editor/DOMAIN.md', domainDoc('editor'));
+    write('client/src/editor/README.md', domainDoc('editor'));
     write('client/src/editor/service.ts', 'export const open = () => 1\n');
+    write('client/src/editor/service.test.ts', "import { open } from './service';\ntest('opens', () => open());\n");
     write('MAP.md', readFileSync(path.join(repo, 'MAP.md'), 'utf8') + '| editor | editing | open() |\n');
     auditWayfinding(repo, TWO, { regenerate: true });
     const audit = auditWayfinding(repo, TWO);
@@ -347,7 +351,7 @@ describe('several source folders', () => {
   });
 
   test('names folders with domains outside the source folders', () => {
-    write('client/src/editor/DOMAIN.md', domainDoc('editor'));
+    write('client/src/editor/README.md', domainDoc('editor'));
     const audit = auditWayfinding(repo, CONFIG);
     expect(audit.srcDirCandidates).toEqual(['client/src']);
     expect(formatWayfindingAudit(audit)).toContain('outside the source folders, under client/src/, get no checks');
@@ -361,7 +365,7 @@ describe('several source folders', () => {
   });
 
   test('the same domain name under two folders is a problem', () => {
-    write('client/src/invoice/DOMAIN.md', domainDoc('invoice'));
+    write('client/src/invoice/README.md', domainDoc('invoice'));
     expect(auditWayfinding(repo, TWO).problems.map((p) => p.message)).toContain(
       'invoice is also a domain at src/invoice; domain names must be unique across source folders'
     );
@@ -387,8 +391,8 @@ describe('parsing', () => {
     ]);
   });
 
-  test('map rows accept a domain name linked to its DOMAIN.md', () => {
-    expect(parseMapRows('| Domain | Owns |\n| --- | --- |\n| [pricing](src/pricing/DOMAIN.md) | prices |\n| [`invoice`](x) | layout |\n')).toEqual([
+  test('map rows accept a domain name linked to its README.md', () => {
+    expect(parseMapRows('| Domain | Owns |\n| --- | --- |\n| [pricing](src/pricing/README.md) | prices |\n| [`invoice`](x) | layout |\n')).toEqual([
       { name: 'pricing', owns: 'prices' },
       { name: 'invoice', owns: 'layout' },
     ]);
@@ -432,7 +436,7 @@ describe('parseArchitectureConfig', () => {
 describe('branch scope', () => {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
 
-  test('changed code in a folder inside a domain with no DOMAIN.md is flagged as a child domain to create', async () => {
+  test('changed code in a folder inside a domain with no README.md is flagged as a child domain to create', async () => {
     write('src/invoice/Header/Header.tsx', 'export const Header = 1\n');
     write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 1\n');
     git('init', '-q', '-b', 'main');
@@ -441,7 +445,7 @@ describe('branch scope', () => {
     git('checkout', '-qb', 'feature');
     write('src/invoice/Header/parts/Logo.tsx', 'export const Logo = 2\n');
 
-    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const changes = await branchChanges(repo, 'main', ':(glob)**/README.md');
     const audit = auditWayfinding(repo, CONFIG);
     const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
     // The outermost folder first: its subfolders become its children once it's a domain.
@@ -455,31 +459,31 @@ describe('branch scope', () => {
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
     git('checkout', '-qb', 'feature');
-    write('src/pricing/DOMAIN.md', readFileSync(path.join(repo, 'src/pricing/DOMAIN.md'), 'utf8').replace('Owns: pricing decisions', 'Owns: pricing decisions; loyalty'));
+    write('src/pricing/README.md', readFileSync(path.join(repo, 'src/pricing/README.md'), 'utf8').replace('Owns: pricing decisions', 'Owns: pricing decisions; loyalty'));
     write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nexport const render = () => priceFor() + 1\n");
-    write('src/tax/DOMAIN.md', domainDoc('tax'));
+    write('src/tax/README.md', domainDoc('tax'));
     write('package.json', '{}\n');
 
-    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const changes = await branchChanges(repo, 'main', ':(glob)**/README.md');
     expect(changes).not.toBeNull();
     const audit = auditWayfinding(repo, CONFIG);
     const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
 
     expect(scope.byDomain).toEqual([
       { domain: 'invoice', files: ['src/invoice/service.ts'] },
-      { domain: 'pricing', files: ['src/pricing/DOMAIN.md'] },
-      { domain: 'tax', files: ['src/tax/DOMAIN.md'] },
+      { domain: 'pricing', files: ['src/pricing/README.md'] },
+      { domain: 'tax', files: ['src/tax/README.md'] },
     ]);
     expect(scope.outside).toEqual(['package.json']);
-    expect(scope.ownershipEdits).toEqual([{ file: 'src/pricing/DOMAIN.md', fields: ['Owns'] }]);
-    expect(scope.structural).toEqual([{ file: 'src/tax/DOMAIN.md', change: 'added' }]);
+    expect(scope.ownershipEdits).toEqual([{ file: 'src/pricing/README.md', fields: ['Owns'] }]);
+    expect(scope.structural).toEqual([{ file: 'src/tax/README.md', change: 'added' }]);
 
     const report = formatWayfindingAudit(audit, scope);
     expect(report).toContain('top-level domain tax is not on the map');
-    expect(report).toContain('ownership change: src/pricing/DOMAIN.md (Owns); must be its own segment');
+    expect(report).toContain('ownership change: src/pricing/README.md (Owns); must be its own segment');
   });
 
-  test('changed code in a folder with no DOMAIN.md is a problem; files straight under the source folder are not', async () => {
+  test('changed code in a folder with no README.md is a problem; files straight under the source folder are not', async () => {
     git('init', '-q', '-b', 'main');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A');
     git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
@@ -488,28 +492,28 @@ describe('branch scope', () => {
     write('src/lib/more/helper.ts', 'export const y = 1\n');
     write('src/main.ts', 'export {}\n');
 
-    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const changes = await branchChanges(repo, 'main', ':(glob)**/README.md');
     const audit = auditWayfinding(repo, CONFIG);
     const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
     expect(scope.offMap).toEqual([{ folder: 'src/lib', parent: null, files: ['src/lib/more/helper.ts', 'src/lib/util.ts'] }]);
     const report = formatWayfindingAudit(audit, scope);
-    expect(report).toContain('✗ This branch changed code in 1 folder(s) with no DOMAIN.md:\n- src/lib/: top-level domain, add it to MAP.md (');
+    expect(report).toContain('✗ This branch changed code in 1 folder(s) with no README.md:\n- src/lib/: top-level domain, add it to MAP.md (');
     expect(report).not.toContain('✓ No problems');
 
-    // Once the folder has a DOMAIN.md it's a domain, and its own folder of code is next: a child domain.
-    write('src/lib/DOMAIN.md', domainDoc('lib'));
-    const after = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    // Once the folder has a README.md it's a domain, and its own folder of code is next: a child domain.
+    write('src/lib/README.md', domainDoc('lib'));
+    const after = await branchChanges(repo, 'main', ':(glob)**/README.md');
     expect(branchScope(auditWayfinding(repo, CONFIG), 'main', after!.files, after!.docDiff).offMap).toEqual([
       { folder: 'src/lib/more', parent: 'lib', files: ['src/lib/more/helper.ts'] },
     ]);
 
-    write('src/lib/more/DOMAIN.md', domainDoc('more', { parent: 'lib' }));
-    const done = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    write('src/lib/more/README.md', domainDoc('more', { parent: 'lib' }));
+    const done = await branchChanges(repo, 'main', ':(glob)**/README.md');
     expect(branchScope(auditWayfinding(repo, CONFIG), 'main', done!.files, done!.docDiff).offMap).toEqual([]);
   });
 
   test('a branch adding a code file loose in the source folder is flagged, an entry point is not', async () => {
-    write('src/lib/DOMAIN.md', domainDoc('lib'));
+    write('src/lib/README.md', domainDoc('lib'));
     write('src/lib/service.ts', 'export const x = 1\n');
     auditWayfinding(repo, CONFIG, { regenerate: true });
     git('init', '-q', '-b', 'main');
@@ -519,10 +523,159 @@ describe('branch scope', () => {
     write('src/index.ts', 'export {}\n');
     write('src/helpers.ts', 'export const h = 1\n');
 
-    const changes = await branchChanges(repo, 'main', ':(glob)**/DOMAIN.md');
+    const changes = await branchChanges(repo, 'main', ':(glob)**/README.md');
     const audit = auditWayfinding(repo, CONFIG);
     const scope = branchScope(audit, 'main', changes!.files, changes!.docDiff);
     expect(scope.looseFiles).toEqual(['src/helpers.ts']);
     expect(formatWayfindingAudit(audit, scope)).toContain('loose in a source folder: src/helpers.ts');
+  });
+});
+
+describe('Wayfinding v1.2 checks', () => {
+  const only = (needle: string) => messages().filter((m) => m.includes(needle));
+  const regenerate = () => auditWayfinding(repo, CONFIG, { regenerate: true });
+
+  test('every README.md needs a valid Kind line', () => {
+    write('src/invoice/README.md', domainDoc('invoice').replace(/^Kind:.*\n/m, ''));
+    expect(only('missing "Kind:"').length).toBe(1);
+    write('src/invoice/README.md', domainDoc('invoice').replace('Kind: domain', 'Kind: folder'));
+    expect(only('is not one of domain, child domain, junction, adapter, shared').length).toBe(1);
+  });
+
+  test('a README.md outside the source folders without a Kind line is not a domain candidate', () => {
+    write('docs/README.md', '# Docs\n\nHow to read these.\n');
+    write('packages/tool/README.md', '# tool\n');
+    expect(auditWayfinding(repo, CONFIG).srcDirCandidates).toBeUndefined();
+  });
+
+  test('the old DOMAIN.md name is reported', () => {
+    write('src/invoice/DOMAIN.md', domainDoc('invoice'));
+    expect(only('DOMAIN.md is now README.md').length).toBe(1);
+  });
+
+  describe('no comments in code', () => {
+    test('flags a comment once, however many times it appears, and names it', () => {
+      write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\n// cents\nexport const render = () => priceFor() // cents\n");
+      const found = only('comment "cents"');
+      expect(found.length).toBe(1);
+      expect(found[0]).toContain('src/invoice/service.ts');
+    });
+
+    test('lint and compiler directives, license headers and generated markers are allowed', () => {
+      write(
+        'src/invoice/service.ts',
+        "/* Copyright 2026 Acme */\n// eslint-disable-next-line no-console\n// @ts-expect-error legacy\nimport { priceFor } from '../pricing/service'\n// generated: do not edit\nexport const render = () => priceFor()\n"
+      );
+      expect(only('comment "')).toEqual([]);
+    });
+
+    test('slashes inside strings, regexes, templates and JSX text are not comments', () => {
+      write(
+        'src/invoice/service.ts',
+        "import { priceFor } from '../pricing/service'\nexport const url = 'http://a.b//c'\nexport const re = /a\\/\\/b/\nexport const t = `x // y ${priceFor()}`\nexport const render = () => priceFor()\n"
+      );
+      write('src/invoice/View.tsx', 'export const View = () => <p>see // not a comment</p>\n');
+      write('src/invoice/View.test.tsx', "import { View } from './View';\ntest('v', () => View());\n");
+      expect(only('comment "')).toEqual([]);
+    });
+  });
+
+  describe('dead code', () => {
+    test('flags an export nothing uses, not one a test or another file uses', () => {
+      write('src/invoice/helpers.ts', 'export const used = 1;\nexport const unused = 2;\n');
+      write('src/invoice/helpers.test.ts', "import { used } from './helpers';\ntest('u', () => used);\n");
+      const found = only('is exported but nothing uses it');
+      expect(found.some((m) => m.includes('`unused`'))).toBe(true);
+      expect(found.some((m) => m.includes('`used`'))).toBe(false);
+    });
+
+    test('an export its own file also uses is not dead, and a consumer named under Hidden behavior keeps one', () => {
+      write('src/invoice/helpers.ts', 'export const inner = 1;\nexport const total = inner + 1;\nexport const external = 3;\n');
+      write('src/invoice/helpers.test.ts', "import { total } from './helpers';\ntest('t', () => total);\n");
+      write('src/invoice/README.md', domainDoc('invoice', { extra: '\n## Hidden behavior\n- billing-sync (another repo) calls external().\n' }));
+      expect(only('is exported but nothing uses it')).toEqual([]);
+    });
+  });
+
+  describe('adapters, shared code and external systems', () => {
+    beforeEach(() => {
+      write('src/pricing/stripe/README.md', domainDoc('stripe', { parent: 'pricing', kind: 'adapter' }));
+      write('src/pricing/stripe/service.ts', "import Stripe from 'stripe';\nexport const charge = () => new Stripe('k');\n");
+      write('src/pricing/service.ts', "import { promoFor } from './promotions/service.ts'\nimport { charge } from './stripe/service'\nexport const priceFor = () => promoFor() + charge()\n");
+      regenerate();
+    });
+
+    test('a domain\'s public file may call its adapter', () => {
+      expect(messages().filter((m) => m.includes('an adapter'))).toEqual([]);
+    });
+
+    test('another file of the domain, or another domain, may not', () => {
+      write('src/pricing/model.ts', "import { charge } from './stripe/service'\nexport const table = charge()\n");
+      write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nimport { charge } from '../pricing/stripe/service'\nexport const render = () => priceFor() + charge()\n");
+      const found = only('an adapter: only pricing');
+      expect(found.length).toBe(2);
+    });
+
+    test('an inbound adapter may call its domain\'s public file but nothing else', () => {
+      write('src/pricing/routes/README.md', domainDoc('routes', { parent: 'pricing', kind: 'adapter' }));
+      write('src/pricing/routes/service.ts', "import { priceFor } from '../service'\nexport const route = () => priceFor()\n");
+      write('src/index.ts', "import { render } from './invoice/service';\nimport { table } from './pricing/model';\nimport { route } from './pricing/routes/service';\nexport const main = () => [render(), table, route];\n");
+      expect(messages().filter((m) => m.includes('inbound adapter') || m.includes('may not depend on its parent'))).toEqual([]);
+      write('src/pricing/routes/service.ts', "import { priceFor } from '../service'\nimport { render } from '../../invoice/service'\nexport const route = () => priceFor() + render()\n");
+      expect(only('(inbound adapter pricing/routes) imports invoice').length).toBe(1);
+    });
+
+    test('shared code imports nothing from its siblings', () => {
+      write('src/pricing/shared/README.md', domainDoc('shared', { parent: 'pricing', kind: 'shared' }));
+      write('src/pricing/shared/round.ts', "import { promoFor } from '../promotions/service'\nexport const round = () => promoFor()\n");
+      write('src/pricing/service.ts', "import { promoFor } from './promotions/service.ts'\nimport { charge } from './stripe/service'\nimport { round } from './shared/round'\nexport const priceFor = () => promoFor() + charge() + round()\n");
+      expect(only('shared code) imports pricing/promotions, its sibling').length).toBe(1);
+    });
+
+    test('a top-level shared folder must be on the map', () => {
+      write('src/shared/README.md', domainDoc('shared', { kind: 'shared' }));
+      write('src/shared/round.ts', 'export const round = () => 1\n');
+      write('src/invoice/service.ts', "import { priceFor } from '../pricing/service'\nimport { round } from '../shared/round'\nexport const render = () => priceFor() + round()\n");
+      expect(messages().some((m) => m.includes('top-level shared folder shared is not declared'))).toBe(true);
+      write('MAP.md', readFileSync(path.join(repo, 'MAP.md'), 'utf8') + '| shared | helpers no domain can own | round() |\n');
+      expect(messages().some((m) => m.includes('top-level shared folder'))).toBe(false);
+    });
+
+    test('an external system\'s client package is imported only by its adapter', () => {
+      write('MAP.md', readFileSync(path.join(repo, 'MAP.md'), 'utf8') + '\n## External systems\n- Stripe: pricing/stripe\n');
+      expect(only('the client of Stripe')).toEqual([]);
+      write('src/invoice/service.ts', "import Stripe from 'stripe';\nimport { priceFor } from '../pricing/service'\nexport const render = () => priceFor() + new Stripe('k').toString();\n");
+      const found = only('the client of Stripe');
+      expect(found.length).toBe(1);
+      expect(found[0]).toContain('src/invoice/service.ts');
+    });
+
+    test('an adapter with no domain above it is flagged', () => {
+      write('src/gateway/README.md', domainDoc('gateway', { kind: 'adapter' }));
+      expect(only('is an adapter with no domain above it').length).toBe(1);
+    });
+  });
+
+  describe('Contains section', () => {
+    test('lists children with their kinds, and is regenerated', () => {
+      write('src/pricing/stripe/README.md', domainDoc('stripe', { parent: 'pricing', kind: 'adapter' }));
+      write('src/pricing/stripe/service.ts', 'export const charge = () => 1;\n');
+      write('src/pricing/service.ts', "import { promoFor } from './promotions/service.ts'\nimport { charge } from './stripe/service'\nexport const priceFor = () => promoFor() + charge()\n");
+      expect(messages().some((m) => m.includes('missing the generated Contains block') || m.includes('Contains section is stale'))).toBe(true);
+      regenerate();
+      const doc = readFileSync(path.join(repo, 'src/pricing/README.md'), 'utf8');
+      expect(doc).toContain('- promotions (child domain)');
+      expect(doc).toContain('- stripe (adapter)');
+      expect(messages()).toEqual([]);
+    });
+  });
+
+  test('a README.md that has grown long is flagged for QA, not failed', () => {
+    const rules = Array.from({ length: 90 }, (_, i) => `- Note ${i} for later.\n`).join('');
+    write('src/invoice/README.md', domainDoc('invoice', { extra: `\n## Hidden behavior\n${rules}` }));
+    const audit = auditWayfinding(repo, CONFIG);
+    expect(audit.advisories?.some((a) => a.includes('src/invoice/README.md') && a.includes('lines written by hand'))).toBe(true);
+    expect(audit.problems.map((p) => p.message).some((m) => m.includes('lines written by hand'))).toBe(false);
+    expect(formatWayfindingAudit(audit)).toContain('For QA to review');
   });
 });
