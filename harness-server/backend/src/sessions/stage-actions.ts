@@ -155,7 +155,7 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
     });
   }
   if (visual.status === 'awaiting-human') {
-    throw new StageActionError('The screenshots are ready for your approval. Review them on the Coding tab to start QA.', 409, { code: 'visual_review_pending' });
+    throw new StageActionError('The screenshots are ready for your approval. Approve them on the Coding tab, then approve the diff to start QA.', 409, { code: 'visual_review_pending' });
   }
   if ((approvalEpoch.get(session.id) ?? 0) !== epoch) {
     throw new StageActionError('The session was sent back to coding while the visual review ran, so it was not sent to QA.', 409);
@@ -181,12 +181,11 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
   });
 }
 
-/** The human signs off the screenshots the UI/UX agent passed, and QA starts. */
+/** The human signs off the screenshots the UI/UX agent passed. Starting QA is the diff approval's job. */
 export async function approveVisualReview(session: SessionRecord): Promise<SessionRecord> {
   const review = session.visualReview;
   if (review?.status !== 'awaiting-human') throw new StageActionError('there are no screenshots waiting for approval');
-  const approved = await updateSession(session.id, { visualReview: { ...review, status: 'approved', approvedAt: new Date().toISOString() } });
-  return approveCoding(approved);
+  return updateSession(session.id, { visualReview: { ...review, status: 'approved', approvedAt: new Date().toISOString() } });
 }
 
 /** The human wants changes: returns the message that sends the coding lead back to fix them. */
