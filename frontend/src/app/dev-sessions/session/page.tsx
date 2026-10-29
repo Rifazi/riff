@@ -40,6 +40,15 @@ function SessionView() {
 
   useWindowTitle(session?.appName);
 
+  // A split parent stays at stage 'split'; it is complete once every part is done.
+  const isSplitParent = session?.stage === 'split' && session.splitInto.length > 0;
+  const { data: roadmap } = useQuery({
+    queryKey: ['roadmap', session?.id, session?.stage],
+    queryFn: () => api.getRoadmap(session!.id),
+    enabled: isSplitParent,
+  });
+  const splitComplete = isSplitParent && Boolean(roadmap) && roadmap!.parts.every((p) => p.stage === 'done');
+
   // When Bridget approves a stage, follow her to the next one, as long as
   // the human was watching the stage she just finished.
   const router = useRouter();
@@ -81,14 +90,14 @@ function SessionView() {
             variant={
               session.stage === 'abandoned'
                 ? 'destructive'
-                : session.stage === 'done'
+                : session.stage === 'done' || splitComplete
                   ? 'success'
                   : session.stage === 'split'
                     ? 'secondary'
                     : 'info'
             }
           >
-            {STAGE_LABEL[session.stage] ?? session.stage}
+            {splitComplete ? STAGE_LABEL.done : (STAGE_LABEL[session.stage] ?? session.stage)}
           </Badge>
           {session.sourceMeeting && (
             <Link

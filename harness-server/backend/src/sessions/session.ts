@@ -78,7 +78,7 @@ export interface HelperRunStats {
 // state/ (gitignored — meeting content is private), not in artifacts/.
 export interface SessionMeetingSource {
   /** "journal" when the source is a Riff journal (overview + notes from many meetings); absent = one meeting. */
-  kind?: 'meeting' | 'journal';
+  kind?: 'meeting' | 'journal' | 'suggestion';
   /** The meeting id, or the journal id when kind is "journal". */
   meetingId: string;
   meetingTitle: string;

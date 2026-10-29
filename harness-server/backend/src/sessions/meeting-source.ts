@@ -8,7 +8,7 @@ const MAX_SOURCE_CHARS = 200_000;
 
 export interface MeetingSourceInput {
   /** "journal": `transcript` holds the journal's notes and excerpts, `summary` its overview. */
-  kind?: 'meeting' | 'journal';
+  kind?: 'meeting' | 'journal' | 'suggestion';
   meetingId: string;
   meetingTitle: string;
   meetingDate?: string | null;
@@ -19,7 +19,7 @@ export interface MeetingSourceInput {
 export function validateMeetingSourceInput(input: unknown): string | null {
   if (!input || typeof input !== 'object') return 'source must be an object';
   const s = input as Record<string, unknown>;
-  if (s.kind != null && s.kind !== 'meeting' && s.kind !== 'journal') return 'source.kind must be "meeting" or "journal"';
+  if (s.kind != null && s.kind !== 'meeting' && s.kind !== 'journal' && s.kind !== 'suggestion') return 'source.kind must be "meeting", "journal" or "suggestion"';
   if (typeof s.meetingId !== 'string' || !s.meetingId.trim()) return 'source.meetingId is required';
   if (typeof s.meetingTitle !== 'string') return 'source.meetingTitle is required';
   if (typeof s.transcript !== 'string' || !s.transcript.trim()) return 'source.transcript is empty';
@@ -32,8 +32,11 @@ export async function writeMeetingSource(sessionId: string, input: MeetingSource
   const filePath = path.join(config.meetingSourcesDir, `${sessionId}.md`);
   const summary = input.summary?.trim() || null;
   const journal = input.kind === 'journal';
+  const suggestion = input.kind === 'suggestion';
 
-  const parts = journal
+  const parts = suggestion
+    ? [`# Suggestion from Bridget's retrospective: ${input.meetingTitle}`, `## Detail\n\n${input.transcript.trim()}`]
+    : journal
     ? [
         `# Journal: ${input.meetingTitle}`,
         input.meetingDate ? `Covers: ${input.meetingDate}` : null,
@@ -52,6 +55,7 @@ export async function writeMeetingSource(sessionId: string, input: MeetingSource
 
   return {
     ...(journal ? { kind: 'journal' as const } : {}),
+    ...(suggestion ? { kind: 'suggestion' as const } : {}),
     meetingId: input.meetingId,
     meetingTitle: input.meetingTitle,
     meetingDate: input.meetingDate ?? null,
@@ -66,7 +70,7 @@ export async function readMeetingSourceAttachment(source: SessionMeetingSource):
     const omitted = text.length - MAX_SOURCE_CHARS;
     text = `${text.slice(0, MAX_SOURCE_CHARS)}\n\n[... truncated, ${omitted.toLocaleString()} more characters omitted ...]`;
   }
-  const prefix = source.kind === 'journal' ? 'journal' : 'meeting-transcript';
+  const prefix = source.kind === 'journal' ? 'journal' : source.kind === 'suggestion' ? 'suggestion' : 'meeting-transcript';
   return { name: `${prefix}-${source.meetingTitle || source.meetingId}.md`, text };
 }
 

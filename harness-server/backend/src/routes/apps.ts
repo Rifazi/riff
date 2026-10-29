@@ -7,7 +7,7 @@ import { removeAllReferenceDocs } from '../sessions/reference-docs.js';
 import { cachedContext, forgetAppContext } from '../context/app-context.js';
 import { ROLES, isRole, type Role } from '../settings/settings.js';
 import { changeDesignMemory, listDesignMemory } from '../themes/design-memory.js';
-import { deleteLesson, listLessons, listRetrospectives, listTrackedSuggestions, setLessonStatus, updateSuggestionStatus } from '../retrospective/store.js';
+import { applySuggestions, deleteLesson, listLessons, listRetrospectives, listTrackedSuggestions, setLessonStatus, updateSuggestionStatus } from '../retrospective/store.js';
 import { lessonVerdict } from '../retrospective/core.js';
 import { suggestionVerdict, type SuggestionStatus } from '../retrospective/suggestion-tracker.js';
 import { getPromptOverridesForApp, setPromptOverride } from '../settings/prompts-store.js';
@@ -20,6 +20,7 @@ import { setupArchitecture, type ArchitectureSetupResult } from '../architecture
 import { auditWayfinding, formatWayfindingAudit } from '../architecture/wayfinding-audit.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { config } from '../config.js';
 
 async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
   return {
@@ -197,6 +198,26 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
     const status = request.body?.status as SuggestionStatus | undefined;
     if (!status || !['open', 'done', 'dismissed', 'muted'].includes(status)) return reply.code(400).send({ error: 'status must be open, done, dismissed or muted' });
     return updateSuggestionStatus(request.params.id, request.params.key, status).map((t) => ({ ...t, verdict: suggestionVerdict(t) }));
+  });
+
+  app.post<{ Params: { id: string }; Body: { keys?: string[] } }>('/api/apps/:id/suggestions/apply', async (request, reply) => {
+    if (!(await getApp(request.params.id).catch(() => null))) return reply.code(404).send({ error: 'app not found' });
+    const keys = request.body?.keys;
+    if (!Array.isArray(keys) || keys.length === 0 || keys.some((k) => typeof k !== 'string')) return reply.code(400).send({ error: 'keys must be a non-empty list of suggestion keys' });
+    const { applied } = applySuggestions(request.params.id, keys);
+    return { applied };
+  });
+
+  // The app a "pipeline" suggestion is worked on in: this Riff checkout, added to the apps on first use.
+  app.post('/api/apps/riff-self', async (_request, reply) => {
+    const repoRoot = path.resolve(config.harnessRoot, '..');
+    const existing = (await listApps()).find((a) => path.resolve(a.repoRoot) === repoRoot);
+    if (existing) return existing;
+    try {
+      return (await createApp({ name: 'Riff', repoRoot })).app;
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.get<{ Params: { id: string } }>('/api/apps/:id/retrospectives', async (request, reply) => {

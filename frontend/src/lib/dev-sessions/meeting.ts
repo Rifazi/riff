@@ -53,6 +53,7 @@ export async function buildMeetingSource(input: {
 export function meetingKickoffMessage(session: SessionRecord): string {
   const source = session.sourceMeeting;
   if (source?.kind === 'journal') return journalKickoffMessage(session);
+  if (source?.kind === 'suggestion') return suggestionKickoffMessage(session);
   const what = source?.includesSummary ? 'transcript and AI summary' : 'transcript';
   const title = source?.meetingTitle ? `"${source.meetingTitle}"` : 'a recorded meeting';
   const when = source?.meetingDate ? ` (${source.meetingDate})` : '';
@@ -64,7 +65,18 @@ export function meetingKickoffMessage(session: SessionRecord): string {
     '3. Ask me about whatever is ambiguous, contradictory or missing — especially acceptance criteria and non-goals.',
     '4. Then write the requirements document — or, if the meeting really covered several separate features, propose splitting them into separate sessions.',
     '',
-    'The transcript is automatic speech-to-text without speaker labels, so names and technical terms may be mis-transcribed — confirm anything important rather than guessing. Cite the meeting in the document\'s Links section.',
+    "The transcript is automatic speech-to-text without speaker labels, so names and technical terms may be mis-transcribed — confirm anything important rather than guessing. Cite the meeting in the document's Links section.",
+  ].join('\n');
+}
+
+/** Opening message for a session started from one of Bridget's retrospective suggestions. */
+function suggestionKickoffMessage(session: SessionRecord): string {
+  return [
+    `I've attached a suggestion for improving Riff's own dev-session pipeline, raised in Bridget's retrospectives: "${session.sourceMeeting?.meetingTitle}". Please turn it into requirements for this repo:`,
+    '',
+    '1. Find the code that implements the behaviour it describes (agents, gates, prompts, retrospective/) and say what would change.',
+    '2. Ask me about anything ambiguous, especially what counts as done and what must not change.',
+    '3. Then write the requirements document, with acceptance criteria and a test for each.',
   ].join('\n');
 }
 

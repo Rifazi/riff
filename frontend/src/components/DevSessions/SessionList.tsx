@@ -50,14 +50,23 @@ function savePrefs(prefs: Prefs) {
   }
 }
 
-function statusOf(session: SessionRecord): Exclude<StatusFilter, 'all'> {
-  if (session.stage === 'done') return 'done';
+// A split feature's parent stays at stage 'split'; it is complete once every part is done.
+function splitComplete(session: SessionRecord, sessionsById: Map<string, SessionRecord>) {
+  return (
+    session.stage === 'split' &&
+    session.splitInto.length > 0 &&
+    session.splitInto.every((id) => sessionsById.get(id)?.stage === 'done')
+  );
+}
+
+function statusOf(session: SessionRecord, sessionsById: Map<string, SessionRecord>): Exclude<StatusFilter, 'all'> {
+  if (session.stage === 'done' || splitComplete(session, sessionsById)) return 'done';
   if (session.stage === 'abandoned') return 'rejected';
   return 'active';
 }
 
-function stageTone(session: SessionRecord) {
-  if (session.stage === 'done') return 'success' as const;
+function stageTone(session: SessionRecord, complete: boolean) {
+  if (session.stage === 'done' || complete) return 'success' as const;
   if (session.stage === 'abandoned') return 'destructive' as const;
   if (session.stage === 'split') return 'secondary' as const;
   if (session.stage.endsWith('approved') || session.stage === 'coding-review' || session.stage === 'qa-reviewed')
@@ -116,17 +125,17 @@ export function SessionList({
     for (const s of sessions) {
       if (appFilter !== 'all' && s.appId !== appFilter) continue;
       if (!matches(s, query)) continue;
-      c[statusOf(s)]++;
+      c[statusOf(s, sessionsById)]++;
       c.all++;
     }
     return c;
-  }, [sessions, appFilter, query]);
+  }, [sessions, sessionsById, appFilter, query]);
 
   const groups = useMemo(() => {
     const byApp = new Map<string, { appId: string; appName: string; sessions: SessionRecord[] }>();
     for (const s of sessions) {
       if (appFilter !== 'all' && s.appId !== appFilter) continue;
-      if (prefs.status !== 'all' && statusOf(s) !== prefs.status) continue;
+      if (prefs.status !== 'all' && statusOf(s, sessionsById) !== prefs.status) continue;
       if (!matches(s, query)) continue;
       const group = byApp.get(s.appId) ?? { appId: s.appId, appName: s.appName, sessions: [] };
       group.sessions.push(s);
@@ -248,6 +257,7 @@ function SessionRow({
   onReopen: (id: string) => void;
   onDelete: (session: SessionRecord) => void;
 }) {
+  const complete = splitComplete(session, sessionsById);
   const shipped = session.splitInto.filter((id) => sessionsById.get(id)?.stage === 'done').length;
   const splitParent = session.splitFrom ? sessionsById.get(session.splitFrom.sessionId) : undefined;
   const partIndex = splitParent ? splitParent.splitInto.indexOf(session.id) : -1;
@@ -300,7 +310,7 @@ function SessionRow({
       </div>
       {/* One footer row on a phone (stage + actions); on desktop `contents` leaves them inline in the row. */}
       <div className="flex items-center justify-between gap-2 md:contents">
-      <Badge variant={stageTone(session)}>{STAGE_LABEL[session.stage] ?? session.stage}</Badge>
+      <Badge variant={stageTone(session, complete)}>{complete ? STAGE_LABEL.done : (STAGE_LABEL[session.stage] ?? session.stage)}</Badge>
       <div className="flex items-center gap-1">
         {session.stage === 'abandoned' && (
           <Button

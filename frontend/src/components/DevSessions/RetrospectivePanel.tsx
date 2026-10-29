@@ -1,10 +1,13 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { GraduationCap, Loader2, RotateCcw } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/dev-sessions/api';
+import { sessionHref } from '@/lib/dev-sessions/stage';
 import type { AppLesson, SuggestionStatus } from '@/lib/dev-sessions/types';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ErrorText } from './PageShell';
@@ -14,7 +17,15 @@ import { ErrorText } from './PageShell';
  * why QA sent it back, the lessons that now go into every agent's briefing for
  * this app (each can be turned off), and suggestions for Riff itself.
  */
-export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: string; appId: string; version: string }) {
+export function RetrospectivePanel({
+  sessionId,
+  appId,
+  version,
+}: {
+  sessionId: string;
+  appId: string;
+  version: string;
+}) {
   const client = useQueryClient();
   const retro = useQuery({
     queryKey: ['retrospective', sessionId, version],
@@ -40,6 +51,41 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
     onSuccess: () => void client.invalidateQueries({ queryKey: ['retrospective', sessionId] }),
   });
 
+  const router = useRouter();
+  const implement = useMutation({
+    mutationFn: async (s: { key: string; title: string; detail: string }) => {
+      const riff = await api.getRiffApp();
+      const session = await api.createSession({
+        title: `Riff: ${s.title}`.slice(0, 120),
+        appId: riff.id,
+        source: {
+          kind: 'suggestion',
+          meetingId: `suggestion:${s.key}`,
+          meetingTitle: s.title,
+          transcript: s.detail || s.title,
+        },
+      });
+      void api.setSuggestionStatus(appId, s.key, 'done');
+      return session;
+    },
+    onSuccess: (session) => router.push(sessionHref(session.id, 'requirements')),
+  });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const apply = useMutation({
+    mutationFn: (keys: string[]) => api.applySuggestions(appId, keys),
+    onSuccess: () => {
+      setPicked(new Set());
+      void client.invalidateQueries({ queryKey: ['retrospective', sessionId] });
+      void client.invalidateQueries({ queryKey: ['app-lessons', appId] });
+    },
+  });
+  const togglePick = (key: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
   const r = retro.data?.retrospective;
   const running = rerun.isPending || Boolean(retro.data?.running);
   if (!r) {
@@ -47,7 +93,8 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
       <div className="mt-3 text-xs text-muted-foreground">
         {running ? (
           <div className="flex items-center gap-2">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Bridget is looking back at how QA went… this takes about a minute.
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Bridget is looking back at how QA went… this takes about a
+            minute.
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -84,7 +131,11 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
                     {k.replace(/-/g, ' ')} · {n}
                   </Badge>
                 ))}
-                {r.facts.unchangedResends.length > 0 && <Badge variant="outline">send-back changed nothing · pass {r.facts.unchangedResends.join(', ')}</Badge>}
+                {r.facts.unchangedResends.length > 0 && (
+                  <Badge variant="outline">
+                    send-back changed nothing · pass {r.facts.unchangedResends.join(', ')}
+                  </Badge>
+                )}
               </div>
             </>
           )}
@@ -100,7 +151,9 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
                     <li key={l.id} className="flex items-start gap-2">
                       <span className={off ? 'text-muted-foreground line-through' : ''}>
                         {l.text}
-                        {live && live.seen > 1 && <span className="text-muted-foreground"> (seen in {live.seen} sessions)</span>}
+                        {live && live.seen > 1 && (
+                          <span className="text-muted-foreground"> (seen in {live.seen} sessions)</span>
+                        )}
                         {live && <EffectBadge lesson={live} />}
                       </span>
                       {live && (
@@ -118,7 +171,9 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
                   );
                 })}
               </ul>
-              <div className="mt-1 text-xs text-muted-foreground">Active lessons are in the plan, coding and QA briefings of this app’s next sessions.</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Active lessons are in the plan, coding and QA briefings of this app’s next sessions.
+              </div>
             </div>
           )}
 
@@ -139,31 +194,85 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
 
           {r.suggestions.length > 0 && (
             <div>
-              <div className="font-medium">Suggestions for improving Riff</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">Suggestions for improving Riff</div>
+                <Button
+                  size="sm"
+                  disabled={picked.size === 0 || apply.isPending}
+                  onClick={() => apply.mutate([...picked])}
+                >
+                  {apply.isPending && <Loader2 className="animate-spin" />} Apply selected
+                  {picked.size > 0 ? ` (${picked.size})` : ''} to next run
+                </Button>
+              </div>
+              <ErrorText>{implement.error instanceof Error ? implement.error.message : null}</ErrorText>
+              <ErrorText>{apply.error instanceof Error ? apply.error.message : null}</ErrorText>
               <ul className="mt-1 space-y-2">
                 {r.suggestions.map((s, i) => (
-                  <li key={i}>
-                    <span className="font-medium">{s.title}</span>
-                    {s.seenIn > 1 && <Badge variant="outline" className="ml-2">seen in {s.seenIn} sessions</Badge>}
-                    {s.status === 'done' && (
-                      <Badge variant="outline" className="ml-2">
-                        {s.verdict === 'not-effective' ? 'marked done, but it keeps coming back' : s.verdict === 'effective' ? 'marked done, and it helped' : 'marked done'}
-                      </Badge>
-                    )}
-                    <div className="text-muted-foreground">{s.detail}</div>
-                    <div className="mt-1 flex gap-1">
-                      {s.status !== 'done' && (
-                        <Button size="sm" variant="ghost" disabled={suggest.isPending} onClick={() => suggest.mutate({ key: s.key, status: 'done' })}>
-                          I did this
-                        </Button>
+                  <li key={i} className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      className="mt-1 shrink-0"
+                      aria-label={`Select: ${s.title}`}
+                      disabled={s.status === 'done'}
+                      checked={picked.has(s.key)}
+                      onChange={() => togglePick(s.key)}
+                    />
+                    <div>
+                      <span className="font-medium">{s.title}</span>
+                      {s.seenIn > 1 && (
+                        <Badge variant="outline" className="ml-2">
+                          seen in {s.seenIn} sessions
+                        </Badge>
                       )}
-                      <Button size="sm" variant="ghost" disabled={suggest.isPending} onClick={() => suggest.mutate({ key: s.key, status: 'dismissed' })}>
-                        Stop suggesting this
-                      </Button>
+                      {s.status === 'done' && (
+                        <Badge variant="outline" className="ml-2">
+                          {s.verdict === 'not-effective'
+                            ? 'marked done, but it keeps coming back'
+                            : s.verdict === 'effective'
+                              ? 'marked done, and it helped'
+                              : 'marked done'}
+                        </Badge>
+                      )}
+                      <div className="text-muted-foreground">{s.detail}</div>
+                      <div className="mt-1 flex gap-1">
+                        {s.status !== 'done' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={suggest.isPending}
+                            onClick={() => suggest.mutate({ key: s.key, status: 'done' })}
+                          >
+                            Mark done
+                          </Button>
+                        )}
+                        {s.status !== 'done' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={implement.isPending}
+                            onClick={() => implement.mutate(s)}
+                          >
+                            Start Dev Session
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={suggest.isPending}
+                          onClick={() => suggest.mutate({ key: s.key, status: 'dismissed' })}
+                        >
+                          Stop suggesting this
+                        </Button>
+                      </div>
                     </div>
                   </li>
                 ))}
               </ul>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Applied suggestions go into the plan, coding and QA briefings of this app’s next sessions as lessons,
+                and show up under lessons above.
+              </div>
             </div>
           )}
 
@@ -181,8 +290,18 @@ export function RetrospectivePanel({ sessionId, appId, version }: { sessionId: s
 function EffectBadge({ lesson }: { lesson: AppLesson }) {
   const n = lesson.exposedSessionIds.length;
   const back = lesson.recurredSessionIds.length;
-  if (lesson.status === 'retired') return <Badge variant="outline" className="ml-2">retired: {lesson.retiredReason}</Badge>;
-  if (lesson.verdict === 'unproven') return <Badge variant="outline" className="ml-2">{n === 0 ? 'not tested yet' : `testing: ${back} of ${n} sessions`}</Badge>;
+  if (lesson.status === 'retired')
+    return (
+      <Badge variant="outline" className="ml-2">
+        retired: {lesson.retiredReason}
+      </Badge>
+    );
+  if (lesson.verdict === 'unproven')
+    return (
+      <Badge variant="outline" className="ml-2">
+        {n === 0 ? 'not tested yet' : `testing: ${back} of ${n} sessions`}
+      </Badge>
+    );
   const label = lesson.verdict === 'working' ? 'working' : lesson.verdict === 'mixed' ? 'mixed' : 'not working';
   return (
     <Badge variant="outline" className="ml-2">

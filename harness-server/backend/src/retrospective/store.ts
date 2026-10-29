@@ -110,6 +110,41 @@ export function updateSuggestionStatus(appId: string, key: string, status: Sugge
   return next;
 }
 
+/**
+ * Makes the chosen suggestions part of what the agents are told next run: each
+ * becomes an active lesson for every role (a pipeline change Riff can't make
+ * itself still reaches the agents as an instruction) and the suggestion is
+ * marked done, so later sessions show whether it helped.
+ */
+export function applySuggestions(appId: string, keys: string[]): { lessons: StoredLesson[]; tracked: TrackedSuggestion[]; applied: string[] } {
+  const now = new Date().toISOString();
+  const wanted = listTrackedSuggestions(appId).filter((t) => keys.includes(t.key) && t.status !== 'done');
+  const store = readLessonStore();
+  const lessons = [...(store[appId] ?? [])];
+  for (const t of wanted) {
+    const text = `${t.title.replace(/[.\s]+$/, '')}. ${t.detail}`.trim();
+    lessons.push({
+      id: randomUUID().slice(0, 8),
+      text,
+      category: 'process',
+      area: null,
+      source: 'model',
+      status: 'active',
+      exposedSessionIds: [],
+      recurredSessionIds: [],
+      seen: t.raisedIn.length || 1,
+      sessionIds: [...t.raisedIn],
+      firstAt: now,
+      lastAt: now,
+    });
+  }
+  writeLessonStore({ ...store, [appId]: lessons });
+  let tracked = listTrackedSuggestions(appId);
+  for (const t of wanted) tracked = setSuggestionStatus(tracked, t.key, 'done', now);
+  saveTrackedSuggestions(appId, tracked);
+  return { lessons, tracked, applied: wanted.map((t) => t.key) };
+}
+
 export interface RetrospectiveRecord {
   sessionId: string;
   appId: string;

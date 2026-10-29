@@ -261,7 +261,7 @@ export interface QaNote {
 
 export interface SessionMeetingSource {
   /** "journal" when started from a Riff journal; absent = one meeting. */
-  kind?: 'meeting' | 'journal';
+  kind?: 'meeting' | 'journal' | 'suggestion';
   /** The meeting id, or the journal id when kind is "journal". */
   meetingId: string;
   meetingTitle: string;
@@ -272,7 +272,7 @@ export interface SessionMeetingSource {
 
 export interface MeetingSourceInput {
   /** "journal": `transcript` holds the journal's notes and excerpts, `summary` its overview. */
-  kind?: 'meeting' | 'journal';
+  kind?: 'meeting' | 'journal' | 'suggestion';
   meetingId: string;
   meetingTitle: string;
   meetingDate?: string | null;

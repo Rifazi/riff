@@ -361,6 +361,15 @@ export const api = {
       body: JSON.stringify({ status }),
     }).then((r) => json<unknown>(r)),
 
+  applySuggestions: (appId: string, keys: string[]) =>
+    fetch(apiUrl(`/api/apps/${appId}/suggestions/apply`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys }),
+    }).then((r) => json<{ applied: string[] }>(r)),
+
+  getRiffApp: () => fetch(apiUrl('/api/apps/riff-self'), { method: 'POST' }).then((r) => json<{ id: string; name: string }>(r)),
+
   approveQa: (id: string) =>
     fetch(apiUrl(`/api/sessions/${id}/qa/approve`), { method: 'POST' }).then((r) => json<SessionRecord>(r)),
 
