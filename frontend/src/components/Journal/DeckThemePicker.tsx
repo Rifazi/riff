@@ -2,11 +2,12 @@
 
 import { Loader2 } from 'lucide-react';
 import type { ThemeMode } from '@/lib/dev-sessions/types';
-import { ModeToggle } from '@/components/DevSessions/themes/ModeToggle';
-import { ThemeTile } from '@/components/DevSessions/themes/ThemeTile';
 import { useThemes } from '@/components/DevSessions/themes/ThemeFrame';
+import { ThemePicker, type ThemeOption } from '@/components/ThemePicker';
+import { deckStyleFor, SAMPLE_SLIDES } from '@/lib/decks/preview';
+import { SlidePreview } from './SlidePreview';
 
-/** The same theme presets as the Theme picker; every slide of the deck is drawn in the one chosen. */
+/** The same theme presets as the Theme picker, previewed as slides; every slide of the deck is drawn in the one chosen. */
 export function DeckThemePicker({
   themeId,
   mode,
@@ -28,23 +29,33 @@ export function DeckThemePicker({
   if (error || !data) return <div className="text-sm text-destructive">Couldn&apos;t load themes.</div>;
 
   const selected = themeId || data.presets[0]?.id;
+  const options: ThemeOption[] = data.presets.map((p) => ({ id: p.id, theme: p.theme, tokens: p.tokens }));
+
   return (
-    <div className={`space-y-2 ${disabled ? 'pointer-events-none opacity-60' : ''}`}>
-      <div className="flex justify-end">
-        <ModeToggle mode={mode} onChange={(m) => onChange(selected, m)} />
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {data.presets.map((preset) => (
-          <ThemeTile
-            key={preset.id}
-            theme={preset.theme}
-            tokens={preset.tokens}
-            mode={mode}
-            selected={preset.id === selected}
-            onSelect={() => onChange(preset.id, mode)}
-          />
-        ))}
-      </div>
+    <div className={disabled ? 'pointer-events-none opacity-60' : ''}>
+      <ThemePicker
+        options={options}
+        selectedId={selected}
+        mode={mode}
+        onModeChange={(m) => onChange(selected, m)}
+        onSelect={(option) => onChange(option.id, mode)}
+        className="grid grid-cols-2 sm:grid-cols-3 gap-3"
+        renderThumb={({ option, mode: m }) => (
+          <div className="p-1.5" style={{ background: option.theme[m].surfaceMuted }}>
+            <SlidePreview slide={SAMPLE_SLIDES[1]} style={deckStyleFor(option.theme, m)} />
+          </div>
+        )}
+        renderPreview={({ option, mode: m }) => {
+          const style = deckStyleFor(option.theme, m);
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {SAMPLE_SLIDES.map((slide, i) => (
+                <SlidePreview key={i} slide={slide} style={style} />
+              ))}
+            </div>
+          );
+        }}
+      />
     </div>
   );
 }

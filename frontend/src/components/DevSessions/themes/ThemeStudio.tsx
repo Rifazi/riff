@@ -8,7 +8,8 @@ import { ErrorText, LoadingState } from '../PageShell';
 import { ModeToggle } from './ModeToggle';
 import { ThemeEditor } from './ThemeEditor';
 import { ThemeShowcase } from './ThemeShowcase';
-import { ThemeTile } from './ThemeTile';
+import { ThemeThumb } from './ThemeThumb';
+import { ThemePicker, type ThemeOption } from '@/components/ThemePicker';
 import { useThemes, useThemeTokens } from './ThemeFrame';
 import { sameTheme } from './theme-utils';
 
@@ -60,6 +61,11 @@ export function ThemeStudio({
       <Badge variant="success">Current</Badge>
     ) : null;
 
+  const options: ThemeOption[] = [
+    ...(current ? [{ id: CURRENT, theme: current.theme, tokens: current.tokens, badge: badgeFor(CURRENT) }] : []),
+    ...data.presets.map((p) => ({ id: p.id, theme: p.theme, tokens: p.tokens, badge: badgeFor(p.id) })),
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -70,44 +76,35 @@ export function ThemeStudio({
         <ModeToggle mode={mode} onChange={setMode} />
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {allowNone && (
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            aria-pressed={value === null}
-            className={`flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed p-4 text-sm ${
-              value === null
-                ? 'border-primary ring-2 ring-primary/30 text-foreground'
-                : 'border-border text-muted-foreground hover:bg-muted'
-            }`}
-          >
-            <Ban className="h-5 w-5" />
-            No theme for now
-          </button>
-        )}
-        {current && (
-          <ThemeTile
-            theme={current.theme}
-            tokens={current.tokens}
-            mode={mode}
-            selected={origin === CURRENT}
-            badge={badgeFor(CURRENT)}
-            onSelect={() => onChange({ theme: current.theme, basedOn: current.basedOn })}
-          />
-        )}
-        {data.presets.map((preset) => (
-          <ThemeTile
-            key={preset.id}
-            theme={preset.theme}
-            tokens={preset.tokens}
-            mode={mode}
-            selected={origin === preset.id}
-            badge={badgeFor(preset.id)}
-            onSelect={() => onChange({ theme: preset.theme, basedOn: preset.id })}
-          />
-        ))}
-      </div>
+      <ThemePicker
+        options={options}
+        selectedId={origin ?? null}
+        mode={mode}
+        onModeChange={setMode}
+        onSelect={(option) => {
+          if (option.id === CURRENT && current) onChange({ theme: current.theme, basedOn: current.basedOn });
+          else onChange({ theme: option.theme, basedOn: option.id });
+        }}
+        renderPreview={({ option, mode }) => <ThemeShowcase tokens={option.tokens} mode={mode} appName={appName} />}
+        renderThumb={({ option, mode }) => <ThemeThumb theme={option.theme} tokens={option.tokens} mode={mode} />}
+        leading={
+          allowNone && (
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              aria-pressed={value === null}
+              className={`flex items-center justify-center gap-2 rounded-lg border border-dashed px-2.5 py-2 text-sm ${
+                value === null
+                  ? 'border-primary ring-2 ring-primary/30 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              <Ban className="h-4 w-4" />
+              No theme for now
+            </button>
+          )
+        }
+      />
 
       {value && (
         <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-4 items-start">
