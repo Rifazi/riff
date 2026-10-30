@@ -43,6 +43,7 @@ pub mod brand_migration;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod deck_export;
 pub mod meeting_detector;
 pub mod notifications;
 pub mod ollama;
@@ -903,6 +904,7 @@ pub fn run() {
             api::api_save_meeting_title,
             api::api_save_transcript,
             api::open_meeting_folder,
+            deck_export::save_deck_to_downloads,
             api::test_backend_connection,
             api::debug_backend_connection,
             api::open_external_url,

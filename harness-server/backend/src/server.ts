@@ -15,6 +15,7 @@ import { registerCoordinatorRoutes } from './routes/coordinator.js';
 import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
 import { registerUsageRoutes } from './routes/usage.js';
+import { registerDeckRoutes } from './routes/decks.js';
 import { recoverInterruptedTeams } from './agents/team/coding-team.js';
 import { recoverInterruptedQaTeams } from './agents/team/qa-team.js';
 import { stopLocalModel } from './agents/local-llm.js';
@@ -69,6 +70,7 @@ async function main() {
   await registerThemeRoutes(app);
   await registerReferenceDocRoutes(app);
   await registerUsageRoutes(app);
+  await registerDeckRoutes(app);
 
   app.get('/api/health', async () => ({ ok: true }));
 

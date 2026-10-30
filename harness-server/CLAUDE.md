@@ -2514,3 +2514,54 @@ exist standalone).
    `toBeGreaterThan`, `arrayContaining`) and `scope-check`'s "stray folders" fails
    without these changes. Not run with real agents or an existing app yet: dead-code
    and comment findings on a legacy repo are the first thing to read.
+
+79. User asked for a journal to be turned into a PowerPoint deck, by an agent
+   with the right skills, next to "Create requirements", then for one look on
+   every slide from the UI's theme picker, for Sasha to rewrite single slides,
+   and for deleting slides and earlier decks. Sasha, the slides agent, is
+   outside the session/stage flow (a journal has no app or repo):
+   - **Agent** (`agents/slides-agent.ts`, prompt `prompts/slides-agent.md`): single-shot
+     calls (AI SDK or `runClaudeSingleShot`) on the `requirements` role's model, no
+     new role. The prompt holds the deck craft: find the story, claim-style titles,
+     one idea per slide, layouts that fit the content, facts only, speaker notes on
+     request, audience. `draftDeck` returns a JSON deck spec, validated, with one
+     retry naming what broke; a deck that is only too long is trimmed
+     (`trimToLength`: dividers, quotes, then middle slides from the back); a deck
+     under the range is accepted. `recreateSlide` rewrites one slide given the
+     deck outline, the slide, the journal text and an optional instruction; the
+     first slide stays `title`, the last `closing`, no other slide uses either.
+   - **Spec** (`decks/deck-spec.ts`, zod): layouts title, section, bullets,
+     two_column, stat, quote, table, closing, with length limits sized to the
+     renderer's boxes and whole-deck rules (title first, closing last, no layout
+     4 times running, short ≤ 7, standard ≤ 12, detailed ≤ 20 slides).
+   - **Theme** (`decks/deck-theme.ts`): the deck uses one of the Theme picker's
+     presets (`themes/presets.ts`) in light or dark, a copy stored on the deck.
+     `deckStyle` takes that mode's colors and the first named font family of the
+     heading/body stacks (Calibri when only system fonts). Every slide has the
+     theme background and the same primary band down its left edge (wider on the
+     title, divider and closing slides), so the deck reads as one look. The agent
+     never chooses colors. Fonts the viewer's machine lacks are substituted by PowerPoint.
+   - **Renderer** (`decks/render-pptx.ts`, `pptxgenjs`): 16:9, speaker notes,
+     slide numbers.
+   - **Storage** (`decks/deck-store.ts`): `state/decks/<id>/` holds `job.json`,
+     `spec.json`, `source.json` (the journal text, so a slide can be rewritten
+     later) and `deck.pptx`; gitignored since it is journal content. Decks made
+     before this layout (flat `<id>.json/.pptx`) are ignored.
+   - **API** (`routes/decks.ts`, logic in `decks/deck-service.ts`): `POST /api/decks`
+     (202, background; `themeId`, `mode`), `GET /api/decks?sourceId=`,
+     `GET /api/decks/:id`, `GET /api/decks/:id/slides` (slides + theme style),
+     `POST /api/decks/:id/slides/:i/recreate`, `DELETE /api/decks/:id/slides/:i`
+     (middle slides only, at least 3 slides stay), `PUT /api/decks/:id/theme`,
+     `DELETE /api/decks/:id`, `GET /api/decks/:id/file`. Every edit re-renders the
+     file, and edits to one deck run one at a time (409 otherwise).
+   - **UI**: `components/Journal/PresentationButton.tsx` (create form with
+     `DeckThemePicker`, which reuses `ThemeTile`/`ModeToggle`, and the list of
+     earlier decks with edit/save/delete), `DeckEditor.tsx` (slide previews in the
+     deck's theme from `SlidePreview.tsx`, Recreate with an optional instruction,
+     delete, change theme, save). Saving goes through the Tauri command
+     `save_deck_to_downloads` (`deck_export.rs`: only `http://127.0.0.1:` URLs,
+     never overwrites, reveals the file).
+   Tests: `deck-spec.test.ts` (10, through the node:test shim; includes a check
+   that every slide of a rendered deck uses the theme background in both modes).
+   The routes were exercised on a scratch server with a hand-made deck. Recreate and
+   the layouts in real PowerPoint have not been run.

@@ -14,5 +14,8 @@
     "serve": "npm run serve --workspace=backend",
     "build": "npm run build --workspace=backend",
     "typecheck": "tsc -p backend/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
   }
 }

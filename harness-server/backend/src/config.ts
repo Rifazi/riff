@@ -18,6 +18,8 @@ export const config = {
   meetingSourcesDir: path.join(HARNESS_ROOT, 'state', 'meeting-sources'),
   // Documents the human attached for the agents (sessions/reference-docs.ts)
   // — under state/, so gitignored like meeting sources.
+  // Generated PowerPoint decks (decks/deck-store.ts) — journal content, so under state/.
+  decksDir: path.join(HARNESS_ROOT, 'state', 'decks'),
   referenceDocsDir: path.join(HARNESS_ROOT, 'state', 'reference-docs'),
   // Requirements/plan/QA docs — reviewable deliverables of *this* project's
   // process, not of any target app, so they live here rather than in a

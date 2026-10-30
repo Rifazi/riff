@@ -40,6 +40,7 @@ import {
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
 import { RequirementsButton, type RequirementsSource } from '@/components/DevSessions/RequirementsButton';
+import { PresentationButton } from '@/components/Journal/PresentationButton';
 import { journalApi, journalKeys, type NotebookEntry } from '@/lib/journal/api';
 import { coverColor, formatDate, NOTEBOOK_COLORS } from '@/lib/journal/format';
 import { Page, PageBody, PageHeader } from '@/components/ui/page';
@@ -219,6 +220,10 @@ function NotebookView() {
               Add to journal
             </Button>
             <RequirementsButton source={requirementsSource} disabled={entries.length === 0} />
+            <PresentationButton
+              source={{ id: notebookId, title: journalTitle, overview: journalOverview }}
+              disabled={entries.length === 0}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" aria-label="Journal actions">
