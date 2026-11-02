@@ -14,12 +14,18 @@ const firstFamily = (stack: string) => {
   return 'Calibri';
 };
 
+/** Slides default to sans-serif: a heading stack that falls back to a serif family uses the body font instead. */
+const slideHeadingFamily = (headingStack: string, sansStack: string) => {
+  const last = headingStack.split(',').pop()?.trim().toLowerCase();
+  return last === 'serif' || last === 'ui-serif' ? firstFamily(sansStack) : firstFamily(headingStack);
+};
+
 /** What the server's deckStyle returns for a theme, so a deck can be previewed before it is drawn. */
 export function deckStyleFor(theme: ThemeDefinition, mode: ThemeMode): DeckStyle {
   const { bg, surface, surfaceMuted, border, text, textMuted, primary, onPrimary } = theme[mode];
   return {
     bg, surface, surfaceMuted, border, text, textMuted, primary, onPrimary,
-    headingFont: firstFamily(theme.fonts.heading),
+    headingFont: slideHeadingFamily(theme.fonts.heading, theme.fonts.sans),
     bodyFont: firstFamily(theme.fonts.sans),
   };
 }

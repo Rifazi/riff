@@ -30,6 +30,16 @@ export interface AppConfig {
   uiuxPass?: boolean;
   // false = no screenshot review before QA when a branch changes the UI (agents/visual-review.ts). Missing = on.
   visualReview?: boolean;
+  // Test account the screenshot tool signs in with for screens behind a login. Stored in plain text: use seeded test data, never a real account.
+  testLogin?: TestLogin;
+  // The npm script the screenshot tool starts instead of dev/start/serve, e.g. "local" for an app whose backend runs locally. Missing = the usual pick.
+  devScript?: string;
+}
+
+export interface TestLogin {
+  path?: string;
+  username: string;
+  password: string;
 }
 
 export function baseBranchFor(app: AppConfig): string {

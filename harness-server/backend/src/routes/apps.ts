@@ -35,6 +35,8 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     architecture: app.architecture ?? null,
     uiuxPass: app.uiuxPass === true,
     visualReview: app.visualReview !== false,
+    devScript: app.devScript ?? null,
+    testLogin: app.testLogin ? { username: app.testLogin.username, path: app.testLogin.path ?? null, hasPassword: true } : null,
   };
 }
 
@@ -111,7 +113,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{
     Params: { id: string };
-    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown; uiuxPass?: boolean; visualReview?: boolean };
+    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown; uiuxPass?: boolean; visualReview?: boolean; testLogin?: { username?: string; password?: string; path?: string } | null; devScript?: string | null };
   }>(
     '/api/apps/:id',
     async (request, reply) => {

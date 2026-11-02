@@ -116,14 +116,16 @@ describe('deckStyle', () => {
     expect(firstFamily('ui-sans-serif, system-ui, Arial')).toBe('Calibri');
   });
 
-  test('every slide is drawn on the theme background in both modes', async () => {
+  test('every slide is drawn on the theme background (accent for the opening) in both modes', async () => {
     for (const mode of ['light', 'dark'] as const) {
       const style = deckStyle(THEME_PRESETS[1], mode);
       const zip = await JSZip.loadAsync(await renderDeck(deck(), style));
       const slides = Object.keys(zip.files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f));
-      for (const f of slides) {
+      for (const [i, f] of slides.sort().entries()) {
         const xml = await zip.files[f].async('string');
-        expect(xml.toUpperCase()).toContain(`<A:SRGBCLR VAL="${style.bg.replace('#', '').toUpperCase()}"`);
+        // The title slide is full-bleed accent; the rest sit on the page color.
+        const fill = i === 0 ? style.primary : style.bg;
+        expect(xml.toUpperCase()).toContain(`<A:SRGBCLR VAL="${fill.replace('#', '').toUpperCase()}"`);
       }
     }
   });

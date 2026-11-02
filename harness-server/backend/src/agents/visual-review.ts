@@ -116,7 +116,7 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
                 readFileToolClaude,
                 readFilesToolClaude,
                 createAnalyzeColorsToolClaude({ repoRoot: app.repoRoot }),
-                createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, onCapture }),
+                createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, onCapture, defaultLogin: app.testLogin, devScript: app.devScript }),
                 createSubmitVisualReviewToolClaude(submit),
               ],
             }),
@@ -135,7 +135,7 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
           read_file: readFileTool,
           read_files: readFilesTool,
           analyze_colors: createAnalyzeColorsTool({ repoRoot: app.repoRoot }),
-          screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, onCapture }),
+          screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, onCapture, defaultLogin: app.testLogin, devScript: app.devScript }),
           submit_visual_review: createSubmitVisualReviewTool(submit),
         };
         await runAgentTurn({ systemPrompt, tools, provider, model, apiKey: (await getApiKey(provider))!, history: [], prompt, onEvent });

@@ -37,56 +37,56 @@ const notes = z
   .transform((s) => fit(s, 1500))
   .optional();
 
-const bullets = z.array(line(140)).min(1).max(6);
+const bullets = z.array(line(80)).min(1).max(4);
 
 const titleSlide = z.object({
   layout: z.literal('title'),
-  title: line(90),
-  subtitle: line(140).optional(),
+  title: line(70),
+  subtitle: line(100).optional(),
   notes,
 });
 const sectionSlide = z.object({
   layout: z.literal('section'),
-  title: line(80),
-  subtitle: line(140).optional(),
+  title: line(60),
+  subtitle: line(100).optional(),
   notes,
 });
 const bulletsSlide = z.object({
   layout: z.literal('bullets'),
-  title: line(80),
+  title: line(70),
   bullets,
   notes,
 });
 const twoColumnSlide = z.object({
   layout: z.literal('two_column'),
-  title: line(80),
-  left: z.object({ heading: line(40), bullets: z.array(line(110)).min(1).max(5) }),
-  right: z.object({ heading: line(40), bullets: z.array(line(110)).min(1).max(5) }),
+  title: line(70),
+  left: z.object({ heading: line(30), bullets: z.array(line(70)).min(1).max(3) }),
+  right: z.object({ heading: line(30), bullets: z.array(line(70)).min(1).max(3) }),
   notes,
 });
 const statSlide = z.object({
   layout: z.literal('stat'),
-  title: line(80),
-  stats: z.array(z.object({ value: line(14), label: line(70) })).min(1).max(3),
+  title: line(70),
+  stats: z.array(z.object({ value: line(12), label: line(50) })).min(1).max(3),
   notes,
 });
 const quoteSlide = z.object({
   layout: z.literal('quote'),
-  quote: line(260),
+  quote: line(160),
   attribution: line(80).optional(),
   notes,
 });
 const tableSlide = z.object({
   layout: z.literal('table'),
-  title: line(80),
-  columns: z.array(line(30)).min(2).max(4),
-  rows: z.array(z.array(line(60)).min(2).max(4)).min(1).max(6),
+  title: line(70),
+  columns: z.array(line(24)).min(2).max(4),
+  rows: z.array(z.array(line(40)).min(2).max(4)).min(1).max(5),
   notes,
 });
 const closingSlide = z.object({
   layout: z.literal('closing'),
-  title: line(80),
-  bullets: z.array(line(110)).max(4).optional(),
+  title: line(70),
+  bullets: z.array(line(80)).max(3).optional(),
   notes,
 });
 
@@ -155,12 +155,12 @@ export function deckProblems(spec: DeckSpec, length: DeckLength): string[] {
   if (inner.some((s) => s.layout === 'title' || s.layout === 'closing')) {
     problems.push('"title" and "closing" layouts are only for the first and last slide.');
   }
-  // Same layout four times running reads as a wall of bullets.
+  // Same layout three times running reads as a wall of bullets.
   let run = 1;
   for (let i = 1; i < spec.slides.length; i++) {
     run = spec.slides[i].layout === spec.slides[i - 1].layout ? run + 1 : 1;
-    if (run === 4) {
-      problems.push(`Slides ${i - 2}-${i + 1} all use "${spec.slides[i].layout}". Vary the layouts.`);
+    if (run === 3) {
+      problems.push(`Slides ${i - 1}-${i + 1} all use "${spec.slides[i].layout}". Vary the layouts.`);
       break;
     }
   }

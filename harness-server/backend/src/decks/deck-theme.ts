@@ -30,6 +30,12 @@ export function firstFamily(stack: string): string {
   return 'Calibri';
 }
 
+/** Slides default to sans-serif: a heading stack that falls back to a serif family uses the body font instead. */
+export function slideHeadingFamily(headingStack: string, sansStack: string): string {
+  const last = headingStack.split(',').pop()?.trim().toLowerCase();
+  return last === 'serif' || last === 'ui-serif' ? firstFamily(sansStack) : firstFamily(headingStack);
+}
+
 export function deckStyle(theme: ThemeDefinition, mode: DeckMode): DeckStyle {
   const c = theme[mode];
   return {
@@ -41,7 +47,7 @@ export function deckStyle(theme: ThemeDefinition, mode: DeckMode): DeckStyle {
     textMuted: c.textMuted,
     primary: c.primary,
     onPrimary: c.onPrimary,
-    headingFont: firstFamily(theme.fonts.heading),
+    headingFont: slideHeadingFamily(theme.fonts.heading, theme.fonts.sans),
     bodyFont: firstFamily(theme.fonts.sans),
   };
 }

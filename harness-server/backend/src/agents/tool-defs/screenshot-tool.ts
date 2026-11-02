@@ -32,7 +32,7 @@ export const screenshotSchema = z.object({
     })
     .optional()
     .describe(
-      'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you. ' +
+      'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you; when the app has a test account configured, leave this out and it signs in with that. ' +
         'Remembered for the rest of this turn, so later screenshots sign in again without it.'
     ),
   steps: z
@@ -84,6 +84,7 @@ const servers = new Map<string, Promise<DevServer>>();
 
 const MAX_PER_TURN = 8;
 const START_TIMEOUT_MS = 90_000;
+const CUSTOM_START_TIMEOUT_MS = 6 * 60_000;
 const URL_PATTERN = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(\d+)/;
 
 export function findChrome(): string | null {
@@ -109,8 +110,17 @@ export function devScriptFor(repoRoot: string): string | null {
   }
 }
 
-async function startDevServer(repoRoot: string): Promise<DevServer> {
-  const script = devScriptFor(repoRoot);
+export function devScriptExists(repoRoot: string, name: string): boolean {
+  try {
+    return typeof JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).scripts?.[name] === 'string';
+  } catch {
+    return false;
+  }
+}
+
+async function startDevServer(repoRoot: string, chosen?: string): Promise<DevServer> {
+  const script = chosen && devScriptExists(repoRoot, chosen) ? chosen : devScriptFor(repoRoot);
+  const startTimeoutMs = chosen ? CUSTOM_START_TIMEOUT_MS : START_TIMEOUT_MS;
   if (!script) throw new Error('The app has no dev, start or serve script in its package.json, so there is nothing to open. Pass `url` for a server that is already running.');
   await ensureDependencies(repoRoot);
   // A free port of our own, so a server already on the app's usual port (often another app) is never the one captured.
@@ -122,7 +132,7 @@ async function startDevServer(repoRoot: string): Promise<DevServer> {
       stopProcess(proc);
       reject(new Error(`${message}\n\nLast output:\n${output.slice(-1500)}`));
     };
-    const timer = setTimeout(() => fail(`The dev server did not print a local URL within ${START_TIMEOUT_MS / 1000}s.`), START_TIMEOUT_MS);
+    const timer = setTimeout(() => fail(`The "${script}" script did not print a local URL within ${startTimeoutMs / 1000}s.`), startTimeoutMs);
     const onData = (chunk: Buffer) => {
       output += chunk.toString().replace(/\u001b\[[0-9;]*m/g, '');
       const match = URL_PATTERN.exec(output);
@@ -173,6 +183,10 @@ export interface ScreenshotDeps {
   onCapture?: (shot: { file: string; text: string }) => void;
   /** Lets the agent point `url` at a server that is already running. Off by default: whatever sits on a localhost port may be a different app. */
   allowUrl?: boolean;
+  /** The app's test account: signs in for any screenshot that doesn't pass its own `login`. */
+  defaultLogin?: PageLogin;
+  /** The app's chosen npm script for serving it (AppConfig.devScript). */
+  devScript?: string;
 }
 
 export function createScreenshotExecute(deps: ScreenshotDeps) {
@@ -187,7 +201,7 @@ export function createScreenshotExecute(deps: ScreenshotDeps) {
 
 function createCapture(deps: ScreenshotDeps) {
   let taken = 0;
-  let rememberedLogin: PageLogin | undefined;
+  let rememberedLogin: PageLogin | undefined = deps.defaultLogin;
   return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
     if (taken >= MAX_PER_TURN) throw new Error(`That is ${MAX_PER_TURN} screenshots this turn. Work from the ones you have.`);
     const chrome = findChrome();
@@ -196,7 +210,7 @@ function createCapture(deps: ScreenshotDeps) {
     let base = input.url?.trim();
     if (base && !deps.allowUrl) throw new Error("`url` is not available here: the screenshot tool starts this app's own dev server. Call it again without `url`.");
     if (!base) {
-      if (!servers.has(deps.sessionId)) servers.set(deps.sessionId, startDevServer(deps.repoRoot));
+      if (!servers.has(deps.sessionId)) servers.set(deps.sessionId, startDevServer(deps.repoRoot, deps.devScript));
       try {
         base = (await servers.get(deps.sessionId)!).url;
       } catch (err) {

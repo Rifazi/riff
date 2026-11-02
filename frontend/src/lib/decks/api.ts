@@ -82,7 +82,8 @@ async function json<T>(res: Response): Promise<T> {
 const send = (path: string, method: string, body?: unknown) =>
   fetch(apiUrl(path), {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    // Fastify rejects a JSON content type with an empty body, which a bodyless DELETE would send.
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
