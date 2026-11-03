@@ -87,7 +87,7 @@ You are given a finished deck's outline, the slide to rewrite, and sometimes an 
 
 function outline(deck: DeckSpec, index: number): string {
   return deck.slides
-    .map((s, i) => `${i + 1}. [${s.layout}] ${'title' in s ? s.title : s.quote.slice(0, 80)}${i === index ? '   <- rewrite this one' : ''}`)
+    .map((s, i) => `${i + 1}. [${s.layout}] ${'title' in s ? s.title : s.layout === 'quote' ? s.quote.slice(0, 80) : s.statement.slice(0, 80)}${i === index ? '   <- rewrite this one' : ''}`)
     .join('\n');
 }
 

@@ -4,12 +4,13 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Loader2, Palette, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Palette, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ConfirmDialog } from '@/components/DevSessions/ConfirmDialog';
-import { decksApi, type DeckWithSlides } from '@/lib/decks/api';
+import { decksApi, type DeckSlide, type DeckWithSlides } from '@/lib/decks/api';
 import { DeckThemePicker } from './DeckThemePicker';
+import { SlideForm } from './SlideForm';
 import { SlidePreview } from './SlidePreview';
 
 const LAYOUT_LABEL: Record<string, string> = {
@@ -20,10 +21,15 @@ const LAYOUT_LABEL: Record<string, string> = {
   stat: 'Numbers',
   quote: 'Quote',
   table: 'Table',
+  statement: 'Statement',
+  timeline: 'Timeline',
+  process: 'Steps',
+  bar_chart: 'Bar chart',
+  status_list: 'Status',
   closing: 'Closing',
 };
 
-/** One presentation's slides: ask Sasha to rewrite any of them, delete the ones in the middle, change the theme, save. */
+/** One presentation's slides: edit any of them by hand, add or delete the ones in the middle, ask Sasha to rewrite one, change the theme, save. */
 export function DeckEditor({ deckId, sourceId, onBack }: { deckId: string; sourceId: string; onBack: () => void }) {
   const queryClient = useQueryClient();
   const key = ['deck-slides', deckId];
@@ -32,6 +38,8 @@ export function DeckEditor({ deckId, sourceId, onBack }: { deckId: string; sourc
   const [instruction, setInstruction] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [editing, setEditing] = useState<{ index: number; draft: DeckSlide } | null>(null);
+  const [adding, setAdding] = useState<number | null>(null);
 
   const applied = (next: DeckWithSlides) => {
     queryClient.setQueryData(key, next);
@@ -48,18 +56,38 @@ export function DeckEditor({ deckId, sourceId, onBack }: { deckId: string; sourc
     },
     onError: failed,
   });
+  const saveEdit = useMutation({
+    mutationFn: ({ index, draft }: { index: number; draft: DeckSlide }) => decksApi.updateSlide(deckId, index, draft),
+    onSuccess: (next) => {
+      applied(next);
+      setEditing(null);
+    },
+    onError: failed,
+  });
+  const add = useMutation({
+    mutationFn: ({ index, layout }: { index: number; layout: DeckSlide['layout'] }) =>
+      decksApi.addSlide(deckId, index, layout),
+    onSuccess: (next, { index }) => {
+      applied(next);
+      setAdding(null);
+      setEditing({ index, draft: next.slides[index] });
+    },
+    onError: failed,
+  });
   const remove = useMutation({
     mutationFn: (index: number) => decksApi.deleteSlide(deckId, index),
     onSuccess: applied,
     onError: failed,
   });
   const restyle = useMutation({
-    mutationFn: ({ themeId, mode }: { themeId: string; mode: 'light' | 'dark' }) => decksApi.setTheme(deckId, themeId, mode),
+    mutationFn: ({ themeId, mode }: { themeId: string; mode: 'light' | 'dark' }) =>
+      decksApi.setTheme(deckId, themeId, mode),
     onSuccess: applied,
     onError: failed,
   });
   const save = useMutation({
-    mutationFn: () => invoke<string>('save_deck_to_downloads', { url: decksApi.fileUrl(deckId), fileName: data!.job.fileName }),
+    mutationFn: () =>
+      invoke<string>('save_deck_to_downloads', { url: decksApi.fileUrl(deckId), fileName: data!.job.fileName }),
     onSuccess: (path) => toast.success(`Saved to ${path}`),
     onError: failed,
   });
@@ -72,9 +100,11 @@ export function DeckEditor({ deckId, sourceId, onBack }: { deckId: string; sourc
       </div>
     );
 
-  const busy = recreate.isPending || remove.isPending || restyle.isPending;
+  const busy = recreate.isPending || remove.isPending || restyle.isPending || saveEdit.isPending || add.isPending;
   const { job, slides, style } = data;
   const canDelete = slides.length > 3;
+  const canAdd = slides.length < 30;
+  const addable = (Object.keys(LAYOUT_LABEL) as DeckSlide['layout'][]).filter((l) => l !== 'title' && l !== 'closing');
 
   return (
     <div className="space-y-4">
@@ -112,58 +142,116 @@ export function DeckEditor({ deckId, sourceId, onBack }: { deckId: string; sourc
           const middle = i > 0 && i < slides.length - 1;
           const working = recreate.isPending && recreate.variables === i;
           return (
-            <li key={i} className="flex gap-3 rounded-md border border-border p-2">
-              <div className="w-[240px] flex-shrink-0">
-                <SlidePreview slide={slide} style={style} />
-              </div>
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {i + 1} · {LAYOUT_LABEL[slide.layout] ?? slide.layout}
-                  </span>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        setRecreating(recreating === i ? null : i);
-                        setInstruction('');
-                      }}
-                    >
-                      <RefreshCw /> Recreate
-                    </Button>
-                    {middle && (
+            <li key={i} className="space-y-2">
+              <div className="flex gap-3 rounded-md border border-border p-2">
+                <div className="w-[240px] flex-shrink-0">
+                  <SlidePreview slide={editing?.index === i ? editing.draft : slide} style={style} />
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {i + 1} · {LAYOUT_LABEL[slide.layout] ?? slide.layout}
+                    </span>
+                    <div className="flex gap-1">
                       <Button
                         variant="outline"
-                        size="icon"
-                        aria-label={`Delete slide ${i + 1}`}
-                        title={canDelete ? 'Delete this slide' : 'A presentation needs at least 3 slides'}
-                        disabled={busy || !canDelete}
-                        onClick={() => setDeleting(i)}
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setRecreating(null);
+                          setEditing(editing?.index === i ? null : { index: i, draft: slide });
+                        }}
                       >
-                        <Trash2 />
+                        <Pencil /> Edit
                       </Button>
-                    )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(null);
+                          setRecreating(recreating === i ? null : i);
+                          setInstruction('');
+                        }}
+                      >
+                        <RefreshCw /> Recreate
+                      </Button>
+                      {middle && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          aria-label={`Delete slide ${i + 1}`}
+                          title={canDelete ? 'Delete this slide' : 'A presentation needs at least 3 slides'}
+                          disabled={busy || !canDelete}
+                          onClick={() => setDeleting(i)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
+                    </div>
                   </div>
+                  {editing?.index === i ? (
+                    <div className="space-y-3">
+                      <SlideForm
+                        slide={editing.draft}
+                        onChange={(patch) => setEditing({ index: i, draft: { ...editing.draft, ...patch } })}
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" disabled={busy} onClick={() => saveEdit.mutate(editing)}>
+                          {saveEdit.isPending && <Loader2 className="animate-spin" />} Save slide
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    slide.notes && <p className="line-clamp-2 text-xs text-muted-foreground">{slide.notes}</p>
+                  )}
+                  {(recreating === i || working) && (
+                    <div className="flex gap-2">
+                      <Input
+                        value={instruction}
+                        onChange={(e) => setInstruction(e.target.value)}
+                        placeholder="What should change? (optional)"
+                        disabled={working}
+                        onKeyDown={(e) => e.key === 'Enter' && !busy && recreate.mutate(i)}
+                      />
+                      <Button size="sm" disabled={busy} onClick={() => recreate.mutate(i)}>
+                        {working ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                        {working ? 'Rewriting…' : 'Rewrite'}
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {slide.notes && <p className="line-clamp-2 text-xs text-muted-foreground">{slide.notes}</p>}
-                {(recreating === i || working) && (
-                  <div className="flex gap-2">
-                    <Input
-                      value={instruction}
-                      onChange={(e) => setInstruction(e.target.value)}
-                      placeholder="What should change? (optional)"
-                      disabled={working}
-                      onKeyDown={(e) => e.key === 'Enter' && !busy && recreate.mutate(i)}
-                    />
-                    <Button size="sm" disabled={busy} onClick={() => recreate.mutate(i)}>
-                      {working ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                      {working ? 'Rewriting…' : 'Rewrite'}
+              </div>
+              {i < slides.length - 1 &&
+                canAdd &&
+                (adding === i + 1 ? (
+                  <div className="flex flex-wrap items-center gap-1 rounded-md border border-dashed border-border p-2">
+                    <span className="mr-1 text-xs text-muted-foreground">New slide layout:</span>
+                    {addable.map((l) => (
+                      <Button
+                        key={l}
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => add.mutate({ index: i + 1, layout: l })}
+                      >
+                        {LAYOUT_LABEL[l]}
+                      </Button>
+                    ))}
+                    <Button size="sm" variant="ghost" onClick={() => setAdding(null)}>
+                      Cancel
                     </Button>
                   </div>
-                )}
-              </div>
+                ) : (
+                  <div className="flex justify-center">
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => setAdding(i + 1)}>
+                      <Plus /> Add slide here
+                    </Button>
+                  </div>
+                ))}
             </li>
           );
         })}

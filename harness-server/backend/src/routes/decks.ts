@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
-import { LENGTHS } from '../decks/deck-spec.js';
+import { LENGTHS, slideSchema } from '../decks/deck-spec.js';
 import { deleteDeck, deckFilePath, listJobs, loadJob } from '../decks/deck-store.js';
-import { DeckError, deckWithSlides, deleteDeckSlide, recreateDeckSlide, restyleDeck, startDeck } from '../decks/deck-service.js';
+import { addDeckSlide, DeckError, deckWithSlides, updateDeckSlide, deleteDeckSlide, recreateDeckSlide, restyleDeck, startDeck } from '../decks/deck-service.js';
 
 const modeSchema = z.enum(['light', 'dark']);
 
@@ -22,6 +22,7 @@ const createSchema = z.object({
 });
 
 const recreateSchema = z.object({ instruction: z.string().trim().max(1000).default('') });
+const addSchema = z.object({ index: z.number().int(), layout: z.string() });
 const restyleSchema = z.object({ themeId: z.string().min(1).max(100), mode: modeSchema });
 
 // Service errors carry their own status; anything else is a 500 with its message.
@@ -77,6 +78,23 @@ export async function registerDeckRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string; index: string } }>('/api/decks/:id/slides/:index', (request, reply) =>
     respond(reply, async () => {
       await deleteDeckSlide(request.params.id, Number(request.params.index));
+      return deckWithSlides(request.params.id);
+    }),
+  );
+
+  app.put<{ Params: { id: string; index: string } }>('/api/decks/:id/slides/:index', (request, reply) =>
+    respond(reply, async () => {
+      await updateDeckSlide(request.params.id, Number(request.params.index), request.body);
+      return deckWithSlides(request.params.id);
+    }),
+  );
+
+  app.post<{ Params: { id: string } }>('/api/decks/:id/slides', (request, reply) =>
+    respond(reply, async () => {
+      const parsed = addSchema.safeParse(request.body);
+      const layout = parsed.success ? slideSchema.options.find((o) => o.shape.layout.value === parsed.data.layout)?.shape.layout.value : undefined;
+      if (!parsed.success || !layout) return reply.code(400).send({ error: 'index and a known layout are required.' });
+      await addDeckSlide(request.params.id, parsed.data.index, layout);
       return deckWithSlides(request.params.id);
     }),
   );

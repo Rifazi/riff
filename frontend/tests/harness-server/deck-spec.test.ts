@@ -130,3 +130,37 @@ describe('deckStyle', () => {
     }
   });
 });
+
+describe('toolbox layouts and minimalism', () => {
+  const wrap = (...middle: object[]) =>
+    JSON.stringify({ title: 'T', slides: [{ layout: 'title', title: 'T' }, ...middle, { layout: 'closing', title: 'Ask' }] });
+
+  test('data layouts parse and render', async () => {
+    const parsed = parseDeckSpec(
+      wrap(
+        { layout: 'timeline', title: 'Milestones', events: [{ when: 'Mar', label: 'Kickoff' }, { when: 'Jun', label: 'Launch' }] },
+        { layout: 'process', title: 'Flow', steps: [{ title: 'Intake' }, { title: 'Resolve', detail: 'In a day' }] },
+        { layout: 'bar_chart', title: 'Billing fell most', items: [{ label: 'Billing', value: 38 }, { label: 'Setup', value: 21 }] },
+        { layout: 'status_list', title: 'Left', items: [{ label: 'Pricing', status: 'open' }, { label: 'Vendor', status: 'risk' }] },
+        { layout: 'statement', statement: 'Ship the smaller version first.' },
+      ),
+    );
+    if ('errors' in parsed) throw new Error(parsed.errors.join('; '));
+    const style = deckStyle(THEME_PRESETS[0], 'light');
+    expect((await renderDeck(parsed.spec, style)).length).toBeGreaterThan(1000);
+  });
+
+  test('rejects a bar chart highlight that is not an item', () => {
+    const parsed = parseDeckSpec(wrap({ layout: 'bar_chart', title: 'x', items: [{ label: 'a', value: 1 }, { label: 'b', value: 2 }], highlight: 5 }));
+    expect('errors' in parsed).toBe(true);
+  });
+
+  test('crowded slides are a deck problem', () => {
+    const words = Array.from({ length: 12 }, (_, i) => `word${i}`).join(' ');
+    const parsed = parseDeckSpec(wrap({ layout: 'bullets', title: 'Crowded', bullets: [words, words, words, 'four'] }));
+    if ('errors' in parsed) throw new Error(parsed.errors.join('; '));
+    const problems = deckProblems(parsed.spec, 'standard');
+    expect(problems.some((p) => p.includes('words'))).toBe(true);
+    expect(problems.some((p) => p.includes('at most 3'))).toBe(true);
+  });
+});

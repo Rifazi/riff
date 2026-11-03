@@ -35,6 +35,10 @@ export const SAMPLE_SLIDES: DeckSlide[] = [
   { layout: 'bullets', title: 'Highlights', bullets: ['Launch moved up two weeks', 'Support load down 18%', 'Three new integrations live'] },
   { layout: 'two_column', title: 'Before and after', left: { heading: 'Before', bullets: ['Manual hand-offs', 'Weekly reports'] }, right: { heading: 'After', bullets: ['Automated routing', 'Live dashboards'] } },
   { layout: 'stat', title: 'By the numbers', stats: [{ value: '42%', label: 'Faster' }, { value: '1.2k', label: 'Users' }, { value: '99.9%', label: 'Uptime' }] },
+  { layout: 'timeline', title: 'Three milestones', events: [{ when: 'Mar 4', label: 'Kickoff' }, { when: 'Apr 18', label: 'Beta' }, { when: 'Jun 2', label: 'Launch' }] },
+  { layout: 'bar_chart', title: 'Support load fell most in billing', items: [{ label: 'Billing', value: 38, display: '38%' }, { label: 'Setup', value: 21, display: '21%' }, { label: 'Reports', value: 9, display: '9%' }] },
+  { layout: 'status_list', title: 'Two items left', items: [{ label: 'Migrate accounts', status: 'done' }, { label: 'Sign off pricing', status: 'open' }, { label: 'Vendor delay', status: 'risk' }] },
+  { layout: 'statement', statement: 'We ship the smaller version first.' },
   { layout: 'quote', quote: 'The best way to predict the future is to build it.', attribution: 'Alan Kay' },
   { layout: 'closing', title: 'Next steps', bullets: ['Confirm scope', 'Assign owners'] },
 ];

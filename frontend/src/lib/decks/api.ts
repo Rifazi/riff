@@ -19,7 +19,7 @@ export interface DeckJob {
 
 /** Every layout's fields in one shape; only the ones a layout uses are set. Mirrors harness-server decks/deck-spec.ts. */
 export interface DeckSlide {
-  layout: 'title' | 'section' | 'bullets' | 'two_column' | 'stat' | 'quote' | 'table' | 'closing';
+  layout: 'title' | 'section' | 'bullets' | 'two_column' | 'stat' | 'quote' | 'table' | 'statement' | 'timeline' | 'process' | 'bar_chart' | 'status_list' | 'closing';
   title?: string;
   subtitle?: string;
   bullets?: string[];
@@ -30,6 +30,12 @@ export interface DeckSlide {
   attribution?: string;
   columns?: string[];
   rows?: string[][];
+  statement?: string;
+  events?: { when: string; label: string }[];
+  steps?: { title: string; detail?: string }[];
+  items?: { label: string; value?: number; display?: string; status?: 'done' | 'open' | 'risk' }[];
+  highlight?: number;
+  caption?: string;
   notes?: string;
 }
 
@@ -101,6 +107,12 @@ export const decksApi = {
 
   deleteSlide: (id: string, index: number) =>
     send(`/api/decks/${id}/slides/${index}`, 'DELETE').then((r) => json<DeckWithSlides>(r)),
+
+  updateSlide: (id: string, index: number, slide: DeckSlide) =>
+    send(`/api/decks/${id}/slides/${index}`, 'PUT', slide).then((r) => json<DeckWithSlides>(r)),
+
+  addSlide: (id: string, index: number, layout: DeckSlide['layout']) =>
+    send(`/api/decks/${id}/slides`, 'POST', { index, layout }).then((r) => json<DeckWithSlides>(r)),
 
   setTheme: (id: string, themeId: string, mode: ThemeMode) =>
     send(`/api/decks/${id}/theme`, 'PUT', { themeId, mode }).then((r) => json<DeckWithSlides>(r)),

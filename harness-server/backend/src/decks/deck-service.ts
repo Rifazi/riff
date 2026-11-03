@@ -2,12 +2,13 @@ import { promises as fs } from 'node:fs';
 import { v4 as uuid } from 'uuid';
 import { draftDeck, recreateSlide, type SlidesRequest } from '../agents/slides-agent.js';
 import { findThemePreset, presetDefinition, THEME_PRESETS } from '../themes/presets.js';
-import type { DeckSpec } from './deck-spec.js';
+import { blankSlide, slideSchema, type DeckSpec, type Slide } from './deck-spec.js';
 import { deckStyle, type DeckMode, type DeckStyle } from './deck-theme.js';
 import { deckFileName, deckFilePath, loadJob, loadSource, loadSpec, saveJob, saveSource, saveSpec, type DeckJob } from './deck-store.js';
 import { renderDeck } from './render-pptx.js';
 
 const MIN_SLIDES = 3;
+const MAX_SLIDES = 30;
 
 export class DeckError extends Error {
   constructor(
@@ -120,5 +121,38 @@ export function restyleDeck(id: string, themeId: string, mode: DeckMode) {
     const { job, spec } = await loadDone(id);
     if (!findThemePreset(themeId)) throw new DeckError('Unknown theme.', 400);
     return writeFiles({ ...job, ...resolveTheme(themeId), mode }, spec);
+  });
+}
+
+/** Replaces one slide with the human's edit. The first and last keep their layout; text over a box's limit is shortened. */
+export function updateDeckSlide(id: string, index: number, input: unknown) {
+  return exclusive(id, async () => {
+    const { job, spec } = await loadDone(id);
+    if (!Number.isInteger(index) || index < 0 || index >= spec.slides.length) throw new DeckError('No such slide.', 404);
+    const parsed = slideSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new DeckError(parsed.error.issues.slice(0, 5).map((i) => `${i.path.join('.') || 'slide'}: ${i.message}`).join('; '), 400);
+    }
+    const first = index === 0;
+    const last = index === spec.slides.length - 1;
+    const layout = parsed.data.layout;
+    if (first && layout !== 'title') throw new DeckError('The first slide must use the title layout.', 400);
+    if (last && layout !== 'closing') throw new DeckError('The last slide must use the closing layout.', 400);
+    if (!first && !last && (layout === 'title' || layout === 'closing')) {
+      throw new DeckError('The title and closing layouts are only for the first and last slide.', 400);
+    }
+    return writeFiles(job, { ...spec, slides: spec.slides.map((s, i) => (i === index ? parsed.data : s)) });
+  });
+}
+
+/** Inserts a placeholder slide so it sits at `index` (never before the title or after the closing). */
+export function addDeckSlide(id: string, index: number, layout: Slide['layout']) {
+  return exclusive(id, async () => {
+    const { job, spec } = await loadDone(id);
+    if (spec.slides.length >= MAX_SLIDES) throw new DeckError(`A presentation can have at most ${MAX_SLIDES} slides.`, 400);
+    if (!Number.isInteger(index) || index < 1 || index > spec.slides.length - 1) throw new DeckError('A slide goes between the first and last.', 400);
+    if (layout === 'title' || layout === 'closing') throw new DeckError('The title and closing layouts are only for the first and last slide.', 400);
+    const slides = [...spec.slides.slice(0, index), blankSlide(layout), ...spec.slides.slice(index)];
+    return writeFiles(job, { ...spec, slides });
   });
 }

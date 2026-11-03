@@ -83,6 +83,38 @@ const tableSlide = z.object({
   rows: z.array(z.array(line(40)).min(2).max(4)).min(1).max(5),
   notes,
 });
+const statementSlide = z.object({
+  layout: z.literal('statement'),
+  statement: line(110),
+  subtitle: line(80).optional(),
+  notes,
+});
+const timelineSlide = z.object({
+  layout: z.literal('timeline'),
+  title: line(70),
+  events: z.array(z.object({ when: line(14), label: line(48) })).min(2).max(5),
+  notes,
+});
+const processSlide = z.object({
+  layout: z.literal('process'),
+  title: line(70),
+  steps: z.array(z.object({ title: line(24), detail: line(60).optional() })).min(2).max(4),
+  notes,
+});
+const barChartSlide = z.object({
+  layout: z.literal('bar_chart'),
+  title: line(70),
+  items: z.array(z.object({ label: line(28), value: z.number().finite().nonnegative(), display: line(12).optional() })).min(2).max(6),
+  highlight: z.number().int().nonnegative().optional(),
+  caption: line(80).optional(),
+  notes,
+});
+const statusListSlide = z.object({
+  layout: z.literal('status_list'),
+  title: line(70),
+  items: z.array(z.object({ label: line(64), status: z.enum(['done', 'open', 'risk']) })).min(2).max(5),
+  notes,
+});
 const closingSlide = z.object({
   layout: z.literal('closing'),
   title: line(70),
@@ -99,9 +131,17 @@ export const slideSchema = z
     statSlide,
     quoteSlide,
     tableSlide,
+    statementSlide,
+    timelineSlide,
+    processSlide,
+    barChartSlide,
+    statusListSlide,
     closingSlide,
   ])
   .superRefine((slide, ctx) => {
+    if (slide.layout === 'bar_chart' && slide.highlight !== undefined && slide.highlight >= slide.items.length) {
+      ctx.addIssue({ code: 'custom', message: `highlight ${slide.highlight} is not an item index`, path: ['highlight'] });
+    }
     if (slide.layout !== 'table') return;
     // A ragged table would render with holes; make the agent fix it.
     slide.rows.forEach((row, i) => {
@@ -141,6 +181,22 @@ export function parseDeckSpec(raw: string): { spec: DeckSpec } | { errors: strin
   };
 }
 
+/** Words a slide puts in front of the audience (speaker notes excluded). */
+export function slideWords(slide: Slide): number {
+  const { notes: _notes, layout: _layout, ...visible } = slide as Slide & { notes?: string };
+  const strings: string[] = [];
+  const walk = (v: unknown) => {
+    if (typeof v === 'string') strings.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(visible);
+  return strings.join(' ').split(/\s+/).filter(Boolean).length;
+}
+
+/** The most words a slide may carry: enough for a claim and its proof, little enough that most of the page stays empty. */
+export const WORD_BUDGET = 32;
+
 /** Problems with the deck as a whole (not one slide) that the agent should fix. */
 export function deckProblems(spec: DeckSpec, length: DeckLength): string[] {
   const problems: string[] = [];
@@ -155,6 +211,12 @@ export function deckProblems(spec: DeckSpec, length: DeckLength): string[] {
   if (inner.some((s) => s.layout === 'title' || s.layout === 'closing')) {
     problems.push('"title" and "closing" layouts are only for the first and last slide.');
   }
+  spec.slides.forEach((s, i) => {
+    if (s.layout === 'table' || s.layout === 'title' || s.layout === 'closing') return;
+    const words = slideWords(s);
+    if (words > WORD_BUDGET) problems.push(`Slide ${i + 1} has ${words} words; keep it under ${WORD_BUDGET}. Cut words or move detail to the speaker notes.`);
+    if (s.layout === 'bullets' && s.bullets.length > 3) problems.push(`Slide ${i + 1} has ${s.bullets.length} bullets; use at most 3.`);
+  });
   // Same layout three times running reads as a wall of bullets.
   let run = 1;
   for (let i = 1; i < spec.slides.length; i++) {
@@ -180,4 +242,37 @@ export function trimToLength(spec: DeckSpec, length: DeckLength): DeckSpec {
   drop((s) => s.layout === 'quote');
   drop(() => true);
   return { ...spec, slides };
+}
+
+/** A valid placeholder slide for a layout, for a human to fill in. */
+export function blankSlide(layout: Slide['layout']): Slide {
+  const title = 'New slide';
+  const pair = { heading: 'Heading', bullets: ['Point'] };
+  switch (layout) {
+    case 'title':
+    case 'section':
+      return { layout, title };
+    case 'bullets':
+      return { layout, title, bullets: ['Point'] };
+    case 'two_column':
+      return { layout, title, left: pair, right: pair };
+    case 'stat':
+      return { layout, title, stats: [{ value: '0', label: 'Label' }] };
+    case 'quote':
+      return { layout, quote: 'Quote' };
+    case 'table':
+      return { layout, title, columns: ['Column 1', 'Column 2'], rows: [['Cell', 'Cell']] };
+    case 'statement':
+      return { layout, statement: 'Statement' };
+    case 'timeline':
+      return { layout, title, events: [{ when: 'Now', label: 'Event' }, { when: 'Next', label: 'Event' }] };
+    case 'process':
+      return { layout, title, steps: [{ title: 'Step 1' }, { title: 'Step 2' }] };
+    case 'bar_chart':
+      return { layout, title, items: [{ label: 'A', value: 1 }, { label: 'B', value: 2 }] };
+    case 'status_list':
+      return { layout, title, items: [{ label: 'Item', status: 'open' }, { label: 'Item', status: 'done' }] };
+    case 'closing':
+      return { layout, title: 'Thank you' };
+  }
 }
