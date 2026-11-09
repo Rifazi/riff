@@ -157,7 +157,7 @@ export async function runUiuxAgentTurn(
             createStartCodingToolClaude({ sessionId: session.id }),
             askMultipleChoiceToolClaude,
             askQuestionToolClaude,
-            ...(screenshots ? [createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, defaultLogin: app.testLogin, devScript: app.devScript })] : []),
+            ...(screenshots ? [createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, defaultLogin: app.testLogin, devScript: app.devScript, devUrl: app.devUrl, devCommand: app.devCommand })] : []),
           ],
         });
 
@@ -198,7 +198,7 @@ export async function runUiuxAgentTurn(
         start_coding: createStartCodingTool({ sessionId: session.id }),
         ask_multiple_choice: askMultipleChoiceTool,
         ask_question: askQuestionTool,
-        ...(screenshots ? { screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, defaultLogin: app.testLogin, devScript: app.devScript }) } : {}),
+        ...(screenshots ? { screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, defaultLogin: app.testLogin, devScript: app.devScript, devUrl: app.devUrl, devCommand: app.devCommand }) } : {}),
       };
       const { updatedHistory } = await runAgentTurn({
         systemPrompt,

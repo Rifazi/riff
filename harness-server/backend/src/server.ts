@@ -11,7 +11,7 @@ import { registerCodingRoutes } from './routes/coding.js';
 import { registerQaRoutes } from './routes/qa.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerAppRoutes } from './routes/apps.js';
-import { registerCoordinatorRoutes } from './routes/coordinator.js';
+import { registerCoordinatorRoutes, resumeCoordinatorRuns } from './routes/coordinator.js';
 import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
 import { registerUsageRoutes } from './routes/usage.js';
@@ -98,6 +98,7 @@ async function main() {
   }
 
   await app.listen({ port: config.port, host: '127.0.0.1' });
+  await resumeCoordinatorRuns();
 }
 
 main().catch((err) => {

@@ -99,7 +99,7 @@ export async function createApp(input: {
 export async function updateApp(
   id: string,
   // architecture: null turns it off; undefined leaves it as it is.
-  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean; testLogin?: Partial<TestLogin> | null; devScript?: string | null }
+  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean; testLogin?: Partial<TestLogin> | null; devScript?: string | null; devUrl?: string | null; devCommand?: string | null }
 ): Promise<AppWriteResult> {
   const apps = await readApps();
   const index = apps.findIndex((a) => a.id === id);
@@ -127,6 +127,10 @@ export async function updateApp(
     if (!devScriptExists(updated.repoRoot, name)) throw new Error(`package.json in ${updated.repoRoot} has no "${name}" script.`);
     updated.devScript = name;
   }
+  if (patch.devUrl === null || patch.devUrl === '') delete updated.devUrl;
+  else if (patch.devUrl) updated.devUrl = normalizeDevUrl(patch.devUrl);
+  if (patch.devCommand === null || patch.devCommand === '') delete updated.devCommand;
+  else if (patch.devCommand) updated.devCommand = patch.devCommand.trim();
   if (patch.testLogin === null) delete updated.testLogin;
   else if (patch.testLogin) {
     const username = (patch.testLogin.username ?? updated.testLogin?.username ?? '').trim();
@@ -157,4 +161,16 @@ export async function deleteApp(id: string): Promise<void> {
   }
   const apps = await readApps();
   await writeApps(apps.filter((a) => a.id !== id));
+}
+
+function normalizeDevUrl(raw: string): string {
+  const text = raw.trim();
+  const withScheme = /^https?:\/\//i.test(text) ? text : `http://${text}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error(`"${raw}" is not a web address. Use something like http://localhost:5173.`);
+  }
+  return url.origin;
 }

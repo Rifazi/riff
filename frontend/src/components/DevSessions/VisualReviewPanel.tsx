@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Eye, Loader2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
@@ -29,9 +30,14 @@ import { ErrorText } from './PageShell';
 export function VisualReviewPanel({
   session,
   onSendToCoder,
+  onRetry,
+  retrying = false,
 }: {
   session: SessionRecord;
   onSendToCoder: (message: string) => void;
+  /** Runs the review again (the Coding tab's diff approval). */
+  onRetry?: () => void;
+  retrying?: boolean;
 }) {
   const review = session.visualReview;
   const queryClient = useQueryClient();
@@ -68,6 +74,10 @@ export function VisualReviewPanel({
           : `Visual review skipped: ${review.reason ?? review.summary}`}
       </div>
     );
+  }
+
+  if (review.status === 'needs-address') {
+    return <AppAddressForm session={session} reason={review.reason ?? review.summary} onRetry={onRetry} retrying={retrying} />;
   }
 
   const waiting = review.status === 'awaiting-human';
@@ -190,6 +200,74 @@ export function VisualReviewPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </section>
+  );
+}
+
+/** The app wasn't running and Riff couldn't start it: ask where it lives, or how to start it, then run the review again. */
+function AppAddressForm({
+  session,
+  reason,
+  onRetry,
+  retrying,
+}: {
+  session: SessionRecord;
+  reason: string;
+  onRetry?: () => void;
+  retrying: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const app = useQuery({ queryKey: ['apps'], queryFn: () => api.listApps() });
+  const current = app.data?.find((a) => a.id === session.appId);
+  const [url, setUrl] = useState('');
+  const [command, setCommand] = useState('');
+  const [seeded, setSeeded] = useState(false);
+  if (current && !seeded) {
+    setSeeded(true);
+    setUrl(current.devUrl ?? '');
+    setCommand(current.devCommand ?? '');
+  }
+
+  const save = useMutation({
+    mutationFn: () => api.updateApp(session.appId, { devUrl: url.trim() || null, devCommand: command.trim() || null }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['apps'] });
+      onRetry?.();
+    },
+  });
+
+  return (
+    <section className="space-y-3 rounded-md border border-warning/40 p-3" aria-label="Visual review needs the app's address">
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <Eye className="h-4 w-4" />
+        Visual review can&apos;t find the app
+      </div>
+      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{reason}</p>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-foreground" htmlFor="app-dev-url">
+          Address of the running app
+        </label>
+        <Input id="app-dev-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://localhost:5173" />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-foreground" htmlFor="app-dev-command">
+          Command that starts the whole stack (optional)
+        </label>
+        <Input
+          id="app-dev-command"
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          placeholder="docker compose up, or npm run dev:all"
+        />
+        <p className="text-xs text-muted-foreground">
+          Run in the app&apos;s repo when nothing answers at the address. Riff waits for the address to come up, then stops it after the review.
+        </p>
+      </div>
+      <ErrorText>{save.error ? (save.error as Error).message : null}</ErrorText>
+      <Button onClick={() => save.mutate()} disabled={(!url.trim() && !command.trim()) || save.isPending || retrying}>
+        {(save.isPending || retrying) && <Loader2 className="animate-spin" />}
+        {save.isPending || retrying ? 'Reviewing…' : 'Save and retry review'}
+      </Button>
     </section>
   );
 }

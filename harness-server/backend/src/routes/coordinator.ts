@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
-import { appendTranscriptEntry, getSession, updateSession } from '../sessions/session-store.js';
+import { appendTranscriptEntry, getSession, listSessions, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor, type StageGroup } from '../sessions/stage-group.js';
 import type { SessionRecord, TranscriptEntry } from '../sessions/session.js';
 import {
@@ -104,6 +104,8 @@ const RUN_TURN: Record<StageGroup, (session: SessionRecord, message: string, onE
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+type Send = (event: AgentEvent) => void;
+
 type Outcome = { kind: 'advanced' | 'stop'; reason: string } | { kind: 'not-ready' } | { kind: 'fix'; message: string };
 
 /**
@@ -186,6 +188,9 @@ async function tryAdvance(
         if (err instanceof StageActionError && err.extra.code === 'visual_changes_needed') {
           send({ type: 'coordinator_decision', action: 'continue', reason: 'The UI/UX agent wants changes to the screens. Sending it back to the coding lead.' });
           return { kind: 'fix', message: String(err.extra.fixMessage) };
+        }
+        if (err instanceof StageActionError && err.extra.code === 'visual_review_needs_address') {
+          return { kind: 'stop', reason: `${err.message}` };
         }
         if (err instanceof StageActionError && err.extra.code === 'visual_review_pending') {
           return { kind: 'stop', reason: 'This branch changes the UI. The UI/UX agent reviewed the screenshots; they wait for your approval on the Coding tab before QA starts.' };
@@ -305,13 +310,257 @@ async function settleTeam(
   }
 }
 
+/** Drives one stage until it advances or needs the human. True = the stage moved on. */
+async function driveStage(sessionId: string, initial: SessionRecord, send: Send): Promise<boolean> {
+  const startGroup = stageGroupFor(initial);
+  // What Bridget did stays in the stage's chat, not only in the run's stream.
+  // A stop she already noted (a rerun on the same stage) isn't repeated.
+  const note = async (group: StageGroup, text: string, isError = false) => {
+    const entry = `${PERSONA}: ${text}`;
+    const last = (await getSession(sessionId))?.transcripts[group].at(-1);
+    if (last?.role === 'system' && last.text === entry) return;
+    await appendTranscriptEntry(sessionId, group, { role: 'system', text: entry, ...(isError ? { isError } : {}) });
+  };
+  const stop = async (group: StageGroup, reason: string) => {
+    send({ type: 'coordinator_decision', action: 'ready', reason });
+    await note(group, reason);
+  };
+  const turnedOff = async () => !(await getSession(sessionId))?.coordinatorEnabled;
+
+  let advanced = false;
+  let selfHeals = 0;
+  let failedTurns = 0;
+  let stepsDone = 0;
+  for (let turns = 0; ; ) {
+    const session = await getSession(sessionId);
+    if (!session) break;
+    // The cap is for turns that get nowhere: a long plan finishing a step per turn isn't stuck.
+    const doneNow = (session.codingPlan ?? []).filter((s) => s.status === 'done').length;
+    if (doneNow > stepsDone) turns = 0;
+    stepsDone = doneNow;
+    if (!session.coordinatorEnabled) {
+      send({ type: 'coordinator_decision', action: 'ready', reason: 'Coordinator was turned off.' });
+      break;
+    }
+    if (session.stage === 'split' || session.stage === 'abandoned') {
+      send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
+      break;
+    }
+    if (session.delivery && session.delivery.kind !== 'pushed') {
+      send({ type: 'coordinator_decision', action: 'ready', reason: `Delivered: ${session.delivery.detail}` });
+      break;
+    }
+    const group = stageGroupFor(session);
+    if (group !== startGroup) {
+      advanced = true;
+      break;
+    }
+    if (session.themeProposal) {
+      await stop(group, 'Waiting for you to apply or dismiss the proposed theme.');
+      break;
+    }
+    if (session.splitProposal) {
+      await stop(group, 'Waiting for you to accept or dismiss the proposed split.');
+      break;
+    }
+
+    // Team rounds run on their own; Bridget waits for them, starting
+    // one herself if its tab isn't open to.
+    const team = session.codingTeam;
+    if (group === 'coding' && team && (isTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(team.status))) {
+      const problem = await settleTeam(sessionId, 'coding', turnedOff);
+      if (problem === 'off') continue;
+      if (problem) {
+        await stop(group, problem);
+        break;
+      }
+      continue;
+    }
+    const qaTeam = session.qaTeam;
+    if (
+      group === 'qa' &&
+      !session.qaRerunPending &&
+      qaTeam &&
+      (isQaTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(qaTeam.status))
+    ) {
+      const problem = await settleTeam(sessionId, 'qa', turnedOff);
+      if (problem === 'off') continue;
+      if (problem) {
+        await stop(group, problem);
+        break;
+      }
+      continue;
+    }
+
+    const transcript = session.transcripts[group];
+
+    // A finished stage is approved, or stops for the human with why.
+    const outcome = await tryAdvance(session, group, transcript, send);
+    if (outcome.kind === 'advanced') {
+      send({ type: 'coordinator_decision', action: 'advanced', reason: outcome.reason });
+      await note(group, outcome.reason);
+      advanced = true;
+      break;
+    }
+    if (outcome.kind === 'stop') {
+      await stop(group, outcome.reason);
+      break;
+    }
+
+    if (turns >= MAX_TURNS) {
+      await stop(group, `Ran ${MAX_TURNS} turns without finishing the ${STAGE_DOC[group]} — stopping for you to look.`);
+      break;
+    }
+
+    let message: string;
+    let runTurn = RUN_TURN[group];
+    const steps = session.codingPlan ?? [];
+    if (outcome.kind === 'fix') {
+      // The lead's fix pass for a failed pre-QA gate: a plain coding
+      // turn (not a step turn, so never light-routed).
+      message = outcome.message;
+      runTurn = (s, m, onEvent) => runCodingAgentTurn(s, m, onEvent);
+    } else if (group === 'qa' && session.qaRerunPending) {
+      message = QA_RERUN_MESSAGE;
+    } else if (group === 'qa' && qaTeam?.status === 'done' && !qaTeam.relayed) {
+      message = QA_TEAM_WRAPUP_MESSAGE;
+    } else if (transcript.length === 0) {
+      const kickoff = KICKOFF_MESSAGE[group];
+      if (!kickoff) {
+        // requirements: nothing to continue from — the coordinator
+        // can't invent a feature request out of nothing.
+        send({ type: 'coordinator_decision', action: 'ready', reason: 'Describe the feature you want built first.' });
+        break;
+      }
+      message = kickoff;
+    } else if (hasUnansweredQuestion(transcript)) {
+      // Checked before asking a model, which can't see the question's
+      // text and would answer it on the human's behalf.
+      await stop(group, 'Waiting for your answer to the question above.');
+      break;
+    } else if (group === 'coding' && session.branch && steps.some((s) => s.status !== 'done') && !session.teamDecisionPending) {
+      // Steps left and nothing asked: the next one, no model needed.
+      message = NEXT_STEP_MESSAGE;
+    } else {
+      const decision = await decideNextAction({
+        stageLabel: group,
+        transcriptText: flattenTranscript(transcript),
+        appId: session.appId,
+      });
+      const lastAgentText = [...transcript].reverse().find((e) => e.role === 'assistant')?.text ?? '';
+      if (decision.action === 'blocked' && selfHeals < MAX_SELF_HEALS && isSelfHealableBlock(decision.reason, lastAgentText)) {
+        // Not finding a file or a setup is the agent's to solve, not the human's.
+        selfHeals++;
+        send({ type: 'coordinator_decision', action: 'continue', reason: `The agent is stuck on something it can fix itself: ${decision.reason}` });
+        await note(group, `the agent said it was stuck (${decision.reason}). That's its to solve, so I've told it to try another way.`);
+        message = SELF_HEAL_MESSAGE;
+      } else if (decision.action === 'ready' || !decision.message) {
+        // Nothing finished to approve, and the agent isn't going on by itself.
+        await stop(group, decision.reason || `The ${STAGE_DOC[group]} isn't finished and the agent stopped.`);
+        break;
+      } else {
+        selfHeals = 0;
+        send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
+        message = decision.message;
+      }
+    }
+
+    turns++;
+    // A turn can fail without throwing: the engines report it as an error or an errored done event.
+    let turnError: string | null = null;
+    const watch = (event: AgentEvent) => {
+      if (event.type === 'error') turnError = event.message;
+      else if (event.type === 'done' && event.isError) turnError = event.text || turnError || 'The turn ended in an error.';
+      send(event);
+    };
+    try {
+      await runTurn(session, message, watch);
+    } catch (err) {
+      turnError = err instanceof Error ? err.message : String(err);
+      send({ type: 'error', message: turnError });
+    }
+    if (turnError) {
+      const failure: string = turnError;
+      if (isUsageLimitError(failure)) {
+        // Out of tokens: another attempt fails the same way, so stop and say why.
+        await stop(group, usageLimitStopReason(failure));
+        break;
+      }
+      if (++failedTurns >= MAX_FAILED_TURNS) {
+        await note(group, `stopped after ${failedTurns} failed turns in a row: ${failure}`, true);
+        break;
+      }
+    } else {
+      failedTurns = 0;
+    }
+  }
+  return advanced;
+}
+
+// Runs in progress, by session, with the streams watching each. A run belongs
+// to the server, not a tab: it hands the session from stage to stage until
+// something needs the human, whether or not any tab is open.
+const activeRuns = new Map<string, Set<Send>>();
+// Stages one run may hand over, so a session bouncing between coding and QA can't run away.
+const MAX_STAGE_HOPS = 40;
+
+/** Starts Bridget on a session unless she's already on it; returns the run's end, or null if one was going. */
+export function startCoordinatorRun(sessionId: string, watcher?: Send): Promise<void> | null {
+  const existing = activeRuns.get(sessionId);
+  if (existing) {
+    if (watcher) existing.add(watcher);
+    return null;
+  }
+  const watchers = new Set<Send>(watcher ? [watcher] : []);
+  activeRuns.set(sessionId, watchers);
+  const send: Send = (event) => {
+    for (const w of watchers) w(event);
+  };
+  return (async () => {
+    try {
+      for (let hop = 0; hop < MAX_STAGE_HOPS; hop++) {
+        const session = await getSession(sessionId);
+        if (!session || !session.coordinatorEnabled) break;
+        if (!(await driveStage(sessionId, session, send))) break;
+      }
+    } catch (err) {
+      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      console.error(`[coordinator] run for ${sessionId} crashed:`, err);
+    } finally {
+      activeRuns.delete(sessionId);
+    }
+  })();
+}
+
+
+/**
+ * After a restart, picks up every session Bridget was driving. One she
+ * stopped for the human (her note is last in the stage's chat), a closed or
+ * delivered one, and a requirements chat with nothing in it are left alone.
+ */
+export async function resumeCoordinatorRuns(): Promise<void> {
+  for (const session of await listSessions()) {
+    if (!session.coordinatorEnabled || session.stage === 'split' || session.stage === 'abandoned') continue;
+    if (session.delivery && session.delivery.kind !== 'pushed') continue;
+    const group = stageGroupFor(session);
+    const last = session.transcripts[group].at(-1);
+    if (!last && group === 'requirements') continue;
+    if (last?.role === 'system' && last.text?.startsWith(`${PERSONA}:`) && !session.qaRerunPending) continue;
+    console.log(`[coordinator] resuming ${session.id} on ${group}`);
+    void startCoordinatorRun(session.id);
+  }
+}
+
 export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Params: { id: string }; Body: { enabled: boolean } }>('/api/sessions/:id/coordinator/toggle', async (request, reply) => {
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     const { enabled } = request.body ?? {};
     if (typeof enabled !== 'boolean') return reply.code(400).send({ error: 'enabled (boolean) is required' });
-    return updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0, coordinatorGateLast: null } : {}) });
+    const updated = await updateSession(session.id, { coordinatorEnabled: enabled, ...(enabled ? { coordinatorGateSendBacks: 0, coordinatorGateLast: null } : {}) });
+    // Turning her on starts the run here, so it doesn't wait for a tab to be open on the stage.
+    if (enabled) void startCoordinatorRun(session.id);
+    return updated;
   });
 
   // A session goes to QA by itself once coding is finished and
@@ -334,197 +583,28 @@ export async function registerCoordinatorRoutes(app: FastifyInstance): Promise<v
     return { advanced: false, reason };
   });
 
-  // SSE, same framing as the per-stage /message endpoints. Drives the
-  // current stage until it's approved (the run then ends, and the next
-  // stage's tab starts the next run) or something needs the human.
+  // SSE, same framing as the per-stage /message endpoints. Watches Bridget's
+  // run on this session, starting one if none is going. The run carries on
+  // from stage to stage on the server; closing the stream doesn't stop it.
   app.post<{ Params: { id: string } }>('/api/sessions/:id/coordinator/run', async (request, reply) => {
     const sessionId = request.params.id;
-    const initial = await getSession(sessionId);
-    if (!initial) return reply.code(404).send({ error: 'session not found' });
+    if (!(await getSession(sessionId))) return reply.code(404).send({ error: 'session not found' });
 
     startEventStream(reply);
-    const send = (event: AgentEvent) => {
+    const send: Send = (event) => {
       if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
-    const startGroup = stageGroupFor(initial);
-    // What Bridget did stays in the stage's chat, not only in this stream.
-    // A stop she already noted (the tab reopened on the same stage) isn't repeated.
-    const note = async (group: StageGroup, text: string, isError = false) => {
-      const entry = `${PERSONA}: ${text}`;
-      const last = (await getSession(sessionId))?.transcripts[group].at(-1);
-      if (last?.role === 'system' && last.text === entry) return;
-      await appendTranscriptEntry(sessionId, group, { role: 'system', text: entry, ...(isError ? { isError } : {}) });
-    };
-    const stop = async (group: StageGroup, reason: string) => {
-      send({ type: 'coordinator_decision', action: 'ready', reason });
-      await note(group, reason);
-    };
-    const turnedOff = async () => !(await getSession(sessionId))?.coordinatorEnabled;
-
+    const finished = startCoordinatorRun(sessionId, send);
+    let closed = false;
+    request.raw.on('close', () => {
+      closed = true;
+      activeRuns.get(sessionId)?.delete(send);
+    });
     try {
-      let selfHeals = 0;
-      let failedTurns = 0;
-      let stepsDone = 0;
-      for (let turns = 0; ; ) {
-        const session = await getSession(sessionId);
-        if (!session) break;
-        // The cap is for turns that get nowhere: a long plan finishing a step per turn isn't stuck.
-        const doneNow = (session.codingPlan ?? []).filter((s) => s.status === 'done').length;
-        if (doneNow > stepsDone) turns = 0;
-        stepsDone = doneNow;
-        if (!session.coordinatorEnabled) {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'Coordinator was turned off.' });
-          break;
-        }
-        if (session.stage === 'split' || session.stage === 'abandoned') {
-          send({ type: 'coordinator_decision', action: 'ready', reason: 'This session is closed — nothing to drive.' });
-          break;
-        }
-        if (session.delivery && session.delivery.kind !== 'pushed') {
-          send({ type: 'coordinator_decision', action: 'ready', reason: `Delivered: ${session.delivery.detail}` });
-          break;
-        }
-        const group = stageGroupFor(session);
-        if (group !== startGroup) break;
-        if (session.themeProposal) {
-          await stop(group, 'Waiting for you to apply or dismiss the proposed theme.');
-          break;
-        }
-        if (session.splitProposal) {
-          await stop(group, 'Waiting for you to accept or dismiss the proposed split.');
-          break;
-        }
-
-        // Team rounds run on their own; Bridget waits for them, starting
-        // one herself if its tab isn't open to.
-        const team = session.codingTeam;
-        if (group === 'coding' && team && (isTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(team.status))) {
-          const problem = await settleTeam(sessionId, 'coding', turnedOff);
-          if (problem === 'off') continue;
-          if (problem) {
-            await stop(group, problem);
-            break;
-          }
-          continue;
-        }
-        const qaTeam = session.qaTeam;
-        if (
-          group === 'qa' &&
-          !session.qaRerunPending &&
-          qaTeam &&
-          (isQaTeamRunning(sessionId) || ['assigned', 'running', 'interrupted'].includes(qaTeam.status))
-        ) {
-          const problem = await settleTeam(sessionId, 'qa', turnedOff);
-          if (problem === 'off') continue;
-          if (problem) {
-            await stop(group, problem);
-            break;
-          }
-          continue;
-        }
-
-        const transcript = session.transcripts[group];
-
-        // A finished stage is approved, or stops for the human with why.
-        const outcome = await tryAdvance(session, group, transcript, send);
-        if (outcome.kind === 'advanced') {
-          send({ type: 'coordinator_decision', action: 'advanced', reason: outcome.reason });
-          await note(group, outcome.reason);
-          break;
-        }
-        if (outcome.kind === 'stop') {
-          await stop(group, outcome.reason);
-          break;
-        }
-
-        if (turns >= MAX_TURNS) {
-          await stop(group, `Ran ${MAX_TURNS} turns without finishing the ${STAGE_DOC[group]} — stopping for you to look.`);
-          break;
-        }
-
-        let message: string;
-        let runTurn = RUN_TURN[group];
-        const steps = session.codingPlan ?? [];
-        if (outcome.kind === 'fix') {
-          // The lead's fix pass for a failed pre-QA gate: a plain coding
-          // turn (not a step turn, so never light-routed).
-          message = outcome.message;
-          runTurn = (s, m, onEvent) => runCodingAgentTurn(s, m, onEvent);
-        } else if (group === 'qa' && session.qaRerunPending) {
-          message = QA_RERUN_MESSAGE;
-        } else if (group === 'qa' && qaTeam?.status === 'done' && !qaTeam.relayed) {
-          message = QA_TEAM_WRAPUP_MESSAGE;
-        } else if (transcript.length === 0) {
-          const kickoff = KICKOFF_MESSAGE[group];
-          if (!kickoff) {
-            // requirements: nothing to continue from — the coordinator
-            // can't invent a feature request out of nothing.
-            send({ type: 'coordinator_decision', action: 'ready', reason: 'Describe the feature you want built first.' });
-            break;
-          }
-          message = kickoff;
-        } else if (hasUnansweredQuestion(transcript)) {
-          // Checked before asking a model, which can't see the question's
-          // text and would answer it on the human's behalf.
-          await stop(group, 'Waiting for your answer to the question above.');
-          break;
-        } else if (group === 'coding' && session.branch && steps.some((s) => s.status !== 'done') && !session.teamDecisionPending) {
-          // Steps left and nothing asked: the next one, no model needed.
-          message = NEXT_STEP_MESSAGE;
-        } else {
-          const decision = await decideNextAction({
-            stageLabel: group,
-            transcriptText: flattenTranscript(transcript),
-            appId: session.appId,
-          });
-          const lastAgentText = [...transcript].reverse().find((e) => e.role === 'assistant')?.text ?? '';
-          if (decision.action === 'blocked' && selfHeals < MAX_SELF_HEALS && isSelfHealableBlock(decision.reason, lastAgentText)) {
-            // Not finding a file or a setup is the agent's to solve, not the human's.
-            selfHeals++;
-            send({ type: 'coordinator_decision', action: 'continue', reason: `The agent is stuck on something it can fix itself: ${decision.reason}` });
-            await note(group, `the agent said it was stuck (${decision.reason}). That's its to solve, so I've told it to try another way.`);
-            message = SELF_HEAL_MESSAGE;
-          } else if (decision.action === 'ready' || !decision.message) {
-            // Nothing finished to approve, and the agent isn't going on by itself.
-            await stop(group, decision.reason || `The ${STAGE_DOC[group]} isn't finished and the agent stopped.`);
-            break;
-          } else {
-            selfHeals = 0;
-            send({ type: 'coordinator_decision', action: 'continue', reason: decision.reason });
-            message = decision.message;
-          }
-        }
-
-        turns++;
-        // A turn can fail without throwing: the engines report it as an error or an errored done event.
-        let turnError: string | null = null;
-        const watch = (event: AgentEvent) => {
-          if (event.type === 'error') turnError = event.message;
-          else if (event.type === 'done' && event.isError) turnError = event.text || turnError || 'The turn ended in an error.';
-          send(event);
-        };
-        try {
-          await runTurn(session, message, watch);
-        } catch (err) {
-          turnError = err instanceof Error ? err.message : String(err);
-          send({ type: 'error', message: turnError });
-        }
-        if (turnError) {
-          const failure: string = turnError;
-          if (isUsageLimitError(failure)) {
-            // Out of tokens: another attempt fails the same way, so stop and say why.
-            await stop(group, usageLimitStopReason(failure));
-            break;
-          }
-          if (++failedTurns >= MAX_FAILED_TURNS) {
-            await note(group, `stopped after ${failedTurns} failed turns in a row: ${failure}`, true);
-            break;
-          }
-        } else {
-          failedTurns = 0;
-        }
-      }
+      if (finished) await finished;
+      else while (activeRuns.has(sessionId) && !closed) await sleep(1000);
     } finally {
+      activeRuns.get(sessionId)?.delete(send);
       reply.raw.end();
     }
   });

@@ -154,6 +154,9 @@ export async function approveCoding(session: SessionRecord): Promise<SessionReco
       fixMessage: visual.message,
     });
   }
+  if (visual.status === 'needs-address') {
+    throw new StageActionError(`${visual.review.summary} Set the app's address on the Coding tab, then approve the diff again.`, 409, { code: 'visual_review_needs_address' });
+  }
   if (visual.status === 'awaiting-human') {
     throw new StageActionError('The screenshots are ready for your approval. Approve them on the Coding tab, then approve the diff to start QA.', 409, { code: 'visual_review_pending' });
   }

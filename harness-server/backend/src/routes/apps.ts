@@ -36,6 +36,8 @@ async function serializeApp(app: Awaited<ReturnType<typeof getApp>>) {
     uiuxPass: app.uiuxPass === true,
     visualReview: app.visualReview !== false,
     devScript: app.devScript ?? null,
+    devUrl: app.devUrl ?? null,
+    devCommand: app.devCommand ?? null,
     testLogin: app.testLogin ? { username: app.testLogin.username, path: app.testLogin.path ?? null, hasPassword: true } : null,
   };
 }
@@ -113,7 +115,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch<{
     Params: { id: string };
-    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown; uiuxPass?: boolean; visualReview?: boolean; testLogin?: { username?: string; password?: string; path?: string } | null; devScript?: string | null };
+    Body: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: unknown; uiuxPass?: boolean; visualReview?: boolean; testLogin?: { username?: string; password?: string; path?: string } | null; devScript?: string | null; devUrl?: string | null; devCommand?: string | null };
   }>(
     '/api/apps/:id',
     async (request, reply) => {
@@ -133,7 +135,7 @@ export async function registerAppRoutes(app: FastifyInstance): Promise<void> {
         watchDocsForChanges(updated);
         return { ...(await serializeApp(updated)), docsInitialized, git, architectureResult };
       } catch (err) {
-        if (err instanceof InvalidRepoRootError || err instanceof InvalidArchitectureError) {
+        if (err instanceof InvalidRepoRootError || err instanceof InvalidArchitectureError || (err instanceof Error && err.message.includes('not a web address'))) {
           return reply.code(400).send({ error: err.message });
         }
         if (err instanceof Error && err.message.includes('not found')) return reply.code(404).send({ error: err.message });
