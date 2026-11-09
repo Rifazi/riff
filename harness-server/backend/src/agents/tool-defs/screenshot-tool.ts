@@ -32,7 +32,7 @@ export const screenshotSchema = z.object({
     })
     .optional()
     .describe(
-      'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you. ' +
+      'Sign in through the app\'s own login form before capturing, for screens behind a login. Pass the credentials the user gave you; when the app has a test account configured, leave this out and it signs in with that. ' +
         'Remembered for the rest of this turn, so later screenshots sign in again without it.'
     ),
   steps: z
@@ -76,14 +76,38 @@ export interface ScreenshotResult {
 }
 
 interface DevServer {
-  proc: ChildProcess;
+  // null when the app was already running at the configured address.
+  proc: ChildProcess | null;
   url: string;
+}
+
+export const APP_UNREACHABLE = 'APP_UNREACHABLE';
+
+/** The app couldn't be reached or started: the human can fix it by giving its address or the command that starts it. */
+export function isAppUnreachable(text: unknown): boolean {
+  return typeof text === 'string' && text.includes(APP_UNREACHABLE);
+}
+
+export interface DevTarget {
+  script?: string;
+  devUrl?: string;
+  devCommand?: string;
+}
+
+async function isReachable(url: string): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(2000), redirect: 'manual' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const servers = new Map<string, Promise<DevServer>>();
 
 const MAX_PER_TURN = 8;
 const START_TIMEOUT_MS = 90_000;
+const CUSTOM_START_TIMEOUT_MS = 6 * 60_000;
 const URL_PATTERN = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):(\d+)/;
 
 export function findChrome(): string | null {
@@ -109,34 +133,65 @@ export function devScriptFor(repoRoot: string): string | null {
   }
 }
 
-async function startDevServer(repoRoot: string): Promise<DevServer> {
-  const script = devScriptFor(repoRoot);
-  if (!script) throw new Error('The app has no dev, start or serve script in its package.json, so there is nothing to open. Pass `url` for a server that is already running.');
-  await ensureDependencies(repoRoot);
-  // A free port of our own, so a server already on the app's usual port (often another app) is never the one captured.
-  const port = await freePort();
-  const proc = spawn('npm', ['run', script], { cwd: repoRoot, detached: true, env: { ...process.env, PORT: String(port), BROWSER: 'none', FORCE_COLOR: '0', CI: '' } });
+export function devScriptExists(repoRoot: string, name: string): boolean {
+  try {
+    return typeof JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).scripts?.[name] === 'string';
+  } catch {
+    return false;
+  }
+}
+
+async function startDevServer(repoRoot: string, target: DevTarget): Promise<DevServer> {
+  const { devUrl, devCommand } = target;
+  if (devUrl && (await isReachable(devUrl))) return { proc: null, url: devUrl };
+
+  const script = target.script && devScriptExists(repoRoot, target.script) ? target.script : devScriptFor(repoRoot);
+  if (!devCommand && !script) {
+    throw new Error(
+      `${APP_UNREACHABLE}: ${devUrl ? `Nothing is answering at ${devUrl}, and` : 'The app has no address set, and'} it has no dev, start or serve script in its package.json to start it. Set the address of a running copy, or a command that starts it.`
+    );
+  }
+  if (!devCommand) await ensureDependencies(repoRoot);
+  const startTimeoutMs = devCommand || target.script ? CUSTOM_START_TIMEOUT_MS : START_TIMEOUT_MS;
+  // The address when one is set, so the stack is started where the human said it lives; otherwise a free port of our own, so a server already on the app's usual port (often another app) is never the one captured.
+  const port = devUrl ? Number(new URL(devUrl).port || 80) : await freePort();
+  const env = { ...process.env, PORT: String(port), BROWSER: 'none', FORCE_COLOR: '0', CI: '' };
+  const label = devCommand ? `"${devCommand}"` : `the "${script}" script`;
+  const proc = devCommand
+    ? spawn('sh', ['-c', devCommand], { cwd: repoRoot, detached: true, env })
+    : spawn('npm', ['run', script!], { cwd: repoRoot, detached: true, env });
   return new Promise<DevServer>((resolve, reject) => {
     let output = '';
-    const fail = (message: string) => {
-      stopProcess(proc);
-      reject(new Error(`${message}\n\nLast output:\n${output.slice(-1500)}`));
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      fn();
     };
-    const timer = setTimeout(() => fail(`The dev server did not print a local URL within ${START_TIMEOUT_MS / 1000}s.`), START_TIMEOUT_MS);
+    const fail = (message: string) =>
+      finish(() => {
+        stopProcess(proc);
+        reject(new Error(`${APP_UNREACHABLE}: ${message}\n\nLast output:\n${output.slice(-1500)}`));
+      });
+    const timer = setTimeout(
+      () => fail(`${label} did not bring the app up ${devUrl ? `at ${devUrl}` : 'on a local URL'} within ${startTimeoutMs / 1000}s.`),
+      startTimeoutMs
+    );
+    const poll = setInterval(() => {
+      if (!devUrl) return;
+      void isReachable(devUrl).then((up) => up && finish(() => setTimeout(() => resolve({ proc, url: devUrl }), 1500)));
+    }, 1500);
     const onData = (chunk: Buffer) => {
       output += chunk.toString().replace(/\u001b\[[0-9;]*m/g, '');
+      if (devUrl) return;
       const match = URL_PATTERN.exec(output);
-      if (match) {
-        clearTimeout(timer);
-        setTimeout(() => resolve({ proc, url: `http://localhost:${match[1]}` }), 1500);
-      }
+      if (match) finish(() => setTimeout(() => resolve({ proc, url: `http://localhost:${match[1]}` }), 1500));
     };
     proc.stdout?.on('data', onData);
     proc.stderr?.on('data', onData);
-    proc.on('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`The dev server exited (${code}) before it was ready.\n\nLast output:\n${output.slice(-1500)}`));
-    });
+    proc.on('exit', (code) => fail(`${label} exited (${code}) before the app was ready.`));
   });
 }
 
@@ -163,7 +218,7 @@ function stopProcess(proc: ChildProcess): void {
 export async function stopScreenshotServer(sessionId: string): Promise<void> {
   const server = servers.get(sessionId);
   servers.delete(sessionId);
-  if (server) await server.then((s) => stopProcess(s.proc)).catch(() => undefined);
+  if (server) await server.then((s) => s.proc && stopProcess(s.proc)).catch(() => undefined);
 }
 
 export interface ScreenshotDeps {
@@ -173,6 +228,13 @@ export interface ScreenshotDeps {
   onCapture?: (shot: { file: string; text: string }) => void;
   /** Lets the agent point `url` at a server that is already running. Off by default: whatever sits on a localhost port may be a different app. */
   allowUrl?: boolean;
+  /** The app's test account: signs in for any screenshot that doesn't pass its own `login`. */
+  defaultLogin?: PageLogin;
+  /** The app's chosen npm script for serving it (AppConfig.devScript). */
+  devScript?: string;
+  /** Where the app runs (AppConfig.devUrl) and the command that starts the whole stack (AppConfig.devCommand). */
+  devUrl?: string;
+  devCommand?: string;
 }
 
 export function createScreenshotExecute(deps: ScreenshotDeps) {
@@ -187,7 +249,7 @@ export function createScreenshotExecute(deps: ScreenshotDeps) {
 
 function createCapture(deps: ScreenshotDeps) {
   let taken = 0;
-  let rememberedLogin: PageLogin | undefined;
+  let rememberedLogin: PageLogin | undefined = deps.defaultLogin;
   return async (input: ScreenshotInput): Promise<ScreenshotResult> => {
     if (taken >= MAX_PER_TURN) throw new Error(`That is ${MAX_PER_TURN} screenshots this turn. Work from the ones you have.`);
     const chrome = findChrome();
@@ -196,11 +258,12 @@ function createCapture(deps: ScreenshotDeps) {
     let base = input.url?.trim();
     if (base && !deps.allowUrl) throw new Error("`url` is not available here: the screenshot tool starts this app's own dev server. Call it again without `url`.");
     if (!base) {
-      if (!servers.has(deps.sessionId)) servers.set(deps.sessionId, startDevServer(deps.repoRoot));
+      if (!servers.has(deps.sessionId)) servers.set(deps.sessionId, startDevServer(deps.repoRoot, { script: deps.devScript, devUrl: deps.devUrl, devCommand: deps.devCommand }));
       try {
         base = (await servers.get(deps.sessionId)!).url;
       } catch (err) {
         servers.delete(deps.sessionId);
+        if (err instanceof Error && isAppUnreachable(err.message)) throw new Error(`${err.message}\n\nDon't retry or work around this: the app's owner has to give its address. End your turn.`);
         throw err;
       }
     }

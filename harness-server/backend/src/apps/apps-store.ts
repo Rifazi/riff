@@ -2,7 +2,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { listSessions } from '../sessions/session-store.js';
-import { validateRepoRoot, ensureDocsDir, slugifyAppId, LEGACY_APP_ID, type AppConfig, type CheckCommands } from './apps.js';
+import { devScriptExists } from '../agents/tool-defs/screenshot-tool.js';
+import { validateRepoRoot, ensureDocsDir, slugifyAppId, LEGACY_APP_ID, type AppConfig, type CheckCommands, type TestLogin } from './apps.js';
 import { setupGitRepo, type GitSetupResult } from '../repo/git.js';
 import { normalizeArchitecture, type ArchitectureConfig } from '../architecture/architecture.js';
 
@@ -98,7 +99,7 @@ export async function createApp(input: {
 export async function updateApp(
   id: string,
   // architecture: null turns it off; undefined leaves it as it is.
-  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean }
+  patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean; testLogin?: Partial<TestLogin> | null; devScript?: string | null; devUrl?: string | null; devCommand?: string | null }
 ): Promise<AppWriteResult> {
   const apps = await readApps();
   const index = apps.findIndex((a) => a.id === id);
@@ -120,6 +121,24 @@ export async function updateApp(
   else if (patch.uiuxPass) updated.uiuxPass = true;
   if (patch.visualReview === false) updated.visualReview = false;
   else if (patch.visualReview) delete updated.visualReview;
+  if (patch.devScript === null || patch.devScript === '') delete updated.devScript;
+  else if (patch.devScript) {
+    const name = patch.devScript.trim();
+    if (!devScriptExists(updated.repoRoot, name)) throw new Error(`package.json in ${updated.repoRoot} has no "${name}" script.`);
+    updated.devScript = name;
+  }
+  if (patch.devUrl === null || patch.devUrl === '') delete updated.devUrl;
+  else if (patch.devUrl) updated.devUrl = normalizeDevUrl(patch.devUrl);
+  if (patch.devCommand === null || patch.devCommand === '') delete updated.devCommand;
+  else if (patch.devCommand) updated.devCommand = patch.devCommand.trim();
+  if (patch.testLogin === null) delete updated.testLogin;
+  else if (patch.testLogin) {
+    const username = (patch.testLogin.username ?? updated.testLogin?.username ?? '').trim();
+    const password = patch.testLogin.password ?? updated.testLogin?.password ?? '';
+    const loginPath = (patch.testLogin.path ?? updated.testLogin?.path ?? '').trim();
+    if (!username || !password) throw new Error('A test login needs both a username and a password.');
+    updated.testLogin = { username, password, ...(loginPath ? { path: loginPath } : {}) };
+  }
   if (patch.architecture === null) delete updated.architecture;
   else if (patch.architecture) updated.architecture = patch.architecture;
   const next = [...apps];
@@ -142,4 +161,16 @@ export async function deleteApp(id: string): Promise<void> {
   }
   const apps = await readApps();
   await writeApps(apps.filter((a) => a.id !== id));
+}
+
+function normalizeDevUrl(raw: string): string {
+  const text = raw.trim();
+  const withScheme = /^https?:\/\//i.test(text) ? text : `http://${text}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error(`"${raw}" is not a web address. Use something like http://localhost:5173.`);
+  }
+  return url.origin;
 }

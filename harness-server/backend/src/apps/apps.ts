@@ -30,6 +30,20 @@ export interface AppConfig {
   uiuxPass?: boolean;
   // false = no screenshot review before QA when a branch changes the UI (agents/visual-review.ts). Missing = on.
   visualReview?: boolean;
+  // Test account the screenshot tool signs in with for screens behind a login. Stored in plain text: use seeded test data, never a real account.
+  testLogin?: TestLogin;
+  // The npm script the screenshot tool starts instead of dev/start/serve, e.g. "local" for an app whose backend runs locally. Missing = the usual pick.
+  devScript?: string;
+  // Where the running app is, e.g. "http://localhost:5173". The screenshot tool uses it when something answers there, else starts the app itself.
+  devUrl?: string;
+  // A shell command that starts the whole stack (run in the repo root), for apps that `npm run dev` alone doesn't bring up. Needs devUrl to know when it is ready.
+  devCommand?: string;
+}
+
+export interface TestLogin {
+  path?: string;
+  username: string;
+  password: string;
 }
 
 export function baseBranchFor(app: AppConfig): string {

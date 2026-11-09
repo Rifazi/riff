@@ -15,7 +15,7 @@ import { createFileTools } from './tool-defs/file-tools.js';
 import { createSearchCodeTool } from './tool-defs/code-search-tool.js';
 import { createOutlineFileTool } from './tool-defs/outline-tool.js';
 import { createAnalyzeColorsTool } from './tool-defs/color-tool.js';
-import { createScreenshotTool, findChrome, stopScreenshotServer, withoutImages } from './tool-defs/screenshot-tool.js';
+import { createScreenshotTool, findChrome, isAppUnreachable, stopScreenshotServer, withoutImages } from './tool-defs/screenshot-tool.js';
 import { createSubmitVisualReviewTool, type VisualReviewSubmission } from './tool-defs/submit-visual-review-tool.js';
 import { createFileToolsClaude } from './tool-defs-claude/file-tools.js';
 import { createSearchCodeToolClaude } from './tool-defs-claude/code-search-tool.js';
@@ -35,6 +35,8 @@ export type VisualGateResult =
   | { status: 'clear' }
   // The human has to look: the UI/UX agent is satisfied, or out of rounds.
   | { status: 'awaiting-human'; review: VisualReview }
+  // The app couldn't be reached or started; the human sets its address (or start command) and approves again.
+  | { status: 'needs-address'; review: VisualReview }
   // The UI/UX agent found blockers; the coding lead gets `message`.
   | { status: 'changes-needed'; review: VisualReview; message: string };
 
@@ -77,6 +79,7 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
     const shots: { file: string; text: string }[] = [];
     let submitted: VisualReviewSubmission | null = null;
     let lastError = '';
+    let unreachable = '';
     const stat = await diffStatAgainstBase(app.repoRoot, session.branch, base).catch(() => '');
     const requirements = session.requirementsPath
       ? (await fs.readFile(path.join(config.harnessRoot, session.requirementsPath), 'utf8').catch(() => '')).slice(0, MAX_REQUIREMENTS_CHARS)
@@ -94,7 +97,11 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
 
     const onEvent = (event: AgentEvent) => {
       if (event.type === 'usage') void addStageUsage(session.id, 'coding', event, 'uiux-review');
-      if (event.type === 'tool_result' && event.isError) lastError = String(typeof event.content === 'string' ? event.content : JSON.stringify(withoutImages(event.content))).slice(0, 400);
+      if (event.type === 'tool_result' && event.isError) {
+        const text = String(typeof event.content === 'string' ? event.content : JSON.stringify(withoutImages(event.content)));
+        lastError = text.slice(0, 400);
+        if (isAppUnreachable(text)) unreachable = text;
+      }
     };
     const onCapture = (shot: { file: string; text: string }) => {
       if (shots.length < MAX_SHOTS) shots.push(shot);
@@ -116,7 +123,7 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
                 readFileToolClaude,
                 readFilesToolClaude,
                 createAnalyzeColorsToolClaude({ repoRoot: app.repoRoot }),
-                createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, onCapture }),
+                createScreenshotToolClaude({ sessionId: session.id, repoRoot: app.repoRoot, onCapture, defaultLogin: app.testLogin, devScript: app.devScript, devUrl: app.devUrl, devCommand: app.devCommand }),
                 createSubmitVisualReviewToolClaude(submit),
               ],
             }),
@@ -135,7 +142,7 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
           read_file: readFileTool,
           read_files: readFilesTool,
           analyze_colors: createAnalyzeColorsTool({ repoRoot: app.repoRoot }),
-          screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, onCapture }),
+          screenshot_app: createScreenshotTool({ sessionId: session.id, repoRoot: app.repoRoot, onCapture, defaultLogin: app.testLogin, devScript: app.devScript, devUrl: app.devUrl, devCommand: app.devCommand }),
           submit_visual_review: createSubmitVisualReviewTool(submit),
         };
         await runAgentTurn({ systemPrompt, tools, provider, model, apiKey: (await getApiKey(provider))!, history: [], prompt, onEvent });
@@ -144,6 +151,14 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
       await stopScreenshotServer(session.id);
     }
 
+    if (shots.length === 0 && unreachable) {
+      const detail = unreachable.replace(/\\n/g, '\n').replace(/^.*?APP_UNREACHABLE:\s*/s, '').split('\n\nLast output')[0].trim();
+      const reason = `Riff couldn't open ${app.name}: ${detail}`;
+      const review = blank(head, 'needs-address', { summary: reason, reason, agentRounds: prev?.agentRounds ?? 0 });
+      await updateSession(session.id, { visualReview: review });
+      await note(session.id, `Visual review is waiting for the app's address: ${reason}`);
+      return { status: 'needs-address', review };
+    }
     if (shots.length === 0) return skip(`no screenshot could be taken${lastError ? ` (${lastError})` : ''}.`);
     const stored = shots.map((s) => ({ file: s.file, label: s.text.replace(/\. Saved to .*$/, '') }));
     // Without a verdict the human still gets the screenshots, and says so.

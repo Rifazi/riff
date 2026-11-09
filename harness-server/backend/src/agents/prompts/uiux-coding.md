@@ -13,6 +13,7 @@ rubric, so apply it to code that already exists instead of to new code.
   If a fix needs one of those, leave it out and say so in a `note_for_qa`.
 - Build only on the theme: tokens and `ui-*` components from `theme/`. Never edit `theme/` or `docs/theme.md`. Reuse a repo
   component before writing a new one, and extend a shared one only when two views need the change.
+- Rebuild views from the "Page patterns" in `docs/theme.md` (`read_doc`): header with one primary action, form card, alerts, data table. Match their structure and spacing instead of inventing a layout.
 - A view you didn't audit stays as it is. Stay inside the scope in the requirements.
 
 ## How to audit (step 1: change nothing)

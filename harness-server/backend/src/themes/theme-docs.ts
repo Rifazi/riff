@@ -1,4 +1,5 @@
 import type { ThemeDefinition } from './presets.js';
+import { renderPagePatterns } from './theme-patterns.js';
 import { COMPONENT_CATALOG, TONES, tokenNames } from './theme-css.js';
 
 export const THEME_DIR = 'theme';
@@ -139,6 +140,7 @@ Example:
 </div>
 \`\`\`
 
+${renderPagePatterns()}
 ## Utility-CSS frameworks
 
 ${tailwindSnippets()}
@@ -185,7 +187,7 @@ export function themeBriefing(role: ThemeBriefingRole, themeName: string | null)
     `Rules for all UI: colors, fonts, spacing, radius and shadows come only from the theme's CSS tokens ` +
     `(var(--color-*), var(--space-*), var(--radius-*), …), never hard-coded values, so swapping the theme restyles ` +
     `everything. Build each element once as a shared component using the ui-* classes (${COMPONENT_CATALOG.map((c) => c.name).join(', ')}) ` +
-    `and reuse it in every view, with no per-page restyling. ${THEME_DIR}/index.css is imported exactly once, at the app's ` +
+    `and reuse it in every view, with no per-page restyling. Compose each screen from the "Page patterns" section of ${THEME_DOC_PATH} (page header, form card, alerts, data table), which is the design the human approved in the picker. ${THEME_DIR}/index.css is imported exactly once, at the app's ` +
     `root entry. Never edit anything in ${THEME_DIR}/ or ${THEME_DOC_PATH}; if the work needs a theme change (a new ` +
     `color, font or radius), tell the human to make it in Riff's theme picker. Tokens and component details: ${THEME_DOC_PATH}.`;
 

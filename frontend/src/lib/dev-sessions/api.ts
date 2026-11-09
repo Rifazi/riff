@@ -96,7 +96,7 @@ export const api = {
 
   updateApp: (
     id: string,
-    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean }
+    patch: { name?: string; repoRoot?: string; checkCommands?: CheckCommands; architecture?: ArchitectureConfig | null; uiuxPass?: boolean; visualReview?: boolean; devUrl?: string | null; devCommand?: string | null }
   ) =>
     fetch(apiUrl(`/api/apps/${id}`), {
       method: 'PATCH',
@@ -295,7 +295,7 @@ export const api = {
         throw Object.assign(new Error(body.error), { fixMessage: String(body.fixMessage ?? '') });
       }
       // The screenshots wait for the human: not an error, the Coding tab shows them.
-      if (body?.code === 'visual_review_pending') throw Object.assign(new Error(body.error), { visualReviewPending: true });
+      if (body?.code === 'visual_review_pending' || body?.code === 'visual_review_needs_address') throw Object.assign(new Error(body.error), { visualReviewPending: true });
     }
     return json<SessionRecord>(res);
   },

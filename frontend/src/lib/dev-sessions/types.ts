@@ -94,6 +94,9 @@ export interface AppConfig {
   uiuxPass: boolean;
   // Whether a branch that changes the UI is screenshotted, judged by the UI/UX agent and approved by the human before QA.
   visualReview: boolean;
+  // Where the running app is, and the command that starts its whole stack; null when unset.
+  devUrl?: string | null;
+  devCommand?: string | null;
 }
 
 // Mirrors harness-server's architecture/architecture.ts.
@@ -238,7 +241,7 @@ export type ThemeApplyResult = SetupSteps & { theme: AppThemeSummary };
 // Left for QA by the coding agent (from = null) or a team engineer (from =
 // its workstream's title) with note_for_qa.
 export interface VisualReview {
-  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped';
+  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped' | 'needs-address';
   head: string;
   verdict: 'good' | 'needs-changes' | null;
   summary: string;

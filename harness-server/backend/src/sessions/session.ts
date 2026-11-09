@@ -224,7 +224,8 @@ export interface VisualReview {
   // awaiting-human: the UI/UX agent is satisfied (or out of rounds) and the human decides.
   // changes-requested: the coding lead was sent the findings; a new review runs when coding is approved again.
   // skipped: nothing could be captured, so there was nothing to sign off.
-  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped';
+  // needs-address: the app wasn't running and Riff couldn't start it; the human sets its address (or start command) in the app's settings and approves again.
+  status: 'awaiting-human' | 'changes-requested' | 'approved' | 'skipped' | 'needs-address';
   // The branch commit the screenshots were taken at. A later commit needs a new review.
   head: string;
   verdict: 'good' | 'needs-changes' | null;

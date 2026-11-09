@@ -568,7 +568,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 sends this partial implementation to QA.
               </div>
             )}
-            {!approved && <VisualReviewPanel session={session} onSendToCoder={(message) => void handleSend(message)} />}
+            {!approved && <VisualReviewPanel session={session} onSendToCoder={(message) => void handleSend(message)} onRetry={() => approveMutation.mutate()} retrying={approveMutation.isPending} />}
             <ErrorText>
               {approveMutation.error && !(approveMutation.error as Error & { visualReviewPending?: boolean }).visualReviewPending
                 ? (approveMutation.error as Error).message
