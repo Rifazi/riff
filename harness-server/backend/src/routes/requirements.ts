@@ -3,6 +3,7 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
+import { kickCoordinator } from './coordinator.js';
 import { config } from '../config.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createSession, getSession, updateSession } from '../sessions/session-store.js';
@@ -100,6 +101,7 @@ export async function registerRequirementsRoutes(app: FastifyInstance): Promise<
         send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
         reply.raw.end();
+        kickCoordinator(request.params.id);
       }
     }
   );

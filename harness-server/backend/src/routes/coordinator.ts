@@ -504,6 +504,13 @@ const activeRuns = new Map<string, Set<Send>>();
 // Stages one run may hand over, so a session bouncing between coding and QA can't run away.
 const MAX_STAGE_HOPS = 40;
 
+/** Hands a session to Bridget after something else (a human message, a team run) ended a turn on it. */
+export function kickCoordinator(sessionId: string): void {
+  void getSession(sessionId).then((session) => {
+    if (session?.coordinatorEnabled) void startCoordinatorRun(sessionId);
+  });
+}
+
 /** Starts Bridget on a session unless she's already on it; returns the run's end, or null if one was going. */
 export function startCoordinatorRun(sessionId: string, watcher?: Send): Promise<void> | null {
   const existing = activeRuns.get(sessionId);

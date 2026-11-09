@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
+import { kickCoordinator } from './coordinator.js';
 import { config } from '../config.js';
 import { getSession, updateSession } from '../sessions/session-store.js';
 import { runQaAgentTurn } from '../agents/qa-agent.js';
@@ -53,6 +54,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
         send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
         reply.raw.end();
+        kickCoordinator(request.params.id);
       }
     }
   );
@@ -74,6 +76,7 @@ export async function registerQaRoutes(app: FastifyInstance): Promise<void> {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
     } finally {
       reply.raw.end();
+      kickCoordinator(request.params.id);
     }
   });
 
