@@ -125,6 +125,14 @@ export function cancelPendingApproval(sessionId: string): void {
 
 export async function approveCoding(session: SessionRecord): Promise<SessionRecord> {
   if (!session.branch) throw new StageActionError('no commits exist on a branch yet');
+  const round = session.codingTeam;
+  if (session.teamDecisionPending || (round && ['assigned', 'running', 'interrupted'].includes(round.status))) {
+    throw new StageActionError(
+      'The coding lead is still working on this round: its team has not built and merged its branches yet. QA starts once they are merged.',
+      409,
+      { code: 'coding_unfinished' },
+    );
+  }
   const epoch = approvalEpoch.get(session.id) ?? 0;
   let gate;
   try {

@@ -360,7 +360,9 @@ export function CodingStage({ session }: { session: SessionRecord }) {
   // The switch stays up for the whole run (turns included) so it can always
   // be turned off.
   const showStepControls = canContinue || autoRun;
-  const busy = streaming || teamActive;
+  // A round Jack assigned but that hasn't been built and merged yet: QA would review a branch without the fixes.
+  const roundUnfinished = ['assigned', 'running', 'interrupted'].includes(session.codingTeam?.status ?? '');
+  const busy = streaming || teamActive || roundUnfinished;
 
   // A session goes to QA on its own once coding is finished
   // and its checks pass: the human's checkpoint is after QA, not before it.
@@ -568,7 +570,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
                 sends this partial implementation to QA.
               </div>
             )}
-            {!approved && <VisualReviewPanel session={session} onSendToCoder={(message) => void handleSend(message)} onRetry={() => approveMutation.mutate()} retrying={approveMutation.isPending} />}
+            {!approved && !roundUnfinished && <VisualReviewPanel session={session} onSendToCoder={(message) => void handleSend(message)} onRetry={() => approveMutation.mutate()} retrying={approveMutation.isPending} />}
             <ErrorText>
               {approveMutation.error && !(approveMutation.error as Error & { visualReviewPending?: boolean }).visualReviewPending
                 ? (approveMutation.error as Error).message
@@ -579,7 +581,7 @@ export function CodingStage({ session }: { session: SessionRecord }) {
               onApprove={() => approveMutation.mutate()}
               approveDisabled={approved || !hasCommits || busy}
               approveDisabledReason={
-                teamActive ? 'The coding team is still working' : !hasCommits ? 'No commits on a branch yet' : undefined
+                teamActive || roundUnfinished ? 'The coding team is still working' : !hasCommits ? 'No commits on a branch yet' : undefined
               }
               busy={approveMutation.isPending}
               onReject={() => rejectMutation.mutate()}
