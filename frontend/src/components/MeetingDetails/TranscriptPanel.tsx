@@ -5,12 +5,15 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { Textarea } from '@/components/ui/textarea';
-import { useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { useMemo, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
   customPrompt: string;
   onPromptChange: (value: string) => void;
+  /** Called when the user presses Done: regenerates the summary using the context. */
+  onApplyContext?: (context: string) => Promise<void> | void;
   onCopyTranscript: () => void;
   onOpenMeetingFolder: () => Promise<void>;
   isRecording: boolean;
@@ -35,6 +38,7 @@ export function TranscriptPanel({
   transcripts,
   customPrompt,
   onPromptChange,
+  onApplyContext,
   onCopyTranscript,
   onOpenMeetingFolder,
   isRecording,
@@ -50,6 +54,10 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
+  // Context box: "Done" collapses it to a preview and regenerates the summary with it
+  const [isEditingContext, setIsEditingContext] = useState(true);
+  const showContextEditor = isEditingContext || !customPrompt.trim();
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -100,13 +108,38 @@ export function TranscriptPanel({
 
       {/* Custom prompt input at bottom of transcript section */}
       {!isRecording && convertedSegments.length > 0 && (
-        <div className="p-1 border-t border-border">
-          <Textarea
-            placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
-            className="w-full shadow-sm min-h-[80px] resize-y"
-            value={customPrompt}
-            onChange={(e) => onPromptChange(e.target.value)}
-          />
+        <div className="p-2 border-t border-border">
+          {showContextEditor ? (
+            <>
+              <Textarea
+                placeholder="Add context for AI summary. For example people involved, meeting overview, objective etc..."
+                className="w-full shadow-sm min-h-[80px] resize-y"
+                value={customPrompt}
+                onChange={(e) => onPromptChange(e.target.value)}
+              />
+              <div className="mt-2 flex justify-end">
+                <Button
+                  size="sm"
+                  disabled={!customPrompt.trim()}
+                  onClick={() => {
+                    setIsEditingContext(false);
+                    void onApplyContext?.(customPrompt);
+                  }}
+                >
+                  Done
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-start gap-2">
+              <p className="flex-1 text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">
+                {customPrompt}
+              </p>
+              <Button size="sm" variant="outline" onClick={() => setIsEditingContext(true)}>
+                Edit
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

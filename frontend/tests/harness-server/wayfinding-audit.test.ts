@@ -157,6 +157,15 @@ describe('auditWayfinding', () => {
     expect(found.some((m) => m.startsWith('billing is on the map but has no top-level domain folder'))).toBe(true);
   });
 
+  test('a map row whose README sits outside the source folders says to remove the row', () => {
+    write('MAP.md', '| Domain | Owns | Interface |\n| --- | --- | --- |\n| pricing | prices | priceFor() |\n| invoice | layout | render() |\n| tax-api | tax | tax() |\n');
+    write('src-tauri/src/tax_api/README.md', domainDoc('tax_api'));
+    const row = messages().find((m) => m.startsWith('tax-api is on the map'));
+    expect(row).toContain('src-tauri/src/tax_api/');
+    expect(row).toContain('remove the tax-api row');
+    expect(row).toContain('never by asking the human');
+  });
+
   test('flags the wrong Parent, a leftover Child domains line and a missing Contains section', () => {
     write('src/pricing/README.md', domainDoc('pricing', { consumers: 'invoice', extra: 'Child domains: promotions\n' }));
     write('src/pricing/promotions/README.md', domainDoc('promotions', { consumers: 'pricing' }));

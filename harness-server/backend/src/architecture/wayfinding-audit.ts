@@ -517,8 +517,9 @@ export function auditWayfinding(
 
   // Domains outside every source folder get no checks, so name the folders they're in.
   const inRoots = (file: string) => srcRoots.some((r) => file.startsWith(r + path.sep));
-  const candidates = walkFiles(repoRoot)
-    .filter((f) => path.basename(f) === DOMAIN_DOC && !inRoots(f) && docKind(readText(f)) !== undefined)
+  const outsideDocs = walkFiles(repoRoot).filter((f) => path.basename(f) === DOMAIN_DOC && !inRoots(f) && docKind(readText(f)) !== undefined);
+  const outsideByName = new Map(outsideDocs.map((f) => [normalizeDomainName(path.basename(path.dirname(f))), toPosix(path.relative(repoRoot, path.dirname(f)))]));
+  const candidates = outsideDocs
     .map((f) => toPosix(path.relative(repoRoot, path.dirname(path.dirname(f)))))
     // A child domain's grandparent is its parent domain, not a source folder.
     .filter((dir) => dir && dir !== '.' && !existsSync(path.join(repoRoot, dir, DOMAIN_DOC)));
@@ -860,11 +861,26 @@ export function auditWayfinding(
     }
     for (const r of rows) {
       if (!topLevel.some((d) => d.name === r.name || d.id === r.name)) {
-        fail('map', MAP_PATH, null, `${r.name} is on the map but has no top-level domain folder with a ${DOMAIN_DOC}`);
+        const outsideDir = outsideByName.get(normalizeDomainName(r.name));
+        fail(
+          'map',
+          MAP_PATH,
+          null,
+          outsideDir
+            ? `${r.name} is on the map, but its ${DOMAIN_DOC} is in ${outsideDir}/, outside the source folders (${config.srcDirs.join(', ')}), so the audit can't see it. ` +
+                `Fix it on the branch, never by asking the human: remove the ${r.name} row from ${MAP_PATH} (code outside the source folders is documented by its own ${DOMAIN_DOC} and isn't mapped), ` +
+                `or, if it is meant to be audited, move it under a source folder and name the folder exactly ${r.name}.`
+            : `${r.name} is on the map but has no top-level domain folder with a ${DOMAIN_DOC}. Create the domain under a source folder (${config.srcDirs.join(', ')}) or remove the row.`
+        );
       }
     }
   }
   return audit;
+}
+
+/** Folder and map names compare equal across `_`, `-` and case. */
+function normalizeDomainName(name: string): string {
+  return name.toLowerCase().replace(/[_\s]+/g, '-');
 }
 
 /** Removes a generated block and, once nothing else is under it, its heading. */

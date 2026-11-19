@@ -95,6 +95,14 @@ file, and a domain's public file never serves both sides. The browser bundle mus
   rules it implements into a server domain, leave the client code and its rules in a client domain, and change no behavior.
   Do one domain at a time and finish with its checkpoint and the audit before the next.
 
+## Only the source folders are audited
+
+A domain is a folder under one of the app's source folders (\`srcDirs\`) with a \`${DOMAIN_DOC}\`, and \`${MAP_PATH}\` lists exactly those top-level domains: no more, no fewer. Code that lives outside every source folder (a Tauri or native backend such as \`src-tauri/src/\`, scripts, infra outside the audited folders) is not a domain. Document it in its own \`${DOMAIN_DOC}\`, but never add it to \`${MAP_PATH}\`, and don't name a map row after a folder the audit can't scan.
+
+- The audit's "on the map but has no top-level domain folder" means the row or the folder is in the wrong place. Remove the row, or move the code under a source folder and name the folder exactly as the row. You can do either on the branch.
+- The audit's "get no checks" notes about folders outside the source folders are informational. Changing the app's source folders is a setting only the human has, so never end a turn, or leave a problem open, because of it. Fix what the branch controls, mention the setting once in your summary, and commit.
+- Folder names and map names must match exactly (\`projects-api\` is not \`projects_api\`). When code must sit in a snake_case folder (Rust modules), it can't be a mapped domain.
+
 ## Decisions and adapters
 
 Code in a domain is one of two kinds. **Decisions** are the rules the domain owns. **Adapters** connect the domain to something
@@ -132,6 +140,7 @@ grouped by what changes for the same reason.
 ## While changing code
 
 - Change a decision only in its owning domain.
+- An audit problem is yours to fix on the branch. Code outside the source folders isn't a domain and isn't on the map (see "Only the source folders are audited"); never stop because a fix needs an app setting.
 - Keep client and server code in separate domains (see "Client and server code are never mixed"); never add browser code to a server domain or server code to a client domain.
 - Reach other domains only through their public file (\`${config.interfaceFile}\`, or the file named after the folder). Never import another domain's other files.
 - From outside a parent domain, never import its child domains.

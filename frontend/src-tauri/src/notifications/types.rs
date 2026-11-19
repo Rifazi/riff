@@ -21,6 +21,7 @@ pub enum NotificationType {
     RecordingResumed,
     TranscriptionComplete,
     MeetingReminder(u64), // Duration in minutes
+    DevSession,           // A Dev Sessions task finished or needs the user
     SystemError(String),
     Test, // For testing notifications
 }
@@ -174,6 +175,13 @@ impl Notification {
         Notification::new("Riff", body, NotificationType::MeetingReminder(minutes_until))
             .with_priority(NotificationPriority::High)
             .with_timeout(NotificationTimeout::Seconds(10))
+    }
+
+    /// A Dev Sessions task finished (`needs_attention = false`) or is waiting on the user.
+    pub fn dev_session(title: impl Into<String>, body: impl Into<String>, needs_attention: bool) -> Self {
+        Notification::new(title, body, NotificationType::DevSession)
+            .with_priority(if needs_attention { NotificationPriority::High } else { NotificationPriority::Normal })
+            .with_timeout(NotificationTimeout::Seconds(8))
     }
 
     pub fn system_error(error: impl Into<String>) -> Self {

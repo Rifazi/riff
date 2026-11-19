@@ -246,6 +246,7 @@ export default function PageContent({
                   transcripts={meetingData.transcripts}
                   customPrompt={customPrompt}
                   onPromptChange={setCustomPrompt}
+                  onApplyContext={summaryGeneration.handleGenerateSummary}
                   onCopyTranscript={copyOperations.handleCopyTranscript}
                   onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
                   isRecording={isRecording}

@@ -152,7 +152,10 @@ export async function registerCodingRoutes(app: FastifyInstance): Promise<void> 
     const session = await getSession(request.params.id);
     if (!session) return reply.code(404).send({ error: 'session not found' });
     try {
-      return await approveVisualReview(session);
+      const approved = await approveVisualReview(session);
+      // The screenshots were the last thing she was waiting on: she carries on to QA.
+      kickCoordinator(session.id);
+      return approved;
     } catch (err) {
       return sendStageActionError(reply, err);
     }

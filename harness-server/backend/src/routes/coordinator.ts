@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { startEventStream } from './sse.js';
+import { notifyAttention, resetAttention } from '../notifications/attention.js';
 import { appendTranscriptEntry, getSession, listSessions, updateSession } from '../sessions/session-store.js';
 import { stageGroupFor, type StageGroup } from '../sessions/stage-group.js';
 import type { SessionRecord, TranscriptEntry } from '../sessions/session.js';
@@ -321,9 +322,14 @@ async function driveStage(sessionId: string, initial: SessionRecord, send: Send)
     if (last?.role === 'system' && last.text === entry) return;
     await appendTranscriptEntry(sessionId, group, { role: 'system', text: entry, ...(isError ? { isError } : {}) });
   };
+  const tell = async (kind: 'done' | 'attention', body: string) => {
+    const title = (await getSession(sessionId))?.title ?? 'Dev session';
+    notifyAttention({ kind, sessionId, title: kind === 'done' ? `Done: ${title}` : `Needs you: ${title}`, body });
+  };
   const stop = async (group: StageGroup, reason: string) => {
     send({ type: 'coordinator_decision', action: 'ready', reason });
     await note(group, reason);
+    await tell('attention', reason);
   };
   const turnedOff = async () => !(await getSession(sessionId))?.coordinatorEnabled;
 
@@ -348,6 +354,7 @@ async function driveStage(sessionId: string, initial: SessionRecord, send: Send)
     }
     if (session.delivery && session.delivery.kind !== 'pushed') {
       send({ type: 'coordinator_decision', action: 'ready', reason: `Delivered: ${session.delivery.detail}` });
+      await tell('done', `Delivered: ${session.delivery.detail}`);
       break;
     }
     const group = stageGroupFor(session);
@@ -466,6 +473,7 @@ async function driveStage(sessionId: string, initial: SessionRecord, send: Send)
     }
 
     turns++;
+    resetAttention(sessionId); // working again, so the next stop is news
     // A turn can fail without throwing: the engines report it as an error or an errored done event.
     let turnError: string | null = null;
     const watch = (event: AgentEvent) => {
@@ -488,6 +496,7 @@ async function driveStage(sessionId: string, initial: SessionRecord, send: Send)
       }
       if (++failedTurns >= MAX_FAILED_TURNS) {
         await note(group, `stopped after ${failedTurns} failed turns in a row: ${failure}`, true);
+        await tell('attention', `Stopped after ${failedTurns} failed turns in a row: ${failure}`.slice(0, 300));
         break;
       }
     } else {
@@ -533,6 +542,7 @@ export function startCoordinatorRun(sessionId: string, watcher?: Send): Promise<
     } catch (err) {
       send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       console.error(`[coordinator] run for ${sessionId} crashed:`, err);
+      notifyAttention({ kind: 'attention', sessionId, title: 'Needs you: Dev session', body: 'The auto-drive run crashed. See the agent server log.' });
     } finally {
       activeRuns.delete(sessionId);
     }

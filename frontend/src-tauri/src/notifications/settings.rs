@@ -58,6 +58,10 @@ pub struct NotificationPreferences {
     /// Show system error notifications
     pub show_system_errors: bool,
 
+    /// Show a notification when a Dev Sessions task finishes or needs attention
+    #[serde(default = "default_true")]
+    pub show_dev_sessions: bool,
+
     /// Minutes before meeting to show reminder (0 = disabled)
     pub meeting_reminder_minutes: Vec<u64>,
 }
@@ -88,6 +92,7 @@ impl Default for NotificationPreferences {
             show_transcription_complete: true,
             show_meeting_reminders: true,
             show_system_errors: true,
+            show_dev_sessions: true,
             meeting_reminder_minutes: vec![15, 5], // 15 minutes and 5 minutes before
         }
     }
@@ -274,4 +279,8 @@ pub fn merge_with_defaults(partial: NotificationSettings) -> NotificationSetting
         manual_dnd_mode: partial.manual_dnd_mode,
         notification_preferences: partial.notification_preferences,
     }
+}
+
+fn default_true() -> bool {
+    true
 }

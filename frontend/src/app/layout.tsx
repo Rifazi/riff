@@ -29,6 +29,7 @@ import {
   isAudioExtension,
   getAudioFormatsDisplayList,
 } from "@/constants/audioFormats";
+import { AgentAttentionNotificationsBridge } from "@/lib/dev-sessions/useAgentAttentionNotifications";
 import { JournalEventsBridge } from "@/lib/journal/useJournalEvents";
 import { RemoteBridge } from "@/lib/remote/RemoteBridge";
 import { MobileGate } from "@/lib/remote/MobileGate";
@@ -298,6 +299,7 @@ export default function RootLayout({
                                 {/* Download progress toast provider - listens for background downloads */}
                                 <DownloadProgressToastProvider />
                                 <JournalEventsBridge />
+                                <AgentAttentionNotificationsBridge />
                                 <RemoteBridge />
 
                                 {/* Show onboarding or main app */}

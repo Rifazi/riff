@@ -123,7 +123,22 @@ export function cancelPendingApproval(sessionId: string): void {
   approvalEpoch.set(sessionId, (approvalEpoch.get(sessionId) ?? 0) + 1);
 }
 
+const approvingCoding = new Set<string>();
+
+/** One approval per session at a time: the checks and the visual review take minutes and can't run twice side by side. */
 export async function approveCoding(session: SessionRecord): Promise<SessionRecord> {
+  if (approvingCoding.has(session.id)) {
+    throw new StageActionError('The checks for QA are already running for this session. Wait for them to finish.', 409, { code: 'approval_running' });
+  }
+  approvingCoding.add(session.id);
+  try {
+    return await approveCodingNow(session);
+  } finally {
+    approvingCoding.delete(session.id);
+  }
+}
+
+async function approveCodingNow(session: SessionRecord): Promise<SessionRecord> {
   if (!session.branch) throw new StageActionError('no commits exist on a branch yet');
   const round = session.codingTeam;
   if (session.teamDecisionPending || (round && ['assigned', 'running', 'interrupted'].includes(round.status))) {

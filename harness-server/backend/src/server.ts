@@ -11,6 +11,7 @@ import { registerCodingRoutes } from './routes/coding.js';
 import { registerQaRoutes } from './routes/qa.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerAppRoutes } from './routes/apps.js';
+import { registerAttentionRoutes } from './notifications/attention.js';
 import { registerCoordinatorRoutes, resumeCoordinatorRuns } from './routes/coordinator.js';
 import { registerThemeRoutes } from './routes/themes.js';
 import { registerReferenceDocRoutes } from './routes/reference-docs.js';
@@ -67,6 +68,7 @@ async function main() {
   await registerSettingsRoutes(app);
   await registerAppRoutes(app);
   await registerCoordinatorRoutes(app);
+  await registerAttentionRoutes(app);
   await registerThemeRoutes(app);
   await registerReferenceDocRoutes(app);
   await registerUsageRoutes(app);
