@@ -470,6 +470,16 @@ export async function branchAddedFiles(repoRoot: string, baseBranch: string, bra
   }
 }
 
+/** Files that differ between two commits; null when either can't be resolved. */
+export async function filesChangedBetween(repoRoot: string, from: string, to: string): Promise<string[] | null> {
+  try {
+    const out = await client(repoRoot).raw(['diff', '--name-only', `${from}..${to}`, '--', '.', ':(exclude)node_modules']);
+    return out.split('\n').map((f) => f.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
 export async function branchChanges(
   repoRoot: string,
   baseBranch: string,

@@ -8,7 +8,7 @@ import { getApiKey, getRoleModelConfig } from '../settings/settings-store.js';
 import { addStageUsage, appendTranscriptEntry, updateSession } from '../sessions/session-store.js';
 import type { SessionRecord, VisualReview } from '../sessions/session.js';
 import { diffBaseFor } from '../sessions/shared-branch.js';
-import { branchChanges, diffStatAgainstBase, resolveCommit } from '../repo/git.js';
+import { branchChanges, diffStatAgainstBase, filesChangedBetween, resolveCommit } from '../repo/git.js';
 import { runAgentTurn, runClaudeAgentTurn, type AgentEvent } from './sdk-client.js';
 import { uiuxStylePrompt } from './uiux-prompt.js';
 import { createFileTools } from './tool-defs/file-tools.js';
@@ -55,6 +55,16 @@ export async function runVisualGate(session: SessionRecord, app: AppConfig): Pro
   if (prev?.head === head) {
     if (prev.status === 'approved' || prev.status === 'skipped') return { status: 'clear' };
     if (prev.status === 'awaiting-human') return { status: 'awaiting-human', review: prev };
+  }
+  // A later commit that touched no UI file (a QA fix to logic or tests) leaves what was reviewed as it was.
+  if (prev && prev.head !== head && (prev.status === 'approved' || prev.status === 'skipped' || prev.status === 'awaiting-human')) {
+    const since = await filesChangedBetween(app.repoRoot, prev.head, head);
+    if (since && uiFiles(since).length === 0) {
+      const carried = await updateSession(session.id, { visualReview: { ...prev, head } });
+      await note(session.id, 'Visual review: the new commits change no UI files, so the earlier review still stands.');
+      const review = carried.visualReview ?? { ...prev, head };
+      return review.status === 'awaiting-human' ? { status: 'awaiting-human', review } : { status: 'clear' };
+    }
   }
 
   const base = diffBaseFor(session, app);
